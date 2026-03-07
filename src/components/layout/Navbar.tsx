@@ -3,7 +3,8 @@ import { Link, useNavigate } from "react-router-dom"
 import { Menu, LogOut, User, LayoutDashboard, Search, X, FolderKanban } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ModeToggle } from "@/components/mode-toggle"
-import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
+import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetDescription } from "@/components/ui/sheet"
+import { VisuallyHidden } from "@/components/ui/visually-hidden"
 import { useAuth } from "@/contexts/AuthContext"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Input } from "@/components/ui/input"
@@ -339,6 +340,10 @@ export function Navbar() {
                             </Button>
                         </SheetTrigger>
                         <SheetContent side="right">
+                            <SheetTitle className="sr-only">Navigation Menu</SheetTitle>
+                            <SheetDescription className="sr-only">
+                                Mobile navigation menu with search and user options
+                            </SheetDescription>
                             <div className="flex flex-col gap-4 py-4">
                                 {/* Mobile Search */}
                                 <div className="relative">

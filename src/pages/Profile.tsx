@@ -118,15 +118,17 @@ export default function Profile() {
 
                 // Check connection status if viewing someone else
                 if (!isOwnProfile && currentUser) {
-                    // Check if already friends
+                    // Check if already friends (only check current user's own data)
                     const friendDoc = await getDoc(doc(db, 'users', currentUser.uid, 'friends', profileId))
                     if (friendDoc.exists()) {
                         setConnectionStatus('connected')
                     } else {
-                        // Check if request sent
-                        const requestRef = doc(db, 'users', profileId, 'connectionRequests', currentUser.uid)
-                        const requestDoc = await getDoc(requestRef)
-                        if (requestDoc.exists()) {
+                        // Check if request sent (only check current user's own sent requests)
+                        const sentRequestsRef = collection(db, 'users', currentUser.uid, 'connectionRequests')
+                        const sentRequestsSnapshot = await getDocs(sentRequestsRef)
+                        const hasSentRequest = sentRequestsSnapshot.docs.some(doc => doc.id === profileId)
+                        
+                        if (hasSentRequest) {
                             setConnectionStatus('pending')
                         }
                     }

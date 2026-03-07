@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { DashboardLayout } from '@/components/layout/DashboardLayout'
 import { Card, CardContent } from '@/components/ui/card'
@@ -6,6 +6,12 @@ import { DiscoverProjectCard } from '@/components/DiscoverProjectCard'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
+import { useInfiniteScroll, usePagination } from '@/hooks/useInfiniteScroll'
+import { useDebounce } from '@/hooks/useDebounce'
+import {
+    loadPaginatedUsers,
+    loadPaginatedProjects
+} from '@/services/paginationService'
 import {
     Search,
     RefreshCw,
@@ -15,7 +21,8 @@ import {
     UserPlus,
     ExternalLink,
     Check,
-    BookOpen
+    BookOpen,
+    Loader2
 } from 'lucide-react'
 import {
     collection,
@@ -61,30 +68,37 @@ interface Project {
 interface TrendingTopic {
     id: string
     title: string
-    count?: number
+    description: string
+    url: string
+    time: number
     category: string
-    url?: string
-    source?: string
-    time?: number
-    tags?: string[]
-    icon?: string
-    color?: string
+    color: string
+    icon: string
+    tags: string[]
+    source: string
 }
 
 export function Discover() {
     const navigate = useNavigate()
-    const [people, setPeople] = useState<Person[]>([])
-    const [projects, setProjects] = useState<Project[]>([])
-    const [trendingTopics, setTrendingTopics] = useState<TrendingTopic[]>([])
     const [loading, setLoading] = useState(true)
     const [refreshingTopics, setRefreshingTopics] = useState(false)
     const [connectedUsers, setConnectedUsers] = useState<Set<string>>(new Set())
-    const [fadingUsers, setFadingUsers] = useState<Set<string>>(new Set()) // Users whose cards are fading out
+    const [fadingUsers, setFadingUsers] = useState<Set<string>>(new Set())
 
+    // Search states
     const [peopleSearch, setPeopleSearch] = useState('')
     const [disciplineFilter, setDisciplineFilter] = useState('all')
     const [projectsSearch, setProjectsSearch] = useState('')
     const [statusFilter, setStatusFilter] = useState('all')
+
+    // Debounced search terms
+    const debouncedPeopleSearch = useDebounce(peopleSearch, 300)
+    const debouncedProjectsSearch = useDebounce(projectsSearch, 300)
+
+    // Pagination states
+    const [peopleState, peopleActions] = usePagination<Person>()
+    const [projectsState, projectsActions] = usePagination<Project>()
+    const [topicsState, topicsActions] = usePagination<TrendingTopic>()
 
     const disciplines = [
         'All Disciplines',
@@ -99,43 +113,118 @@ export function Discover() {
         'Law'
     ]
 
+    // Load more functions for infinite scroll
+    const loadMorePeople = useCallback(async (): Promise<boolean> => {
+        try {
+            const result = await loadPaginatedUsers(peopleState.lastDoc)
+            peopleActions.addItems(result.items, result.lastDoc as any)
+            return result.hasMore
+        } catch (error) {
+            console.error('Error loading more people:', error)
+            return false
+        }
+    }, [peopleState.lastDoc, peopleActions])
+
+    const loadMoreProjects = useCallback(async (): Promise<boolean> => {
+        try {
+            const filters = {
+                status: statusFilter !== 'all' ? statusFilter : undefined,
+                searchTerm: debouncedProjectsSearch || undefined
+            }
+            const result = await loadPaginatedProjects(projectsState.lastDoc, 10, filters)
+            projectsActions.addItems(result.items, result.lastDoc as any)
+            return result.hasMore
+        } catch (error) {
+            console.error('Error loading more projects:', error)
+            return false
+        }
+    }, [projectsState.lastDoc, projectsActions, statusFilter, debouncedProjectsSearch])
+
+    const loadMoreTopics = useCallback(async (): Promise<boolean> => {
+        try {
+            // Use local function to get trending topics
+            const topics = await loadTrendingTopics()
+            
+            // Apply pagination logic
+            const currentIndex = topicsState.lastDoc ? parseInt(topicsState.lastDoc.id) || 0 : 0
+            const pageSize = 9 // Show 9 topics per page
+            const startIndex = currentIndex
+            const endIndex = startIndex + pageSize
+            
+            const paginatedTopics = topics.slice(startIndex, endIndex)
+            const hasMore = endIndex < topics.length
+            
+            if (paginatedTopics.length > 0) {
+                topicsActions.addItems(paginatedTopics, { id: endIndex.toString() } as any)
+            }
+            
+            return hasMore
+        } catch (error) {
+            console.error('Error loading more topics:', error)
+            return false
+        }
+    }, [topicsState.lastDoc, topicsActions])
+
+    // Infinite scroll hooks
+    const peopleScroll = useInfiniteScroll(loadMorePeople, { enabled: !peopleState.loading })
+    const projectsScroll = useInfiniteScroll(loadMoreProjects, { enabled: !projectsState.loading })
+    const topicsScroll = useInfiniteScroll(loadMoreTopics, { enabled: !topicsState.loading })
+
+    // Initial data loading
     useEffect(() => {
-        loadData()
+        loadInitialData()
     }, [])
 
-    const loadData = async () => {
+    const loadInitialData = async () => {
         setLoading(true)
         try {
-            await Promise.all([
-                loadPeople(),
-                loadProjects(),
-                loadTrendingTopics()
+            // Load initial data for all sections
+            const [peopleResult, projectsResult] = await Promise.all([
+                loadPaginatedUsers(),
+                loadPaginatedProjects()
             ])
+
+            // Load trending topics using local function
+            const topics = await loadTrendingTopics()
+            const initialTopics = topics.slice(0, 9) // First 9 topics
+
+            // Set initial data with proper lastDoc for pagination
+            peopleActions.setItems(peopleResult.items)
+            peopleActions.setHasMore(peopleResult.hasMore)
+            if (peopleResult.lastDoc) {
+                peopleActions.addItems([], peopleResult.lastDoc as any)
+            }
+            
+            projectsActions.setItems(projectsResult.items)
+            projectsActions.setHasMore(projectsResult.hasMore)
+            if (projectsResult.lastDoc) {
+                projectsActions.addItems([], projectsResult.lastDoc as any)
+            }
+            
+            topicsActions.setItems(initialTopics)
+            topicsActions.setHasMore(topics.length > 9)
+            if (topics.length > 9) {
+                topicsActions.addItems([], { id: '9' } as any) // Set lastDoc for pagination
+            }
+
+            // Check connection statuses for initial people
+            if (peopleResult.items.length > 0) {
+                await checkConnectionStatuses(peopleResult.items)
+            }
         } catch (error) {
-            console.error('Error loading discover data:', error)
+            console.error('Error loading initial data:', error)
         } finally {
             setLoading(false)
         }
     }
 
-    const loadPeople = async () => {
-        try {
-            const usersRef = collection(db, 'users')
-            const q = query(usersRef, limit(20))
-            const snapshot = await getDocs(q)
-            const peopleData = snapshot.docs.map(doc => ({
-                id: doc.id,
-                ...doc.data()
-            })) as Person[]
-
-            // Check connection statuses BEFORE setting people to avoid flash
-            await checkConnectionStatuses(peopleData)
-            setPeople(peopleData)
-        } catch (error) {
-            console.error('Error loading people:', error)
-            setPeople([])
-        }
-    }
+    // Reset and reload when filters change
+    useEffect(() => {
+        if (debouncedProjectsSearch !== projectsSearch) return // Wait for debounce
+        
+        projectsActions.reset()
+        loadMoreProjects()
+    }, [statusFilter, debouncedProjectsSearch])
 
     const checkConnectionStatuses = async (people: Person[]) => {
         if (!auth.currentUser) return
@@ -144,70 +233,40 @@ export function Discover() {
         const connectedSet = new Set<string>()
 
         try {
-            await Promise.all(people.map(async (person) => {
+            // Only check the current user's own data (which they have permission to access)
+            
+            // Get current user's friends
+            const friendsRef = collection(db, 'users', currentUserId, 'friends')
+            const friendsSnapshot = await getDocs(friendsRef)
+            const friendIds = new Set(friendsSnapshot.docs.map(doc => doc.id))
+
+            // Get current user's sent connection requests
+            const sentRequestsRef = collection(db, 'users', currentUserId, 'connectionRequests')
+            const sentRequestsSnapshot = await getDocs(sentRequestsRef)
+            const sentRequestIds = new Set(sentRequestsSnapshot.docs.map(doc => doc.id))
+
+            // Check each person against current user's data only
+            people.forEach(person => {
                 if (person.id === currentUserId) return
 
-                // Check if already friends (connection accepted)
-                const friendRef = doc(db, 'users', currentUserId, 'friends', person.id)
-                const friendDoc = await getDoc(friendRef)
-
-                if (friendDoc.exists()) {
+                // Check if they are already friends
+                if (friendIds.has(person.id)) {
                     connectedSet.add(person.id)
                     return
                 }
 
-                // Also check the reverse (if the other user has us as friend)
-                const reverseFriendRef = doc(db, 'users', person.id, 'friends', currentUserId)
-                const reverseFriendDoc = await getDoc(reverseFriendRef)
-
-                if (reverseFriendDoc.exists()) {
+                // Check if current user has sent a request to this person
+                if (sentRequestIds.has(person.id)) {
                     connectedSet.add(person.id)
                     return
                 }
+            })
 
-                // Check if request sent by current user
-                const requestRef = doc(db, 'users', person.id, 'connectionRequests', currentUserId)
-                const requestDoc = await getDoc(requestRef)
-
-                if (requestDoc.exists()) {
-                    connectedSet.add(person.id)
-                    return
-                }
-
-                // Check if request received from this person (pending)
-                const receivedRequestRef = doc(db, 'users', currentUserId, 'connectionRequests', person.id)
-                const receivedRequestDoc = await getDoc(receivedRequestRef)
-
-                if (receivedRequestDoc.exists()) {
-                    connectedSet.add(person.id)
-                }
-            }))
-
-            setConnectedUsers(connectedSet)
+            setConnectedUsers(prev => new Set([...prev, ...connectedSet]))
         } catch (error) {
             console.error('Error checking connection statuses:', error)
-        }
-    }
-
-    const loadProjects = async () => {
-        try {
-            const projectsRef = collection(db, 'projects')
-            const q = query(
-                projectsRef,
-                orderBy('createdAt', 'desc'),
-                limit(12)
-            )
-            const snapshot = await getDocs(q)
-            const projectsData = snapshot.docs.map(doc => ({
-                id: doc.id,
-                ...doc.data(),
-                tags: doc.data().tags || [],
-                createdAt: doc.data().createdAt?.toDate() || new Date()
-            })) as Project[]
-            setProjects(projectsData)
-        } catch (error) {
-            console.error('Error loading projects:', error)
-            setProjects([])
+            // Gracefully handle the error by setting empty connections
+            setConnectedUsers(new Set())
         }
     }
 
@@ -222,10 +281,24 @@ export function Discover() {
                 fetch(`https://hacker-news.firebaseio.com/v0/item/${id}.json`).then(res => res.json()).catch(() => null)
             )
             const stories = await Promise.all(storyPromises)
-            return stories.filter((story: any) => story && story.title && story.url && !story.deleted).map((story: any) => ({
-                ...story,
-                source: 'hackernews'
-            }))
+            return stories.filter((story: any) => story && story.title && story.url && !story.deleted).map((story: any) => {
+                // Create a better description from the URL domain
+                let description = story.title
+                if (story.url) {
+                    try {
+                        const domain = new URL(story.url).hostname.replace('www.', '')
+                        description = `Trending story from ${domain}: ${story.title}`
+                    } catch (e) {
+                        description = `Trending tech story: ${story.title}`
+                    }
+                }
+                
+                return {
+                    ...story,
+                    description: description,
+                    source: 'hackernews'
+                }
+            })
         } catch (error) {
             console.error('Error fetching Hacker News stories:', error)
             return []
@@ -241,8 +314,8 @@ export function Discover() {
                 title: article.title,
                 url: article.url,
                 time: new Date(article.published_at || article.created_at).getTime() / 1000,
-                tags: article.tags || [],
-                description: article.description || '',
+                tags: article.tag_list || article.tags || [],
+                description: article.description || article.social_image_alt || `Article by ${article.user?.name || 'Dev.to'}`, // Better description fallback
                 source: 'devto'
             }))
         } catch (error) {
@@ -278,9 +351,33 @@ export function Discover() {
                 tags = story.tags.slice(0, 3).map((tag: any) => typeof tag === 'string' ? tag : tag.name || tag)
             }
 
+            // Generate meaningful descriptions based on category and title
+            let description = story.description || ''
+            
+            if (!description || description === story.title) {
+                // Generate contextual descriptions based on category
+                const categoryDescriptions: Record<string, string> = {
+                    'Artificial Intelligence': 'Explore the latest developments in AI technology, machine learning algorithms, and their real-world applications.',
+                    'Web Development': 'Discover new frameworks, tools, and best practices for building modern web applications.',
+                    'DevOps & Cloud': 'Learn about cloud infrastructure, deployment strategies, and DevOps automation tools.',
+                    'Cybersecurity': 'Stay informed about security vulnerabilities, protection methods, and privacy concerns.',
+                    'Data Science': 'Dive into data analysis techniques, visualization tools, and database technologies.',
+                    'Blockchain & Web3': 'Understand cryptocurrency trends, blockchain technology, and decentralized applications.',
+                    'Technology': 'Get insights into the latest tech trends, innovations, and industry developments.'
+                }
+                
+                description = categoryDescriptions[category.title] || 'Stay updated with the latest technology trends and developments in the tech industry.'
+            }
+            
+            // Truncate if too long
+            if (description.length > 150) {
+                description = description.substring(0, 150) + '...'
+            }
+
             return {
                 id: story.source ? `${story.source}_${story.id}` : `${story.id || Date.now()}`,
                 title: story.title,
+                description: description,
                 url: story.url,
                 time: story.time || Date.now() / 1000,
                 category: category.title,
@@ -302,23 +399,47 @@ export function Discover() {
             const allStories = [...hackerNewsStories, ...devToArticles]
 
             if (allStories.length === 0) {
-                setTrendingTopics([])
-                return
+                return []
             }
 
             const topics = createTopicsFromStories(allStories)
-            const shuffled = topics.sort(() => 0.5 - Math.random()).slice(0, 9)
-            setTrendingTopics(shuffled)
+            
+            // Remove duplicates based on title to avoid duplicate keys
+            const uniqueTopics = topics.filter((topic, index, self) => 
+                index === self.findIndex(t => t.title === topic.title)
+            )
+            
+            // Ensure unique IDs by adding timestamp
+            const topicsWithUniqueIds = uniqueTopics.map((topic, index) => ({
+                ...topic,
+                id: `${topic.source}_${topic.id}_${Date.now()}_${index}`
+            }))
+            
+            const shuffled = topicsWithUniqueIds.sort(() => 0.5 - Math.random())
+            return shuffled
         } catch (error) {
             console.error('Error loading trending topics:', error)
-            setTrendingTopics([])
+            return []
         }
     }
 
     const handleRefreshTopics = async () => {
         setRefreshingTopics(true)
-        await loadTrendingTopics()
-        setRefreshingTopics(false)
+        try {
+            topicsActions.reset()
+            const topics = await loadTrendingTopics()
+            const initialTopics = topics.slice(0, 9)
+            
+            topicsActions.setItems(initialTopics)
+            topicsActions.setHasMore(topics.length > 9)
+            if (topics.length > 9) {
+                topicsActions.addItems([], { id: '9' } as any)
+            }
+        } catch (error) {
+            console.error('Error refreshing topics:', error)
+        } finally {
+            setRefreshingTopics(false)
+        }
     }
 
     const handleConnect = async (userId: string) => {
@@ -398,7 +519,7 @@ export function Discover() {
         }
     }
 
-    const filteredPeople = people.filter(person => {
+    const filteredPeople = peopleState.items.filter(person => {
         // Filter out current user
         if (auth.currentUser && person.id === auth.currentUser.uid) {
             return false
@@ -409,10 +530,10 @@ export function Discover() {
             return false
         }
 
-        const matchesSearch = peopleSearch === '' ||
-            (person.firstName && person.firstName.toLowerCase().includes(peopleSearch.toLowerCase())) ||
-            (person.lastName && person.lastName.toLowerCase().includes(peopleSearch.toLowerCase())) ||
-            (person.skills || []).some(skill => skill && skill.toLowerCase().includes(peopleSearch.toLowerCase()))
+        const matchesSearch = debouncedPeopleSearch === '' ||
+            (person.firstName && person.firstName.toLowerCase().includes(debouncedPeopleSearch.toLowerCase())) ||
+            (person.lastName && person.lastName.toLowerCase().includes(debouncedPeopleSearch.toLowerCase())) ||
+            (person.skills || []).some(skill => skill && skill.toLowerCase().includes(debouncedPeopleSearch.toLowerCase()))
 
         const matchesDiscipline = disciplineFilter === 'all' ||
             (person.discipline && person.discipline.toLowerCase().replace(/ & /g, '-').replace(/ /g, '-') === disciplineFilter)
@@ -420,11 +541,11 @@ export function Discover() {
         return matchesSearch && matchesDiscipline
     })
 
-    const filteredProjects = projects.filter(project => {
-        const matchesSearch = projectsSearch === '' ||
-            project.title.toLowerCase().includes(projectsSearch.toLowerCase()) ||
-            project.description.toLowerCase().includes(projectsSearch.toLowerCase()) ||
-            (project.tags || []).some(tag => tag.toLowerCase().includes(projectsSearch.toLowerCase()))
+    const filteredProjects = projectsState.items.filter(project => {
+        const matchesSearch = debouncedProjectsSearch === '' ||
+            project.title.toLowerCase().includes(debouncedProjectsSearch.toLowerCase()) ||
+            project.description.toLowerCase().includes(debouncedProjectsSearch.toLowerCase()) ||
+            (project.tags || []).some(tag => tag.toLowerCase().includes(debouncedProjectsSearch.toLowerCase()))
 
         const matchesStatus = statusFilter === 'all' || project.status === statusFilter
 
@@ -566,6 +687,26 @@ export function Discover() {
                             )
                         })
                     )}
+                    
+                    {/* Infinite scroll sentinel for people */}
+                    {!loading && peopleState.hasMore && (
+                        <div ref={peopleScroll.sentinelRef} className="col-span-full flex justify-center py-8">
+                            {peopleScroll.isLoading ? (
+                                <div className="flex items-center gap-2 text-gray-500">
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                    <span>Loading more collaborators...</span>
+                                </div>
+                            ) : (
+                                <Button 
+                                    variant="outline" 
+                                    onClick={peopleScroll.loadMore}
+                                    className="px-6 py-2"
+                                >
+                                    Load More Collaborators
+                                </Button>
+                            )}
+                        </div>
+                    )}
                 </div>
             </section>
 
@@ -614,6 +755,26 @@ export function Discover() {
                             <DiscoverProjectCard key={project.id} project={project} />
                         ))
                     )}
+                    
+                    {/* Infinite scroll sentinel for projects */}
+                    {!loading && projectsState.hasMore && (
+                        <div ref={projectsScroll.sentinelRef} className="col-span-full flex justify-center py-8">
+                            {projectsScroll.isLoading ? (
+                                <div className="flex items-center gap-2 text-gray-500">
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                    <span>Loading more projects...</span>
+                                </div>
+                            ) : (
+                                <Button 
+                                    variant="outline" 
+                                    onClick={projectsScroll.loadMore}
+                                    className="px-6 py-2"
+                                >
+                                    Load More Projects
+                                </Button>
+                            )}
+                        </div>
+                    )}
                 </div>
             </section>
 
@@ -633,45 +794,73 @@ export function Discover() {
                     </Button>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    {trendingTopics.length === 0 ? (
+                    {topicsState.items.length === 0 ? (
                         <div className="col-span-full text-center py-8">
                             <TrendingUp className="h-12 w-12 text-gray-400 mx-auto mb-4" />
                             <p className="text-gray-500">No trending topics yet</p>
                         </div>
                     ) : (
-                        trendingTopics.map((topic) => (
+                        topicsState.items.map((topic) => (
                             <Card key={topic.id} className="hover:shadow-lg transition-all hover:border-blue-500">
                                 <CardContent className="p-6">
                                     <div className="flex items-center justify-between mb-4">
                                         <span className="text-2xl">{topic.icon}</span>
-                                        <Badge variant="secondary" className="text-xs">{topic.category}</Badge>
+                                        <Badge variant="secondary" className="text-xs">{topic.source}</Badge>
                                     </div>
-                                    <h3 className="text-lg font-bold mb-2 line-clamp-2 h-14" title={topic.title}>
+                                    <h3 className="text-lg font-bold mb-3 line-clamp-2" title={topic.title}>
                                         {topic.title}
                                     </h3>
-                                    <div className="flex flex-wrap gap-2 mb-4 h-12 overflow-hidden">
-                                        {(topic.tags || []).slice(0, 3).map((tag, i) => (
-                                            <Badge key={i} variant="outline" className="text-xs bg-gray-50">
+                                    {topic.description && topic.description !== topic.title && (
+                                        <p className="text-sm text-gray-600 dark:text-gray-300 mb-4 line-clamp-3">
+                                            {topic.description}
+                                        </p>
+                                    )}
+                                    <div className="flex flex-wrap gap-2 mb-4">
+                                        <Badge variant="outline" className="text-xs bg-gray-50 dark:bg-gray-800">
+                                            {topic.category}
+                                        </Badge>
+                                        {topic.tags.slice(0, 2).map((tag, i) => (
+                                            <Badge key={i} variant="outline" className="text-xs bg-gray-50 dark:bg-gray-800">
                                                 {tag}
                                             </Badge>
                                         ))}
                                     </div>
                                     <div className="flex justify-between items-center mt-auto">
                                         <span className="text-xs text-gray-500">
-                                            {topic.source === 'hackernews' ? 'Hacker News' : 'Dev.to'}
+                                            Trending in tech
                                         </span>
-                                        <a
-                                            href={topic.url}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => window.open(topic.url, '_blank')}
                                             className="text-blue-600 hover:text-blue-800 text-sm font-medium flex items-center gap-1"
                                         >
                                             Read <ExternalLink className="h-3 w-3" />
-                                        </a>
+                                        </Button>
                                     </div>
                                 </CardContent>
                             </Card>
                         ))
+                    )}
+                    
+                    {/* Infinite scroll sentinel for trending topics */}
+                    {topicsState.hasMore && (
+                        <div ref={topicsScroll.sentinelRef} className="col-span-full flex justify-center py-8">
+                            {topicsScroll.isLoading ? (
+                                <div className="flex items-center gap-2 text-gray-500">
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                    <span>Loading more topics...</span>
+                                </div>
+                            ) : (
+                                <Button 
+                                    variant="outline" 
+                                    onClick={topicsScroll.loadMore}
+                                    className="px-6 py-2"
+                                >
+                                    Load More Topics
+                                </Button>
+                            )}
+                        </div>
                     )}
                 </div>
             </section>

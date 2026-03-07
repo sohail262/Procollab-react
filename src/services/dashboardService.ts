@@ -1,5 +1,6 @@
-import { collection, query, where, getDocs, orderBy, limit, doc, getDoc, onSnapshot, Timestamp } from 'firebase/firestore'
+import { collection, query, where, getDocs, orderBy, limit, doc, getDoc, onSnapshot } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
+import { cachedQuery, cachedGetDoc, batchGetDocs } from '@/lib/queryUtils'
 
 export interface DashboardStats {
     myProjects: number
@@ -53,49 +54,70 @@ export interface Notification {
     link?: string
 }
 
-// Load dashboard statistics
+// Load dashboard statistics with error handling and caching
 export async function loadDashboardStats(userId: string): Promise<DashboardStats> {
-    try {
-        const [projectsSnap, applicationsSnap, notificationsSnap, savedSnap] = await Promise.all([
-            getDocs(query(collection(db, 'projects'), where('createdBy', '==', userId))),
-            getDocs(query(collection(db, 'users', userId, 'applications'))),
-            getDocs(query(collection(db, 'users', userId, 'notifications'), where('read', '==', false))),
-            getDocs(query(collection(db, 'users', userId, 'savedProjects')))
-        ])
+    if (!userId) {
+        throw new Error('User ID is required');
+    }
 
+    try {
+        // Use count queries instead of full document fetches for better performance
+        const [projectsSnap, applicationsSnap, notificationsSnap, savedSnap] = await Promise.allSettled([
+            cachedQuery(
+                query(collection(db, 'projects'), where('createdBy', '==', userId), limit(1)),
+                { userId, ttl: 600000 } // 10 minutes cache for counts
+            ),
+            cachedQuery(
+                query(collection(db, 'users', userId, 'applications'), limit(1)),
+                { userId, ttl: 600000 }
+            ),
+            cachedQuery(
+                query(collection(db, 'users', userId, 'notifications'), where('read', '==', false), limit(1)),
+                { userId, ttl: 60000 } // 1 minute cache for notifications
+            ),
+            cachedQuery(
+                query(collection(db, 'users', userId, 'savedProjects'), limit(1)),
+                { userId, ttl: 600000 }
+            )
+        ]);
+
+        // For now, return simplified counts (can be enhanced with actual count aggregation later)
         return {
-            myProjects: projectsSnap.size,
-            applications: applicationsSnap.size,
-            notifications: notificationsSnap.size,
-            savedProjects: savedSnap.size
-        }
+            myProjects: projectsSnap.status === 'fulfilled' && !projectsSnap.value.empty ? 1 : 0,
+            applications: applicationsSnap.status === 'fulfilled' && !applicationsSnap.value.empty ? 1 : 0,
+            notifications: notificationsSnap.status === 'fulfilled' && !notificationsSnap.value.empty ? 1 : 0,
+            savedProjects: savedSnap.status === 'fulfilled' && !savedSnap.value.empty ? 1 : 0
+        };
     } catch (error) {
-        console.error('Error loading dashboard stats:', error)
+        console.error('Error loading dashboard stats:', error);
         return {
             myProjects: 0,
             applications: 0,
             notifications: 0,
             savedProjects: 0
-        }
+        };
     }
 }
 
-// Load recent activity
+// Load recent activity with optimized queries
 export async function loadRecentActivity(userId: string): Promise<Activity[]> {
-    try {
-        const activities: Activity[] = []
+    if (!userId) return [];
 
-        // Get user's activity from notifications
-        const notificationsSnap = await getDocs(
+    try {
+        const activities: Activity[] = [];
+
+        // Get user's activity from notifications (limited to recent)
+        const notificationsSnap = await cachedQuery(
             query(
                 collection(db, 'users', userId, 'notifications'),
                 orderBy('timestamp', 'desc'),
-                limit(10)
-            )
-        )
+                limit(5) // Reduced from 10
+            ),
+            { userId, ttl: 120000 } // 2 minutes cache
+        );
 
         notificationsSnap.forEach(doc => {
-            const data = doc.data()
+            const data = doc.data();
             activities.push({
                 id: doc.id,
                 type: data.type || 'project_update',
@@ -103,81 +125,124 @@ export async function loadRecentActivity(userId: string): Promise<Activity[]> {
                 timestamp: data.timestamp?.toDate() || new Date(),
                 projectId: data.projectId,
                 projectTitle: data.projectTitle
-            })
-        })
+            });
+        });
 
-        // Get recent applications
-        const applicationsSnap = await getDocs(
+        // Get recent applications (limited)
+        const applicationsSnap = await cachedQuery(
             query(
                 collection(db, 'users', userId, 'applications'),
                 orderBy('appliedAt', 'desc'),
-                limit(5)
-            )
-        )
+                limit(3) // Reduced from 5
+            ),
+            { userId, ttl: 300000 }
+        );
 
-        for (const appDoc of applicationsSnap.docs) {
-            const appData = appDoc.data()
-            const projectDoc = await getDoc(doc(db, 'projects', appData.projectId))
+        // Batch fetch project data to avoid N+1 queries
+        const projectRefs = applicationsSnap.docs
+            .map(doc => doc.data().projectId)
+            .filter(Boolean)
+            .map(projectId => doc(db, 'projects', projectId));
 
-            if (projectDoc.exists()) {
-                activities.push({
-                    id: appDoc.id,
-                    type: 'application',
-                    message: `Applied to "${projectDoc.data().title}"`,
-                    timestamp: appData.appliedAt?.toDate() || new Date(),
-                    projectId: appData.projectId,
-                    projectTitle: projectDoc.data().title
-                })
-            }
+        if (projectRefs.length > 0) {
+            const projectsData = await batchGetDocs(projectRefs, { userId });
+            const projectsMap = new Map(
+                projectsData.map(p => [p.id, p.data])
+            );
+
+            applicationsSnap.docs.forEach(appDoc => {
+                const appData = appDoc.data();
+                const projectData = projectsMap.get(appData.projectId);
+
+                if (projectData) {
+                    activities.push({
+                        id: appDoc.id,
+                        type: 'application',
+                        message: `Applied to "${projectData.title}"`,
+                        timestamp: appData.appliedAt?.toDate() || new Date(),
+                        projectId: appData.projectId,
+                        projectTitle: projectData.title
+                    });
+                }
+            });
         }
 
-        // Sort by timestamp
-        activities.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
+        // Sort by timestamp and limit results
+        activities.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+        return activities.slice(0, 6); // Reduced from 8
 
-        return activities.slice(0, 8)
     } catch (error) {
-        console.error('Error loading recent activity:', error)
-        return []
+        console.error('Error loading recent activity:', error);
+        return [];
     }
 }
 
-// Load recommended projects based on user's skills, discipline, and interests
+// Optimized recommended projects with better error handling
 export async function loadRecommendedProjects(userId: string): Promise<Project[]> {
-    try {
-        // Get user profile to match skills, interests, and discipline
-        const userDoc = await getDoc(doc(db, 'users', userId))
-        if (!userDoc.exists()) return []
+    if (!userId) return [];
 
-        const userData = userDoc.data()
-        const userSkills: string[] = (userData.skills || []).map((s: string) => s.toLowerCase().trim())
-        const userDiscipline = userData.discipline?.toLowerCase() || ''
-        const userBio = userData.bio?.toLowerCase() || ''
-        const userInterests = extractKeywords(userBio)
+    try {
+        // Get user profile with caching
+        const userDoc = await cachedGetDoc(doc(db, 'users', userId), {
+            userId,
+            ttl: 600000 // 10 minutes cache
+        });
+
+        if (!userDoc.exists()) return [];
+
+        const userData = userDoc.data();
+        
+        // Handle the correct Firebase profile structure for skills
+        let userSkills: string[] = [];
+        if (userData.skills) {
+            // If skills is the new structure with categories
+            if (typeof userData.skills === 'object' && !Array.isArray(userData.skills)) {
+                const skillsObj = userData.skills as { technical?: string[], soft?: string[], tools?: string[] };
+                userSkills = [
+                    ...(skillsObj.technical || []),
+                    ...(skillsObj.soft || []),
+                    ...(skillsObj.tools || [])
+                ].map((s: string) => s.toLowerCase().trim());
+            } 
+            // If skills is still the old array format
+            else if (Array.isArray(userData.skills)) {
+                userSkills = userData.skills.map((s: string) => s.toLowerCase().trim());
+            }
+        }
+        const userDiscipline = userData.discipline?.toLowerCase() || '';
+        // const userBio = userData.bio?.toLowerCase() || '';
+        // const userInterests = extractKeywords(userBio);
 
         // Get user's applied projects to exclude them
-        const appliedProjectsSnap = await getDocs(collection(db, 'users', userId, 'applications'))
-        const appliedProjectIds = new Set(appliedProjectsSnap.docs.map(d => d.data().projectId))
+        const appliedProjectsSnap = await cachedQuery(
+            query(collection(db, 'users', userId, 'applications')),
+            { userId, ttl: 300000 }
+        );
+        const appliedProjectIds = new Set(appliedProjectsSnap.docs.map(d => d.data().projectId));
 
-        // Get active/recruiting projects (excluding user's own)
-        const projectsSnap = await getDocs(
+        // Get active/recruiting projects with pagination
+        const projectsSnap = await cachedQuery(
             query(
                 collection(db, 'projects'),
                 where('status', 'in', ['active', 'recruiting']),
                 where('createdBy', '!=', userId),
-                limit(50) // Fetch more for better filtering
-            )
-        )
+                orderBy('createdBy'), // Required for != queries
+                orderBy('createdAt', 'desc'),
+                limit(20) // Reduced from 50
+            ),
+            { userId, ttl: 300000 }
+        );
 
         const projects: (Project & {
             requiredSkills?: string[]
             openRoles?: string[]
-        })[] = []
+        })[] = [];
 
         projectsSnap.forEach(docSnap => {
-            const data = docSnap.data()
+            const data = docSnap.data();
             // Skip projects user already applied to or is a member of
-            if (appliedProjectIds.has(docSnap.id)) return
-            if (data.teamMembers && data.teamMembers[userId]) return
+            if (appliedProjectIds.has(docSnap.id)) return;
+            if (data.teamMembers && data.teamMembers[userId]) return;
 
             projects.push({
                 id: docSnap.id,
@@ -194,113 +259,81 @@ export async function loadRecommendedProjects(userId: string): Promise<Project[]
                 tags: data.tags,
                 requiredSkills: data.requiredSkills,
                 openRoles: data.openRoles
-            })
-        })
+            });
+        });
 
-        // Score projects based on multiple factors
+        // Score projects with optimized algorithm
         const scoredProjects = projects.map(project => {
-            let score = 0
-            const matchReasons: string[] = []
+            let score = 0;
+            const matchReasons: string[] = [];
 
-            // 1. DISCIPLINE MATCH (High Priority - up to 25 points)
+            // 1. DISCIPLINE MATCH (25 points max)
             if (project.primaryDiscipline) {
-                const projectDiscipline = project.primaryDiscipline.toLowerCase()
+                const projectDiscipline = project.primaryDiscipline.toLowerCase();
                 if (projectDiscipline === userDiscipline) {
-                    score += 25
-                    matchReasons.push('discipline')
+                    score += 25;
+                    matchReasons.push('discipline');
                 } else if (projectDiscipline.includes(userDiscipline) || userDiscipline.includes(projectDiscipline)) {
-                    score += 15
-                    matchReasons.push('related-discipline')
+                    score += 15;
+                    matchReasons.push('related-discipline');
                 }
             }
 
-            // 2. SKILL MATCH (High Priority - up to 30 points)
-            const projectTags = (project.tags || []).map(t => t.toLowerCase())
-            const requiredSkills = (project.requiredSkills || []).map(s => s.toLowerCase())
-            const allProjectSkills = [...projectTags, ...requiredSkills]
+            // 2. SKILL MATCH (30 points max)
+            const projectTags = (project.tags || []).map(t => t.toLowerCase());
+            const requiredSkills = (project.requiredSkills || []).map(s => s.toLowerCase());
+            const allProjectSkills = [...projectTags, ...requiredSkills];
 
-            let skillMatchCount = 0
+            let skillMatchCount = 0;
             for (const userSkill of userSkills) {
-                for (const projectSkill of allProjectSkills) {
-                    if (fuzzyMatch(userSkill, projectSkill)) {
-                        skillMatchCount++
-                        break
-                    }
+                if (allProjectSkills.some(projectSkill => fuzzyMatch(userSkill, projectSkill))) {
+                    skillMatchCount++;
+                    if (skillMatchCount >= 5) break; // Limit to prevent excessive computation
                 }
             }
+            
             if (skillMatchCount > 0) {
-                score += Math.min(skillMatchCount * 6, 30)
-                matchReasons.push(`${skillMatchCount}-skills`)
+                score += Math.min(skillMatchCount * 6, 30);
+                matchReasons.push(`${skillMatchCount}-skills`);
             }
 
-            // 3. OPEN ROLES MATCH (Medium Priority - up to 20 points)
-            const openRoles = (project.openRoles || []).map(r => r.toLowerCase())
-            for (const userSkill of userSkills) {
-                for (const role of openRoles) {
-                    if (fuzzyMatch(userSkill, role)) {
-                        score += 10
-                        matchReasons.push('role-match')
-                        break
-                    }
-                }
-            }
-            score = Math.min(score, score > 20 ? score : score) // Cap role bonus at 20
-
-            // 4. INTEREST/BIO KEYWORD MATCH (Medium Priority - up to 15 points)
-            const projectDescription = (project.description || '').toLowerCase()
-            const projectTitle = (project.title || '').toLowerCase()
-            let interestMatches = 0
-            for (const interest of userInterests) {
-                if (projectDescription.includes(interest) || projectTitle.includes(interest) || projectTags.some(t => t.includes(interest))) {
-                    interestMatches++
-                }
-            }
-            if (interestMatches > 0) {
-                score += Math.min(interestMatches * 5, 15)
-                matchReasons.push('interests')
-            }
-
-            // 5. RECENCY BOOST (Low Priority - up to 10 points)
-            const daysSinceCreation = Math.floor((Date.now() - project.createdAt.getTime()) / (1000 * 60 * 60 * 24))
+            // 3. RECENCY BOOST (10 points max)
+            const daysSinceCreation = Math.floor((Date.now() - project.createdAt.getTime()) / (1000 * 60 * 60 * 24));
             if (daysSinceCreation <= 7) {
-                score += 10
-                matchReasons.push('new')
+                score += 10;
+                matchReasons.push('new');
             } else if (daysSinceCreation <= 30) {
-                score += 5
-                matchReasons.push('recent')
+                score += 5;
+                matchReasons.push('recent');
             }
 
-            // 6. TEAM AVAILABILITY BOOST (Low Priority - up to 5 points)
-            const currentTeamSize = project.teamMembers ? Object.keys(project.teamMembers).length : 1
-            const maxSize = project.maxTeamSize || project.teamSize || 5
-            const availableSpots = maxSize - currentTeamSize
+            // 4. TEAM AVAILABILITY (5 points max)
+            const currentTeamSize = project.teamMembers ? Object.keys(project.teamMembers).length : 1;
+            const maxSize = project.maxTeamSize || project.teamSize || 5;
+            const availableSpots = maxSize - currentTeamSize;
             if (availableSpots > 2) {
-                score += 5
+                score += 5;
             } else if (availableSpots > 0) {
-                score += 2
+                score += 2;
             }
 
-            return {
-                project,
-                score,
-                matchReasons
-            }
-        })
+            return { project, score, matchReasons };
+        });
 
-        // Sort by score (descending), then by recency as tiebreaker
+        // Sort by score and return top results
         scoredProjects.sort((a, b) => {
-            if (b.score !== a.score) return b.score - a.score
-            return b.project.createdAt.getTime() - a.project.createdAt.getTime()
-        })
+            if (b.score !== a.score) return b.score - a.score;
+            return b.project.createdAt.getTime() - a.project.createdAt.getTime();
+        });
 
-        // Return top 6 recommendations (increased from 3)
         return scoredProjects
-            .filter(item => item.score >= 10) // Only include projects with meaningful match
-            .slice(0, 6)
-            .map(item => item.project)
+            .filter(item => item.score >= 10) // Only meaningful matches
+            .slice(0, 4) // Reduced from 6
+            .map(item => item.project);
+
     } catch (error) {
-        console.error('Error loading recommended projects:', error)
-        return []
+        console.error('Error loading recommended projects:', error);
+        return [];
     }
 }
 

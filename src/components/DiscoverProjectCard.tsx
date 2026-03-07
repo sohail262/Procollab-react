@@ -72,7 +72,7 @@ export function DiscoverProjectCard({ project }: DiscoverProjectCardProps) {
                     ))}
                     {(project.tags || []).length > 3 && (
                         <Badge variant="outline" className="text-xs">
-                            +{project.tags.length - 3}
+                            +{(project.tags || []).length - 3}
                         </Badge>
                     )}
                 </div>

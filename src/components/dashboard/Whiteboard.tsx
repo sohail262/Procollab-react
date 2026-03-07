@@ -115,7 +115,7 @@ export function Whiteboard({ readOnly = false }: WhiteboardProps) {
             <div className="h-full w-full relative">
                 <Tldraw
                     onMount={handleMount}
-                    persistenceKey={null} // Disable local persistence to avoid conflicts
+                    persistenceKey={undefined} // Disable local persistence to avoid conflicts
                 />
             </div>
         </Card>
