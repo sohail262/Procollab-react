@@ -47,6 +47,18 @@ const MINIMAL_PERMISSIONS: MemberPermissions = {
     settings: { read: false, write: false }
 }
 
+/** New members start with everything off until the owner enables access in Manage Team */
+export const EMPTY_MEMBER_PERMISSIONS: MemberPermissions = {
+    dashboard: { read: false, write: false },
+    tasks: { read: false, write: false },
+    whiteboard: { read: false, write: false },
+    files: { read: false, write: false },
+    chat: { read: false, write: false },
+    calendar: { read: false, write: false },
+    gantt: { read: false, write: false },
+    settings: { read: false, write: false }
+}
+
 export function usePermissions(): UsePermissionsReturn {
     const { id: projectId } = useParams()
     const [permissions, setPermissions] = useState<MemberPermissions | null>(null)
@@ -101,20 +113,9 @@ export function usePermissions(): UsePermissionsReturn {
                     // Use custom permissions if set
                     setPermissions(memberData.permissions as MemberPermissions)
                 } else {
-                    // Default permissions based on role
                     if (role === 'member') {
-                        setPermissions({
-                            dashboard: { read: true, write: true },
-                            tasks: { read: true, write: true },
-                            whiteboard: { read: true, write: true },
-                            files: { read: true, write: true },
-                            chat: { read: true, write: true },
-                            calendar: { read: true, write: false },
-                            gantt: { read: true, write: false },
-                            settings: { read: true, write: false }
-                        })
+                        setPermissions(EMPTY_MEMBER_PERMISSIONS)
                     } else {
-                        // Viewer or unknown role
                         setPermissions(MINIMAL_PERMISSIONS)
                     }
                 }

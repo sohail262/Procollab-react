@@ -39,8 +39,11 @@ export default defineConfig({
       }
     }
   },
-  // Optimize dev server
+  // Dev server: fixed port avoids "Failed to fetch dynamically imported module" when 5173
+  // is already taken — Vite would otherwise bind to 5174+ while the browser still uses 5173.
   server: {
+    port: 5173,
+    strictPort: true,
     hmr: {
       overlay: false
     }

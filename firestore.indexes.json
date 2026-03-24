@@ -1,0 +1,12 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "connectionRequests",
+      "queryScope": "COLLECTION_GROUP",
+      "fields": [
+        { "fieldPath": "from", "order": "ASCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

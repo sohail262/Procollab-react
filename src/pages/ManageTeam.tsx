@@ -12,7 +12,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
     ArrowLeft, Mail, Trash2, Check, X, UserPlus, Users,
     ClipboardList, Settings, Shield, Kanban, FileText,
-    MessageSquare, Calendar, LayoutDashboard, Pencil, Eye
+    MessageSquare, Calendar, LayoutDashboard, Pencil, Eye,
+    ExternalLink,
 } from 'lucide-react'
 import {
     doc,
@@ -23,6 +24,7 @@ import {
     where,
     onSnapshot,
     addDoc,
+    setDoc,
     updateDoc,
     deleteDoc,
     arrayUnion,
@@ -33,6 +35,7 @@ import { db } from '@/lib/firebase'
 import { useAuth } from '@/hooks/use-auth'
 import { useToast } from '@/hooks/use-toast'
 import { useProjectRole } from '@/hooks/use-project-role'
+import { EMPTY_MEMBER_PERMISSIONS, type MemberPermissions } from '@/hooks/use-permissions'
 
 interface TeamMember {
     id: string
@@ -43,17 +46,6 @@ interface TeamMember {
     role: 'owner' | 'admin' | 'member' | 'viewer'
     joinedAt: Date
     permissions?: MemberPermissions
-}
-
-interface MemberPermissions {
-    dashboard: { read: boolean; write: boolean }
-    tasks: { read: boolean; write: boolean }
-    whiteboard: { read: boolean; write: boolean }
-    files: { read: boolean; write: boolean }
-    chat: { read: boolean; write: boolean }
-    calendar: { read: boolean; write: boolean }
-    gantt: { read: boolean; write: boolean }
-    settings: { read: boolean; write: boolean }
 }
 
 interface Invitation {
@@ -97,16 +89,7 @@ const getDefaultPermissions = (role: string): MemberPermissions => {
                 settings: { read: true, write: true }
             }
         case 'member':
-            return {
-                dashboard: { read: true, write: true },
-                tasks: { read: true, write: true },
-                whiteboard: { read: true, write: true },
-                files: { read: true, write: true },
-                chat: { read: true, write: true },
-                calendar: { read: true, write: false },
-                gantt: { read: true, write: false },
-                settings: { read: true, write: false }
-            }
+            return EMPTY_MEMBER_PERMISSIONS
         case 'viewer':
         default:
             return {
@@ -185,7 +168,7 @@ export function ManageTeam() {
                 id: doc.id,
                 ...doc.data(),
                 joinedAt: doc.data().joinedAt?.toDate() || new Date(),
-                permissions: doc.data().permissions || getDefaultPermissions(doc.data().role)
+                permissions: doc.data().permissions ?? getDefaultPermissions(doc.data().role)
             })) as TeamMember[]
             setMembers(membersData)
         })
@@ -401,16 +384,16 @@ export function ManageTeam() {
         if (!id) return
 
         try {
-            const defaultPerms = getDefaultPermissions('member')
+            const displayName = request.userName || request.userEmail
 
-            // Add to members
-            await addDoc(collection(db, 'projects', id, 'members'), {
+            // Member doc id must match uid so hooks (e.g. useProjectRole) resolve the role
+            await setDoc(doc(db, 'projects', id, 'members', request.userId), {
                 uid: request.userId,
-                name: request.userName || request.userEmail,
+                name: displayName,
                 email: request.userEmail,
                 avatar: request.userAvatar,
                 role: 'member',
-                permissions: defaultPerms,
+                permissions: EMPTY_MEMBER_PERMISSIONS,
                 joinedAt: serverTimestamp()
             })
 
@@ -436,7 +419,18 @@ export function ManageTeam() {
 
             toast({
                 title: "Application accepted",
-                description: `${request.userName || request.userEmail} has been added to the team`
+                description: `${displayName} was added with all permissions off. Open the Permissions tab and enable what they should access.`,
+            })
+            setActiveTab('permissions')
+            setSelectedMember({
+                id: request.userId,
+                uid: request.userId,
+                name: displayName,
+                email: request.userEmail,
+                avatar: request.userAvatar,
+                role: 'member',
+                joinedAt: new Date(),
+                permissions: EMPTY_MEMBER_PERMISSIONS,
             })
         } catch (error) {
             console.error('Error accepting request:', error)
@@ -717,6 +711,11 @@ export function ManageTeam() {
                                                                     <span className="font-medium">Skills:</span> {request.skills}
                                                                 </div>
                                                             )}
+                                                            {request.experience && (
+                                                                <div className="text-xs text-muted-foreground">
+                                                                    <span className="font-medium">Experience:</span> {request.experience}
+                                                                </div>
+                                                            )}
                                                             {request.timeCommitment && (
                                                                 <Badge variant="secondary" className="text-xs">
                                                                     {request.timeCommitment} hrs/week
@@ -729,7 +728,17 @@ export function ManageTeam() {
                                                         </p>
                                                     </div>
                                                 </div>
-                                                <div className="flex items-center gap-2 flex-shrink-0">
+                                                <div className="flex flex-col items-end gap-2 flex-shrink-0">
+                                                    <Button
+                                                        variant="outline"
+                                                        size="sm"
+                                                        className="w-full sm:w-auto"
+                                                        onClick={() => navigate(`/profile/${request.userId}`)}
+                                                    >
+                                                        <ExternalLink className="h-4 w-4 mr-2" />
+                                                        View profile
+                                                    </Button>
+                                                    <div className="flex items-center gap-2">
                                                     <Button
                                                         size="sm"
                                                         className="bg-green-600 hover:bg-green-700 text-white"
@@ -747,6 +756,7 @@ export function ManageTeam() {
                                                         <X className="h-4 w-4 mr-2" />
                                                         Reject
                                                     </Button>
+                                                    </div>
                                                 </div>
                                             </div>
                                         ))}
@@ -799,7 +809,7 @@ export function ManageTeam() {
                                     </CardTitle>
                                     <CardDescription>
                                         {selectedMember
-                                            ? `Configure what ${selectedMember.name} can access and modify`
+                                            ? `Configure what ${selectedMember.name} can access and modify. New members start with no access until you enable it here.`
                                             : 'Select a member to configure their permissions'}
                                     </CardDescription>
                                 </CardHeader>

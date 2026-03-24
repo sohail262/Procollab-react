@@ -1,0 +1,112 @@
+{
+  "rules": {
+    "users": {
+      "$uid": {
+        ".read": "$uid === auth.uid",
+        ".write": "$uid === auth.uid",
+        ".validate": "true",
+        "firstName": { ".validate": "newData.isString() || !newData.exists()" },
+        "lastName": { ".validate": "newData.isString() || !newData.exists()" },
+        "email": { ".validate": "newData.isString() && newData.val().matches(/^[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,4}$/i) || !newData.exists()" },
+        "discipline": { ".validate": "newData.isString() || !newData.exists()" },
+        "role": { ".validate": "newData.isString() || !newData.exists()" },
+        "skills": { ".validate": "true" },
+        "bio": { ".validate": "newData.isString() || !newData.exists()" },
+        "createdAt": { ".validate": "newData.isNumber() || !newData.exists()" },
+        "profilePicture": { ".validate": "newData.isString() || !newData.exists()" },
+        "phone": { ".validate": "newData.isString() || !newData.exists()" },
+        "location": { ".validate": "newData.isString() || !newData.exists()" },
+        "institution": { ".validate": "newData.isString() || !newData.exists()" },
+        "website": { ".validate": "newData.isString() || !newData.exists()" },
+        "interests": { ".validate": "true" },
+        "emailNotifications": { ".validate": "newData.isBoolean() || !newData.exists()" },
+        "applicationUpdates": { ".validate": "newData.isBoolean() || !newData.exists()" },
+        "projectUpdates": { ".validate": "newData.isBoolean() || !newData.exists()" },
+        "profileVisibility": { ".validate": "newData.isBoolean() || !newData.exists()" },
+        "contactVisibility": { ".validate": "newData.isBoolean() || !newData.exists()" },
+        "profileComplete": { ".validate": "newData.isBoolean() || !newData.exists()" },
+        "updatedAt": { ".validate": "newData.isNumber() || !newData.exists()" },
+        "projects": {
+          "$projectId": {
+            ".validate": "root.child('projects').child($projectId).exists()"
+          }
+        },
+        "applications": {
+          "$projectId": {
+            ".validate": "root.child('projects').child($projectId).exists()"
+          }
+        },
+        "savedProjects": {
+          "$projectId": {
+            ".validate": "root.child('projects').child($projectId).exists()"
+          }
+        }
+      }
+    },
+    "whiteboards": {
+      "$projectId": {
+        ".read": "auth != null",
+        ".write": "auth != null",
+        "presence": {
+          "$userId": {
+            ".write": "auth != null && auth.uid == $userId"
+          }
+        }
+      }
+    },
+    "projects": {
+      ".read": true,
+      "$projectId": {
+        ".write": "auth != null && (!data.exists() || data.child('createdBy').val() === auth.uid)",
+        ".validate": "newData.hasChildren(['title', 'summary', 'description', 'status', 'createdBy', 'createdAt'])",
+        "title": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 100" },
+        "summary": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 200" },
+        "description": { ".validate": "newData.isString() && newData.val().length > 0" },
+        "status": { ".validate": "newData.isString() && newData.val().matches(/^(active|recruiting|completed|on-hold)$/)" },
+        "createdBy": { ".validate": "newData.isString() && newData.val() === auth.uid" },
+        "createdAt": { ".validate": "newData.isNumber()" },
+        "teamMembers": {
+          "$uid": {
+            ".write": "auth != null && (root.child('projects').child($projectId).child('createdBy').val() === auth.uid || $uid === auth.uid)",
+            ".validate": "newData.hasChildren(['role', 'joinedAt'])"
+          }
+        }
+      }
+    },
+    "projectApplications": {
+      "$projectId": {
+        ".read": "auth != null && root.child('projects').child($projectId).child('createdBy').val() === auth.uid",
+        "$uid": {
+          ".read": "auth != null && $uid === auth.uid",
+          ".write": "auth != null && ($uid === auth.uid || root.child('projects').child($projectId).child('createdBy').val() === auth.uid)",
+          ".validate": "newData.hasChildren(['position', 'status', 'appliedAt'])",
+          "status": { ".validate": "!data.exists() || data.val() === newData.val() || root.child('projects').child($projectId).child('createdBy').val() === auth.uid" }
+        }
+      }
+    },
+    "projectDiscussions": {
+      "$projectId": {
+        ".read": true,
+        "$commentId": {
+          ".write": "auth != null && (!data.exists() || data.child('userId').val() === auth.uid)",
+          ".validate": "newData.hasChildren(['userId', 'text', 'timestamp'])",
+          "userId": { ".validate": "newData.isString() && newData.val() === auth.uid" },
+          "text": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 1000" },
+          "timestamp": { ".validate": "newData.isNumber()" }
+        }
+      }
+    },
+    "notifications": {
+      "$uid": {
+        ".read": "auth != null && $uid === auth.uid",
+        ".write": "auth != null && ((!data.exists()) || $uid === auth.uid)",
+        "$notificationId": {
+          ".validate": "newData.hasChildren(['type', 'timestamp'])",
+          "type": { ".validate": "newData.isString()" },
+          "timestamp": { ".validate": "newData.isNumber()" },
+          "read": { ".validate": "newData.isBoolean() || !newData.exists()" }
+        }
+      }
+    }
+  }
+}

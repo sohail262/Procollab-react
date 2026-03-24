@@ -20,11 +20,16 @@ import {
     Trash2,
     LayoutDashboard,
     Activity,
-    FileText
+    FileText,
+    Users,
 } from 'lucide-react'
 import { doc, getDoc, collection, query, where, getDocs, setDoc, serverTimestamp, addDoc, deleteDoc } from 'firebase/firestore'
 import { db, auth } from '@/lib/firebase'
 import { useToast } from '@/hooks/use-toast'
+import {
+    acceptConnectionRequest,
+    rejectConnectionRequest,
+} from '@/services/connectionService'
 
 interface UserProfile {
     id: string
@@ -61,6 +66,12 @@ interface Application {
     appliedAt: any
 }
 
+interface NetworkFriend {
+    uid: string
+    displayName: string
+    photoURL?: string
+}
+
 export default function Profile() {
     const { id } = useParams()
     const { user: currentUser, logout } = useAuth()
@@ -71,9 +82,12 @@ export default function Profile() {
     const [projects, setProjects] = useState<Project[]>([])
     const [applications, setApplications] = useState<Application[]>([])
     const [loading, setLoading] = useState(true)
-    const [connectionStatus, setConnectionStatus] = useState<'none' | 'pending' | 'connected'>('none')
+    const [connectionStatus, setConnectionStatus] = useState<
+        'none' | 'pending_out' | 'pending_in' | 'connected'
+    >('none')
     const [actionLoading, setActionLoading] = useState(false)
     const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
+    const [networkFriends, setNetworkFriends] = useState<NetworkFriend[]>([])
 
     const isOwnProfile = !id || (currentUser && id === currentUser.uid)
     const profileId = id || currentUser?.uid
@@ -103,6 +117,28 @@ export default function Profile() {
                 })) as Project[]
                 setProjects(projectsData)
 
+                setNetworkFriends([])
+                const friendsSnap = await getDocs(collection(db, 'users', profileId, 'friends'))
+                const networkList = await Promise.all(
+                    friendsSnap.docs.map(async (fd) => {
+                        const uid = fd.id
+                        const fdata = fd.data()
+                        const us = await getDoc(doc(db, 'users', uid))
+                        const u = us.exists() ? us.data() : {}
+                        const displayName =
+                            (typeof fdata.name === 'string' && fdata.name.trim()) ||
+                            `${(u as { firstName?: string }).firstName || ''} ${(u as { lastName?: string }).lastName || ''}`.trim() ||
+                            (u as { email?: string }).email ||
+                            'Member'
+                        return {
+                            uid,
+                            displayName,
+                            photoURL: (u as { photoURL?: string }).photoURL,
+                        } as NetworkFriend
+                    })
+                )
+                setNetworkFriends(networkList)
+
                 // Load applications if own profile
                 if (isOwnProfile) {
                     const appsQuery = query(
@@ -118,18 +154,34 @@ export default function Profile() {
 
                 // Check connection status if viewing someone else
                 if (!isOwnProfile && currentUser) {
-                    // Check if already friends (only check current user's own data)
                     const friendDoc = await getDoc(doc(db, 'users', currentUser.uid, 'friends', profileId))
                     if (friendDoc.exists()) {
                         setConnectionStatus('connected')
                     } else {
-                        // Check if request sent (only check current user's own sent requests)
-                        const sentRequestsRef = collection(db, 'users', currentUser.uid, 'connectionRequests')
-                        const sentRequestsSnapshot = await getDocs(sentRequestsRef)
-                        const hasSentRequest = sentRequestsSnapshot.docs.some(doc => doc.id === profileId)
-                        
-                        if (hasSentRequest) {
-                            setConnectionStatus('pending')
+                        const outgoingRef = doc(
+                            db,
+                            'users',
+                            profileId,
+                            'connectionRequests',
+                            currentUser.uid
+                        )
+                        const outgoingSnap = await getDoc(outgoingRef)
+                        if (outgoingSnap.exists()) {
+                            setConnectionStatus('pending_out')
+                        } else {
+                            const incomingRef = doc(
+                                db,
+                                'users',
+                                currentUser.uid,
+                                'connectionRequests',
+                                profileId
+                            )
+                            const incomingSnap = await getDoc(incomingRef)
+                            if (incomingSnap.exists()) {
+                                setConnectionStatus('pending_in')
+                            } else {
+                                setConnectionStatus('none')
+                            }
                         }
                     }
                 }
@@ -181,9 +233,39 @@ export default function Profile() {
                 }
             })
 
-            setConnectionStatus('pending')
+            setConnectionStatus('pending_out')
         } catch (error) {
             console.error('Error sending connection request:', error)
+        } finally {
+            setActionLoading(false)
+        }
+    }
+
+    const handleAcceptIncomingOnProfile = async () => {
+        if (!currentUser || !profile || !id) return
+        try {
+            setActionLoading(true)
+            await acceptConnectionRequest(currentUser.uid, profile.id)
+            setConnectionStatus('connected')
+            toast({ title: 'Connected', description: 'You are now collaborators.' })
+        } catch (e) {
+            console.error(e)
+            toast({ title: 'Could not accept', variant: 'destructive' })
+        } finally {
+            setActionLoading(false)
+        }
+    }
+
+    const handleRejectIncomingOnProfile = async () => {
+        if (!currentUser || !profile || !id) return
+        try {
+            setActionLoading(true)
+            await rejectConnectionRequest(currentUser.uid, profile.id)
+            setConnectionStatus('none')
+            toast({ title: 'Request declined' })
+        } catch (e) {
+            console.error(e)
+            toast({ title: 'Could not decline', variant: 'destructive' })
         } finally {
             setActionLoading(false)
         }
@@ -256,11 +338,31 @@ export default function Profile() {
                                             <Check className="h-4 w-4 mr-2" />
                                             Connected
                                         </Button>
-                                    ) : connectionStatus === 'pending' ? (
+                                    ) : connectionStatus === 'pending_out' ? (
                                         <Button variant="outline" disabled>
                                             <Check className="h-4 w-4 mr-2" />
-                                            Request Sent
+                                            Request sent
                                         </Button>
+                                    ) : connectionStatus === 'pending_in' ? (
+                                        <div className="flex gap-2">
+                                            <Button
+                                                className="bg-green-600 hover:bg-green-700"
+                                                onClick={handleAcceptIncomingOnProfile}
+                                                disabled={actionLoading}
+                                            >
+                                                {actionLoading ? (
+                                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                                ) : (
+                                                    <>
+                                                        <Check className="h-4 w-4 mr-2" />
+                                                        Accept
+                                                    </>
+                                                )}
+                                            </Button>
+                                            <Button variant="outline" onClick={handleRejectIncomingOnProfile} disabled={actionLoading}>
+                                                Decline
+                                            </Button>
+                                        </div>
                                     ) : (
                                         <Button onClick={handleConnect} disabled={actionLoading}>
                                             {actionLoading ? (
@@ -346,6 +448,13 @@ export default function Profile() {
                     </div>
                 </div>
 
+                {isOwnProfile && (
+                    <p className="text-sm text-muted-foreground mb-4">
+                        Connection invites you send or receive are in the header under the{' '}
+                        <span className="font-medium text-foreground">connections</span> icon (incoming and sent, including withdraw).
+                    </p>
+                )}
+
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                     {/* Left Column */}
                     <div className="space-y-6">
@@ -358,6 +467,47 @@ export default function Profile() {
                                 <p className="text-gray-600 dark:text-gray-300 whitespace-pre-wrap">
                                     {profile.bio || 'No bio available.'}
                                 </p>
+                            </CardContent>
+                        </Card>
+
+                        <Card>
+                            <CardHeader>
+                                <CardTitle className="text-lg flex items-center gap-2">
+                                    <Users className="h-4 w-4" />
+                                    Network
+                                </CardTitle>
+                            </CardHeader>
+                            <CardContent>
+                                {networkFriends.length === 0 ? (
+                                    <p className="text-sm text-muted-foreground">
+                                        {isOwnProfile
+                                            ? 'Accepted collaborators appear here. Send requests from Discover or profiles.'
+                                            : 'No public connections to show.'}
+                                    </p>
+                                ) : (
+                                    <div className="flex flex-wrap gap-4">
+                                        {networkFriends.map((f) => (
+                                            <button
+                                                key={f.uid}
+                                                type="button"
+                                                onClick={() => navigate(`/profile/${f.uid}`)}
+                                                className="flex flex-col items-center gap-1.5 w-[76px] group"
+                                            >
+                                                <img
+                                                    src={
+                                                        f.photoURL ||
+                                                        `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(f.uid)}`
+                                                    }
+                                                    alt=""
+                                                    className="w-14 h-14 rounded-full border border-border object-cover group-hover:border-primary transition-colors"
+                                                />
+                                                <span className="text-xs text-center line-clamp-2 w-full group-hover:text-primary">
+                                                    {f.displayName}
+                                                </span>
+                                            </button>
+                                        ))}
+                                    </div>
+                                )}
                             </CardContent>
                         </Card>
 

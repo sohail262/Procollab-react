@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { DashboardLayout } from '@/components/layout/DashboardLayout'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
+import { TemplateGallery } from '@/components/dashboard/TemplateGallery'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
@@ -31,7 +32,6 @@ import type { ProjectMethodology, Task } from '@/types/project'
 import { KanbanBoard } from '@/components/dashboard/KanbanBoard'
 import { GanttChart } from '@/components/dashboard/GanttChart'
 import { ProjectCalendar } from '@/components/dashboard/ProjectCalendar'
-import { TimeTracking } from '@/components/dashboard/TimeTracking'
 import { ResourceManagement } from '@/components/dashboard/ResourceManagement'
 import { AIInsights } from '@/components/dashboard/AIInsights'
 import { Analytics } from '@/components/dashboard/Analytics'
@@ -80,6 +80,7 @@ export function ProjectDashboard() {
     const [tasks, setTasks] = useState<Task[]>([])
     const [activeTab, setActiveTab] = useState('overview')
     const [methodology, setMethodology] = useState<ProjectMethodology>('agile')
+    const [showTemplates, setShowTemplates] = useState(false)
 
     useEffect(() => {
         if (id && user) {
@@ -142,7 +143,6 @@ export function ProjectDashboard() {
         kanban: 'tasks',
         gantt: 'gantt',
         calendar: 'calendar',
-        time: 'dashboard', // Time tracking is part of dashboard
         team: 'dashboard', // Team view is part of dashboard
         analytics: 'dashboard', // Analytics is part of dashboard
         whiteboard: 'whiteboard',
@@ -212,6 +212,9 @@ export function ProjectDashboard() {
                                 New Task
                             </Button>
                         )}
+                        <Button variant="outline" onClick={() => setShowTemplates(true)}>
+                            📦 Templates
+                        </Button>
                         {(isOwner || isAdmin || canManageTeam) && (
                             <Button variant="outline" size="icon" onClick={() => navigate(`/project/${id}/manage-team`)}>
                                 <Settings className="h-4 w-4" />
@@ -246,12 +249,6 @@ export function ProjectDashboard() {
                                 <TabsTrigger value="calendar" className="data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:shadow-none rounded-none h-full px-4">
                                     <CalendarDays className="h-4 w-4 mr-2" />
                                     Calendar
-                                </TabsTrigger>
-                            )}
-                            {canViewTab('time') && (
-                                <TabsTrigger value="time" className="data-[state=active]:bg-transparent data-[state=active]:border-b-2 data-[state=active]:border-primary data-[state=active]:shadow-none rounded-none h-full px-4">
-                                    <Clock className="h-4 w-4 mr-2" />
-                                    Time
                                 </TabsTrigger>
                             )}
                             {canViewTab('team') && (
@@ -301,7 +298,7 @@ export function ProjectDashboard() {
                                 <>
                                     {!canWriteTab('overview') && <ReadOnlyNotice />}
                                     {/* Stats Overview */}
-                                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                         <Card>
                                             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                                                 <CardTitle className="text-sm font-medium">Total Progress</CardTitle>
@@ -354,29 +351,6 @@ export function ProjectDashboard() {
                                                 <p className="text-xs text-muted-foreground mt-1">
                                                     {project?.maxMembers ? `${project.maxMembers - (project.currentMembers || 0)} spots remaining` : 'Open for applications'}
                                                 </p>
-                                            </CardContent>
-                                        </Card>
-                                        <Card>
-                                            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                                                <CardTitle className="text-sm font-medium">Time Logged</CardTitle>
-                                                <Clock className="h-4 w-4 text-muted-foreground" />
-                                            </CardHeader>
-                                            <CardContent>
-                                                {(() => {
-                                                    const totalHours = tasks.reduce((sum, task) => sum + (task.timeSpent || 0), 0);
-                                                    const hours = Math.floor(totalHours);
-                                                    const minutes = Math.round((totalHours - hours) * 60);
-                                                    return (
-                                                        <>
-                                                            <div className="text-2xl font-bold">
-                                                                {hours}h {minutes > 0 ? `${minutes}m` : ''}
-                                                            </div>
-                                                            <p className="text-xs text-muted-foreground mt-1">
-                                                                Total time tracked
-                                                            </p>
-                                                        </>
-                                                    );
-                                                })()}
                                             </CardContent>
                                         </Card>
                                     </div>
@@ -446,17 +420,6 @@ export function ProjectDashboard() {
                             )}
                         </TabsContent>
 
-                        <TabsContent value="time">
-                            {!canViewTab('time') ? (
-                                <AccessDenied feature="Time Tracking" />
-                            ) : (
-                                <>
-                                    {!canWriteTab('time') && <ReadOnlyNotice />}
-                                    <TimeTracking readOnly={!canWriteTab('time')} />
-                                </>
-                            )}
-                        </TabsContent>
-
                         <TabsContent value="team">
                             {!canViewTab('team') ? (
                                 <AccessDenied feature="Team" />
@@ -519,7 +482,21 @@ export function ProjectDashboard() {
                     </div>
                 </Tabs>
             </div>
+
+            <TemplateGallery
+                open={showTemplates}
+                onClose={() => setShowTemplates(false)}
+                projectId={id!}
+                projectName={project?.title ?? ''}
+                onApplied={(updatedName: string) => {
+                    setProject((prev: any) => ({
+                        ...prev,
+                        title: updatedName   // updates header instantly
+                    }))
+                    setShowTemplates(false)
+                    setActiveTab('kanban')   // jumps to board after applying
+                }}
+            />
         </DashboardLayout>
     )
 }
-

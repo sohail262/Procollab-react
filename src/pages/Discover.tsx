@@ -22,7 +22,17 @@ import {
     ExternalLink,
     Check,
     BookOpen,
-    Loader2
+    Loader2,
+    Bot,
+    Globe,
+    Cloud,
+    ShieldCheck,
+    BarChart2,
+    Link2,
+    Monitor,
+    HeartPulse,
+    Scale,
+    type LucideIcon
 } from 'lucide-react'
 import {
     collection,
@@ -37,6 +47,8 @@ import {
     serverTimestamp
 } from 'firebase/firestore'
 import { db, auth } from '@/lib/firebase'
+import { hasOutgoingRequestTo } from '@/services/connectionService'
+import { useToast } from '@/hooks/use-toast'
 
 interface Person {
     id: string
@@ -73,16 +85,23 @@ interface TrendingTopic {
     time: number
     category: string
     color: string
-    icon: string
+    icon: string  // lucide icon key
     tags: string[]
     source: string
+    sourceLabel?: string
 }
 
 export function Discover() {
     const navigate = useNavigate()
+    const { toast } = useToast()
     const [loading, setLoading] = useState(true)
     const [refreshingTopics, setRefreshingTopics] = useState(false)
-    const [connectedUsers, setConnectedUsers] = useState<Set<string>>(new Set())
+    /** Already friends — hidden from Discover list */
+    const [friendIds, setFriendIds] = useState<Set<string>>(new Set())
+    /** I sent a request; show Request sent (path: users/{them}/connectionRequests/{me}) */
+    const [outgoingPendingIds, setOutgoingPendingIds] = useState<Set<string>>(new Set())
+    /** They sent me a request; show Accept / Reject (path: users/{me}/connectionRequests/{them}) */
+    const [incomingPendingIds, setIncomingPendingIds] = useState<Set<string>>(new Set())
     const [fadingUsers, setFadingUsers] = useState<Set<string>>(new Set())
 
     // Search states
@@ -113,17 +132,48 @@ export function Discover() {
         'Law'
     ]
 
+    const checkConnectionStatuses = useCallback(async (people: Person[]) => {
+        if (!auth.currentUser) return
+
+        const currentUserId = auth.currentUser.uid
+
+        try {
+            const friendsSnapshot = await getDocs(collection(db, 'users', currentUserId, 'friends'))
+            const friendSet = new Set(friendsSnapshot.docs.map(d => d.id))
+
+            const incomingSnapshot = await getDocs(collection(db, 'users', currentUserId, 'connectionRequests'))
+            const incomingSet = new Set(incomingSnapshot.docs.map(d => d.id))
+
+            const others = people.filter(p => p.id !== currentUserId)
+            const outgoingResults = await Promise.all(
+                others.map(async (p) =>
+                    (await hasOutgoingRequestTo(currentUserId, p.id)) ? p.id : null
+                )
+            )
+            const outgoingSet = new Set(outgoingResults.filter(Boolean) as string[])
+
+            setFriendIds(prev => new Set([...prev, ...friendSet]))
+            setIncomingPendingIds(prev => new Set([...prev, ...incomingSet]))
+            setOutgoingPendingIds(prev => new Set([...prev, ...outgoingSet]))
+        } catch (error) {
+            console.error('Error checking connection statuses:', error)
+        }
+    }, [])
+
     // Load more functions for infinite scroll
     const loadMorePeople = useCallback(async (): Promise<boolean> => {
         try {
             const result = await loadPaginatedUsers(peopleState.lastDoc)
             peopleActions.addItems(result.items, result.lastDoc as any)
+            if (result.items.length > 0) {
+                await checkConnectionStatuses(result.items)
+            }
             return result.hasMore
         } catch (error) {
             console.error('Error loading more people:', error)
             return false
         }
-    }, [peopleState.lastDoc, peopleActions])
+    }, [peopleState.lastDoc, peopleActions, checkConnectionStatuses])
 
     const loadMoreProjects = useCallback(async (): Promise<boolean> => {
         try {
@@ -226,50 +276,6 @@ export function Discover() {
         loadMoreProjects()
     }, [statusFilter, debouncedProjectsSearch])
 
-    const checkConnectionStatuses = async (people: Person[]) => {
-        if (!auth.currentUser) return
-
-        const currentUserId = auth.currentUser.uid
-        const connectedSet = new Set<string>()
-
-        try {
-            // Only check the current user's own data (which they have permission to access)
-            
-            // Get current user's friends
-            const friendsRef = collection(db, 'users', currentUserId, 'friends')
-            const friendsSnapshot = await getDocs(friendsRef)
-            const friendIds = new Set(friendsSnapshot.docs.map(doc => doc.id))
-
-            // Get current user's sent connection requests
-            const sentRequestsRef = collection(db, 'users', currentUserId, 'connectionRequests')
-            const sentRequestsSnapshot = await getDocs(sentRequestsRef)
-            const sentRequestIds = new Set(sentRequestsSnapshot.docs.map(doc => doc.id))
-
-            // Check each person against current user's data only
-            people.forEach(person => {
-                if (person.id === currentUserId) return
-
-                // Check if they are already friends
-                if (friendIds.has(person.id)) {
-                    connectedSet.add(person.id)
-                    return
-                }
-
-                // Check if current user has sent a request to this person
-                if (sentRequestIds.has(person.id)) {
-                    connectedSet.add(person.id)
-                    return
-                }
-            })
-
-            setConnectedUsers(prev => new Set([...prev, ...connectedSet]))
-        } catch (error) {
-            console.error('Error checking connection statuses:', error)
-            // Gracefully handle the error by setting empty connections
-            setConnectedUsers(new Set())
-        }
-    }
-
     // --- Trending Topics Logic ---
 
     const fetchTopHackerNewsStories = async (count = 20) => {
@@ -324,18 +330,82 @@ export function Discover() {
         }
     }
 
+    const fetchNewsAPIArticles = async (category: 'health' | 'science' | 'technology' | 'business', label: string, count = 10) => {
+        try {
+            const apiKey = import.meta.env.VITE_NEWS_API_KEY
+            console.log(`[NewsAPI] Fetching ${label} (category: ${category})...`)
+            const url = `https://newsapi.org/v2/top-headlines?country=us&category=${category}&pageSize=${count}&apiKey=${apiKey}`
+            console.log(`[NewsAPI] URL:`, url.replace(apiKey, '***'))
+            const response = await fetch(url)
+            console.log(`[NewsAPI] Response status for ${label}:`, response.status)
+            const data = await response.json()
+            console.log(`[NewsAPI] Response body for ${label}:`, data)
+            if (data.status !== 'ok') {
+                console.warn(`[NewsAPI] Non-ok status for ${label}:`, data.status, data.message)
+                return []
+            }
+            const articles = (data.articles || [])
+                .filter((a: any) => a.title && a.url && a.title !== '[Removed]')
+                .map((a: any, i: number) => ({
+                    id: `newsapi_${category}_${i}_${Date.now()}`,
+                    title: a.title,
+                    url: a.url,
+                    time: new Date(a.publishedAt || Date.now()).getTime() / 1000,
+                    tags: [],
+                    description: a.description || a.content || '',
+                    source: 'newsapi',
+                    sourceLabel: label,
+                    _newsCategory: category
+                }))
+            console.log(`[NewsAPI] ${label} — ${articles.length} articles fetched`)
+            return articles
+        } catch (error) {
+            console.error(`[NewsAPI] Error fetching ${label}:`, error)
+            return []
+        }
+    }
+
     const createTopicsFromStories = (stories: any[]) => {
         const categoryMap: Record<string, any> = {
-            'ai': { title: 'Artificial Intelligence', color: 'indigo', icon: '🤖', keywords: ['ai', 'artificial intelligence', 'machine learning', 'ml', 'neural', 'deep learning', 'llm', 'gpt', 'chatgpt', 'transformer'] },
-            'web': { title: 'Web Development', color: 'blue', icon: '🌐', keywords: ['javascript', 'react', 'vue', 'angular', 'node', 'web', 'frontend', 'backend', 'api', 'framework'] },
-            'devops': { title: 'DevOps & Cloud', color: 'green', icon: '☁️', keywords: ['docker', 'kubernetes', 'devops', 'cloud', 'aws', 'azure', 'gcp', 'ci/cd', 'deployment', 'infrastructure'] },
-            'security': { title: 'Cybersecurity', color: 'red', icon: '🔒', keywords: ['security', 'cyber', 'encryption', 'vulnerability', 'privacy', 'breach', 'authentication', 'oauth'] },
-            'data': { title: 'Data Science', color: 'purple', icon: '📊', keywords: ['data', 'database', 'sql', 'nosql', 'analytics', 'big data', 'data science', 'visualization'] },
-            'blockchain': { title: 'Blockchain & Web3', color: 'yellow', icon: '⛓️', keywords: ['blockchain', 'crypto', 'bitcoin', 'ethereum', 'web3', 'defi', 'nft', 'smart contract'] },
-            'default': { title: 'Technology', color: 'indigo', icon: '💻', keywords: [] }
+            'ai': { title: 'Artificial Intelligence', color: 'indigo', icon: 'bot', keywords: ['ai', 'artificial intelligence', 'machine learning', 'ml', 'neural', 'deep learning', 'llm', 'gpt', 'chatgpt', 'transformer'] },
+            'web': { title: 'Web Development', color: 'blue', icon: 'globe', keywords: ['javascript', 'react', 'vue', 'angular', 'node', 'web', 'frontend', 'backend', 'api', 'framework'] },
+            'devops': { title: 'DevOps & Cloud', color: 'green', icon: 'cloud', keywords: ['docker', 'kubernetes', 'devops', 'cloud', 'aws', 'azure', 'gcp', 'ci/cd', 'deployment', 'infrastructure'] },
+            'security': { title: 'Cybersecurity', color: 'red', icon: 'shield', keywords: ['security', 'cyber', 'encryption', 'vulnerability', 'privacy', 'breach', 'authentication', 'oauth'] },
+            'data': { title: 'Data Science', color: 'purple', icon: 'barchart', keywords: ['data', 'database', 'sql', 'nosql', 'analytics', 'big data', 'data science', 'visualization'] },
+            'blockchain': { title: 'Blockchain & Web3', color: 'yellow', icon: 'link2', keywords: ['blockchain', 'crypto', 'bitcoin', 'ethereum', 'web3', 'defi', 'nft', 'smart contract'] },
+            'default': { title: 'Technology', color: 'indigo', icon: 'monitor', keywords: [] }
         }
 
         return stories.map(story => {
+            // NewsAPI health/law articles get their own category
+            if (story.source === 'newsapi' && story._newsCategory) {
+                const isHealth = story._newsCategory === 'health'
+                let tags: string[] = []
+                if (story.tags && Array.isArray(story.tags)) {
+                    tags = story.tags.slice(0, 3).map((tag: any) => typeof tag === 'string' ? tag : tag.name || tag)
+                }
+                let description = story.description || ''
+                if (!description || description === story.title) {
+                    description = isHealth
+                        ? 'Latest health and medical news.'
+                        : 'Latest science and policy developments.'
+                }
+                if (description.length > 150) description = description.substring(0, 150) + '...'
+                return {
+                    id: story.id,
+                    title: story.title,
+                    description,
+                    url: story.url,
+                    time: story.time || Date.now() / 1000,
+                    category: isHealth ? 'Health & Medicine' : 'Law & Policy',
+                    color: isHealth ? 'rose' : 'amber',
+                    icon: isHealth ? 'heartpulse' : 'scale',
+                    tags,
+                    source: 'newsapi',
+                    sourceLabel: story.sourceLabel || (isHealth ? 'Health India' : 'Law India')
+                }
+            }
+
             const titleLower = story.title ? story.title.toLowerCase() : ''
             let category = categoryMap.default
 
@@ -351,11 +421,9 @@ export function Discover() {
                 tags = story.tags.slice(0, 3).map((tag: any) => typeof tag === 'string' ? tag : tag.name || tag)
             }
 
-            // Generate meaningful descriptions based on category and title
             let description = story.description || ''
             
             if (!description || description === story.title) {
-                // Generate contextual descriptions based on category
                 const categoryDescriptions: Record<string, string> = {
                     'Artificial Intelligence': 'Explore the latest developments in AI technology, machine learning algorithms, and their real-world applications.',
                     'Web Development': 'Discover new frameworks, tools, and best practices for building modern web applications.',
@@ -365,11 +433,9 @@ export function Discover() {
                     'Blockchain & Web3': 'Understand cryptocurrency trends, blockchain technology, and decentralized applications.',
                     'Technology': 'Get insights into the latest tech trends, innovations, and industry developments.'
                 }
-                
                 description = categoryDescriptions[category.title] || 'Stay updated with the latest technology trends and developments in the tech industry.'
             }
             
-            // Truncate if too long
             if (description.length > 150) {
                 description = description.substring(0, 150) + '...'
             }
@@ -377,13 +443,13 @@ export function Discover() {
             return {
                 id: story.source ? `${story.source}_${story.id}` : `${story.id || Date.now()}`,
                 title: story.title,
-                description: description,
+                description,
                 url: story.url,
                 time: story.time || Date.now() / 1000,
                 category: category.title,
                 color: category.color,
                 icon: category.icon,
-                tags: tags,
+                tags,
                 source: story.source || 'unknown'
             }
         })
@@ -391,12 +457,14 @@ export function Discover() {
 
     const loadTrendingTopics = async () => {
         try {
-            const [hackerNewsStories, devToArticles] = await Promise.all([
+            const [hackerNewsStories, devToArticles, healthArticles, lawArticles] = await Promise.all([
                 fetchTopHackerNewsStories(20).catch(() => []),
-                fetchDevToArticles(10).catch(() => [])
+                fetchDevToArticles(10).catch(() => []),
+                fetchNewsAPIArticles('health', 'Health', 8).catch(() => []),
+                fetchNewsAPIArticles('science', 'Science & Law', 8).catch(() => [])
             ])
 
-            const allStories = [...hackerNewsStories, ...devToArticles]
+            const allStories = [...hackerNewsStories, ...devToArticles, ...healthArticles, ...lawArticles]
 
             if (allStories.length === 0) {
                 return []
@@ -456,12 +524,7 @@ export function Discover() {
             // Check if request already exists
             const requestDoc = await getDoc(requestRef)
             if (requestDoc.exists()) {
-                console.log('Request already sent')
-                setConnectedUsers(prev => {
-                    const newSet = new Set(prev)
-                    newSet.add(userId)
-                    return newSet
-                })
+                setOutgoingPendingIds(prev => new Set([...prev, userId]))
                 return
             }
 
@@ -494,28 +557,24 @@ export function Discover() {
                 }
             })
 
-            // Add to fading users first (shows "Sent" with fade animation)
+            setOutgoingPendingIds(prev => new Set([...prev, userId]))
             setFadingUsers(prev => {
-                const newSet = new Set(prev)
-                newSet.add(userId)
-                return newSet
+                const next = new Set(prev)
+                next.add(userId)
+                return next
             })
-
-            // After 5 seconds, move to connectedUsers (removes from view)
             setTimeout(() => {
-                setConnectedUsers(prev => {
-                    const newSet = new Set(prev)
-                    newSet.add(userId)
-                    return newSet
-                })
                 setFadingUsers(prev => {
-                    const newSet = new Set(prev)
-                    newSet.delete(userId)
-                    return newSet
+                    const next = new Set(prev)
+                    next.delete(userId)
+                    return next
                 })
-            }, 5000)
+            }, 2000)
+
+            toast({ title: 'Request sent', description: 'They will be notified.' })
         } catch (error) {
             console.error('Error sending connection request:', error)
+            toast({ title: 'Could not send request', variant: 'destructive' })
         }
     }
 
@@ -525,8 +584,12 @@ export function Discover() {
             return false
         }
 
-        // Filter out users who already received a connection request from current user
-        if (connectedUsers.has(person.id)) {
+        if (friendIds.has(person.id)) {
+            return false
+        }
+
+        // Pending connections are handled in the header (incoming / sent); keep Discover clean
+        if (outgoingPendingIds.has(person.id) || incomingPendingIds.has(person.id)) {
             return false
         }
 
@@ -566,7 +629,12 @@ export function Discover() {
             {/* Discover People Section */}
             <section id="discover-people" className="mb-12">
                 <div className="flex flex-col lg:flex-row lg:justify-between lg:items-center mb-6 gap-4">
-                    <h2 className="text-2xl font-bold">Find Collaborators</h2>
+                    <div>
+                        <h2 className="text-2xl font-bold">Find Collaborators</h2>
+                        <p className="text-sm text-muted-foreground mt-1 max-w-xl">
+                            Invites you send or receive are in the connections menu (header). Withdraw sent requests from the Sent tab there.
+                        </p>
+                    </div>
                     <div className="flex flex-col sm:flex-row gap-3">
                         <div className="relative flex-1 sm:flex-none">
                             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-500" />
@@ -610,21 +678,21 @@ export function Discover() {
                             return (
                                 <Card
                                     key={person.id}
-                                    className={`hover:shadow-lg transition-all duration-500 group ${isFading ? 'opacity-50 scale-95 pointer-events-none' : ''
+                                    className={`hover:shadow-lg transition-all duration-500 group ${isFading ? 'opacity-90' : ''
                                         }`}
                                 >
                                     <CardContent className="p-5">
-                                        <div className="flex items-start justify-between mb-4">
-                                            <div className="flex items-center gap-3">
+                                        <div className="flex items-start justify-between mb-4 gap-2">
+                                            <div className="flex items-center gap-3 min-w-0">
                                                 <img
                                                     src={person.photoURL || `https://api.dicebear.com/7.x/${person.avatarStyle || 'avataaars'}/svg?seed=${encodeURIComponent(person.avatarSeed || person.email || person.id)}`}
                                                     alt={`${person.firstName || ''} ${person.lastName || ''}`}
-                                                    className="w-12 h-12 rounded-full border border-gray-200 dark:border-gray-700 cursor-pointer hover:border-blue-500 transition-colors"
+                                                    className="w-12 h-12 rounded-full border border-gray-200 dark:border-gray-700 cursor-pointer hover:border-blue-500 transition-colors shrink-0"
                                                     onClick={() => navigate(`/profile/${person.id}`)}
                                                 />
-                                                <div>
+                                                <div className="min-w-0">
                                                     <h3
-                                                        className="font-semibold text-gray-900 dark:text-white cursor-pointer hover:text-blue-600 transition-colors"
+                                                        className="font-semibold text-gray-900 dark:text-white cursor-pointer hover:text-blue-600 transition-colors truncate"
                                                         onClick={() => navigate(`/profile/${person.id}`)}
                                                     >
                                                         {person.firstName} {person.lastName}
@@ -632,25 +700,27 @@ export function Discover() {
                                                     <p className="text-xs text-gray-500 dark:text-gray-400">{person.role}</p>
                                                 </div>
                                             </div>
-                                            <Button
-                                                size="sm"
-                                                variant={isFading ? "outline" : "secondary"}
-                                                className={`h-8 px-3 text-xs ${isFading ? 'text-green-600 border-green-200 bg-green-50 dark:bg-green-900/30 dark:border-green-800 dark:text-green-400' : ''}`}
-                                                onClick={() => handleConnect(person.id)}
-                                                disabled={isFading}
-                                            >
-                                                {isFading ? (
-                                                    <>
-                                                        <Check className="h-3 w-3 mr-1" />
-                                                        Request Sent!
-                                                    </>
-                                                ) : (
-                                                    <>
-                                                        <UserPlus className="h-3 w-3 mr-1" />
-                                                        Connect
-                                                    </>
-                                                )}
-                                            </Button>
+                                            <div className="flex flex-col items-end gap-1 shrink-0">
+                                                <Button
+                                                    size="sm"
+                                                    variant={isFading ? 'outline' : 'secondary'}
+                                                    className={`h-8 px-3 text-xs ${isFading ? 'text-green-600 border-green-200 bg-green-50 dark:bg-green-900/30 dark:border-green-800 dark:text-green-400' : ''}`}
+                                                    onClick={() => handleConnect(person.id)}
+                                                    disabled={isFading}
+                                                >
+                                                    {isFading ? (
+                                                        <>
+                                                            <Check className="h-3 w-3 mr-1" />
+                                                            Request sent
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <UserPlus className="h-3 w-3 mr-1" />
+                                                            Connect
+                                                        </>
+                                                    )}
+                                                </Button>
+                                            </div>
                                         </div>
 
                                         <div className="space-y-3">
@@ -800,12 +870,25 @@ export function Discover() {
                             <p className="text-gray-500">No trending topics yet</p>
                         </div>
                     ) : (
-                        topicsState.items.map((topic) => (
+                        topicsState.items.map((topic) => {
+                            const iconMap: Record<string, LucideIcon> = {
+                                bot: Bot,
+                                globe: Globe,
+                                cloud: Cloud,
+                                shield: ShieldCheck,
+                                barchart: BarChart2,
+                                link2: Link2,
+                                monitor: Monitor,
+                                heartpulse: HeartPulse,
+                                scale: Scale
+                            }
+                            const TopicIcon = iconMap[topic.icon] || Monitor
+                            return (
                             <Card key={topic.id} className="hover:shadow-lg transition-all hover:border-blue-500">
                                 <CardContent className="p-6">
                                     <div className="flex items-center justify-between mb-4">
-                                        <span className="text-2xl">{topic.icon}</span>
-                                        <Badge variant="secondary" className="text-xs">{topic.source}</Badge>
+                                        <TopicIcon className="h-6 w-6 text-gray-600 dark:text-gray-300" />
+                                        <Badge variant="secondary" className="text-xs">{topic.sourceLabel || topic.source}</Badge>
                                     </div>
                                     <h3 className="text-lg font-bold mb-3 line-clamp-2" title={topic.title}>
                                         {topic.title}
@@ -840,7 +923,8 @@ export function Discover() {
                                     </div>
                                 </CardContent>
                             </Card>
-                        ))
+                            )
+                        })
                     )}
                     
                     {/* Infinite scroll sentinel for trending topics */}
