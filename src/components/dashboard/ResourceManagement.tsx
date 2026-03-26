@@ -136,7 +136,17 @@ const HEALTH_CONFIG = {
     overloaded: { label: 'Overloaded', color: 'text-orange-500', bg: 'bg-orange-100 dark:bg-orange-900/20',border: 'border-orange-200', icon: Flame        },
     blocked:    { label: 'Blocked',    color: 'text-red-500',    bg: 'bg-red-100 dark:bg-red-900/20',      border: 'border-red-200',    icon: AlertTriangle},
 }
-
+function normalizeRole(raw: string | undefined): string {
+    if (!raw) return 'Member'
+    const map: Record<string, string> = {
+        'owner':        'Project Lead',
+        'project lead': 'Project Lead',
+        'admin':        'Admin',
+        'member':       'Member',
+        'viewer':       'Viewer',
+    }
+    return map[raw.toLowerCase()] ?? raw
+}
 // ─── Safe Timestamp → Date ────────────────────────────────────────────────────
 const toDate = (val: any): Date | null => {
     if (!val) return null
@@ -1054,22 +1064,33 @@ export function ResourceManagement({ readOnly = false }: ResourceManagementProps
     const [filterHealth,setFilterHealth]= useState('all')
     const [selectedMember, setSelectedMember] = useState<UserProfile | null>(null)
 
-    // ── Listeners ─────────────────────────────────────────────────────────────
-    useEffect(() => {
-        if (!projectId || !user) return
+  useEffect(() => {
+    if (!projectId || !user) return
 
-        // Project doc → team members
-        const projUnsub = onSnapshot(
-            doc(db, 'projects', projectId),
-            async snap => {
-                if (!snap.exists()) { setLoading(false); return }
-                const members = snap.data().teamMembers ?? {}
-                setRawMembers(members)
+    // ✅ FIX: Read from members sub-collection (where ManageTeam writes)
+    // Also watch root doc for role changes synced there
+    const membersUnsub = onSnapshot(
+        collection(db, 'projects', projectId, 'members'),
+        async snap => {
+            if (snap.empty) {
+                // ── Fallback: try teamMembers map on root doc ──────────────
+                // Handles legacy data written before the sub-collection fix
+                const projSnap = await getDoc(doc(db, 'projects', projectId))
+                if (!projSnap.exists()) { setLoading(false); return }
 
-                // Fetch user profiles
+                const teamMembersMap = projSnap.data().teamMembers ?? {}
+                if (Object.keys(teamMembersMap).length === 0) {
+                    setRawMembers({})
+                    setProfiles({})
+                    setLoading(false)
+                    return
+                }
+
+                // Build rawMembers from root doc map as fallback
+                setRawMembers(teamMembersMap)
                 const profileMap: Record<string, any> = {}
                 await Promise.all(
-                    Object.keys(members).map(async uid => {
+                    Object.keys(teamMembersMap).map(async uid => {
                         try {
                             const uSnap = await getDoc(doc(db, 'users', uid))
                             profileMap[uid] = uSnap.exists()
@@ -1082,18 +1103,81 @@ export function ResourceManagement({ readOnly = false }: ResourceManagementProps
                 )
                 setProfiles(profileMap)
                 setLoading(false)
-            },
-            err => { console.error('Team listener:', err); setLoading(false) }
-        )
+                return
+            }
 
-        // Tasks
-        const tasksUnsub = onSnapshot(
-            query(collection(db, 'projects', projectId, 'tasks')),
-            snap => setTasks(snap.docs.map(d => ({ id: d.id, ...d.data() } as Task)))
-        )
+            // ✅ PRIMARY PATH: build rawMembers from sub-collection docs
+            // This matches exactly what ManageTeam writes
+            const membersMap: Record<string, any> = {}
+            snap.docs.forEach(d => {
+                const data = d.data()
+                membersMap[d.id] = {
+                    // Normalize role casing — ManageTeam writes lowercase 'member'
+                    // but ROLE_CONFIG expects 'Member', 'Admin', etc.
+                    role: normalizeRole(data.role),
+                    joinedAt: data.joinedAt,
+                    permissions: data.permissions,
+                    // Keep full data for profile enrichment fallback
+                    _name:   data.name   || data.displayName || '',
+                    _email:  data.email  || '',
+                    _avatar: data.avatar || data.photoURL    || '',
+                }
+            })
+            setRawMembers(membersMap)
 
-        return () => { projUnsub(); tasksUnsub() }
-    }, [projectId, user])
+            // Fetch user profiles for enriched data
+            const profileMap: Record<string, any> = {}
+            await Promise.all(
+                snap.docs.map(async d => {
+                    const uid      = d.id
+                    const subData  = d.data()
+                    try {
+                        const uSnap = await getDoc(doc(db, 'users', uid))
+                        if (uSnap.exists()) {
+                            profileMap[uid] = { uid, ...uSnap.data() }
+                        } else {
+                            // User profile missing — use data from sub-collection doc
+                            profileMap[uid] = {
+                                uid,
+                                displayName: subData.name || subData.displayName || 'Unknown',
+                                email:       subData.email   || '',
+                                photoURL:    subData.avatar  || subData.photoURL || '',
+                                skills:      [],
+                            }
+                        }
+                    } catch {
+                        profileMap[uid] = {
+                            uid,
+                            displayName: subData.name || 'Unknown',
+                            email:       subData.email || '',
+                            photoURL:    subData.avatar || '',
+                            skills:      [],
+                        }
+                    }
+                })
+            )
+            setProfiles(profileMap)
+            setLoading(false)
+        },
+        err => {
+            console.error('Members sub-collection listener:', err)
+            setLoading(false)
+        }
+    )
+
+    // Tasks listener (unchanged)
+    const tasksUnsub = onSnapshot(
+        query(collection(db, 'projects', projectId, 'tasks')),
+        snap => setTasks(
+            snap.docs.map(d => ({ id: d.id, ...d.data() } as Task))
+        )
+    )
+
+    return () => {
+        membersUnsub()
+        tasksUnsub()
+    }
+}, [projectId, user])
 
     // ── Build enriched profiles ───────────────────────────────────────────────
     const members: UserProfile[] = useMemo(() => {
@@ -1192,9 +1276,15 @@ export function ResourceManagement({ readOnly = false }: ResourceManagementProps
 
             return {
                 uid,
-                displayName: profile.displayName ?? profile.name ?? 'Unknown',
-                email:       profile.email    ?? '',
-                photoURL:    profile.photoURL ?? profile.avatar ?? '',
+                displayName: profile.displayName
+                ?? profile.name
+                ?? rawMembers[uid]?._name
+                ?? 'Unknown',
+                email: profile.email ?? rawMembers[uid]?._email ?? '',
+                photoURL: profile.photoURL
+                ?? profile.avatar
+                ?? rawMembers[uid]?._avatar
+                ?? '',
                 role,
                 joinedAt:    typeof memberData === 'object' ? memberData?.joinedAt : null,
                 skills,

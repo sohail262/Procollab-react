@@ -49,7 +49,6 @@ export function EditProject() {
 
     const loadProject = async () => {
         if (!id) return
-
         setLoading(true)
         try {
             const docRef = doc(db, 'projects', id)
@@ -68,13 +67,38 @@ export function EditProject() {
                     return
                 }
 
+                // ✅ Parse duration smartly
+                // Handles 3 cases:
+                // 1. New format: durationValue="3" + durationUnit="months" saved separately
+                // 2. Combined format: duration="3 months"
+                // 3. Old format: duration="3" (just a number)
+                let durationValue = ''
+                let durationUnit = project.durationUnit || 'months'
+
+                if (project.durationValue) {
+                    // Case 1: New format — use directly
+                    durationValue = project.durationValue.toString()
+                    durationUnit = project.durationUnit || 'months'
+                } else if (project.duration) {
+                    const durationStr = project.duration.toString().trim()
+                    const parts = durationStr.split(' ')
+                    if (parts.length >= 2) {
+                        // Case 2: "3 months" — split it
+                        durationValue = parts[0]
+                        durationUnit = parts[1]
+                    } else {
+                        // Case 3: just "3"
+                        durationValue = parts[0]
+                    }
+                }
+
                 setFormData({
                     title: project.title || '',
                     summary: project.summary || '',
                     description: project.description || '',
                     status: project.status || 'recruiting',
-                    duration: project.duration || '',
-                    durationUnit: project.durationUnit || 'months',
+                    duration: durationValue,
+                    durationUnit: durationUnit,
                     teamSize: project.teamSize || 4,
                     primaryDiscipline: project.primaryDiscipline || '',
                     requiredSkills: project.requiredSkills?.join(', ') || '',
@@ -118,16 +142,25 @@ export function EditProject() {
                 summary: formData.summary,
                 description: formData.description,
                 status: formData.status,
-                duration: formData.duration,
+
+                // ✅ Save all 3 duration formats
+                duration: `${formData.duration} ${formData.durationUnit}`,
+                durationValue: formData.duration,
                 durationUnit: formData.durationUnit,
+
                 teamSize: parseInt(formData.teamSize.toString()),
+                maxMembers: parseInt(formData.teamSize.toString()), // ✅ keep in sync
                 primaryDiscipline: formData.primaryDiscipline,
                 disciplines: [formData.primaryDiscipline].filter(Boolean),
-                requiredSkills: formData.requiredSkills.split(',').map(s => s.trim()).filter(Boolean),
-                tags: formData.tags.split(',').map(t => t.trim()).filter(Boolean),
+                requiredSkills: formData.requiredSkills
+                    .split(',').map(s => s.trim()).filter(Boolean),
+                tags: formData.tags
+                    .split(',').map(t => t.trim()).filter(Boolean),
                 timeCommitment: formData.timeCommitment,
-                openRoles: formData.openRoles.split('\n').map(r => r.trim()).filter(Boolean),
-                goals: formData.goals.split('\n').map(g => g.trim()).filter(Boolean),
+                openRoles: formData.openRoles
+                    .split('\n').map(r => r.trim()).filter(Boolean),
+                goals: formData.goals
+                    .split('\n').map(g => g.trim()).filter(Boolean),
                 timeline: formData.timeline,
                 location: formData.location,
                 locationDetails: formData.locationDetails,
@@ -156,7 +189,6 @@ export function EditProject() {
 
     const handleDelete = async () => {
         if (!id) return
-
         setDeleting(true)
         try {
             await deleteDoc(doc(db, 'projects', id))
@@ -301,7 +333,10 @@ export function EditProject() {
                                         max="50"
                                         required
                                         value={formData.teamSize}
-                                        onChange={e => setFormData({ ...formData, teamSize: parseInt(e.target.value) })}
+                                        onChange={e => setFormData({
+                                            ...formData,
+                                            teamSize: parseInt(e.target.value)
+                                        })}
                                     />
                                 </div>
 
@@ -313,7 +348,10 @@ export function EditProject() {
                                         min="1"
                                         required
                                         value={formData.duration}
-                                        onChange={e => setFormData({ ...formData, duration: e.target.value })}
+                                        onChange={e => setFormData({
+                                            ...formData,
+                                            duration: e.target.value
+                                        })}
                                     />
                                 </div>
 
@@ -323,7 +361,10 @@ export function EditProject() {
                                         id="durationUnit"
                                         className="w-full px-3 py-2 border rounded-md bg-background"
                                         value={formData.durationUnit}
-                                        onChange={e => setFormData({ ...formData, durationUnit: e.target.value })}
+                                        onChange={e => setFormData({
+                                            ...formData,
+                                            durationUnit: e.target.value
+                                        })}
                                     >
                                         <option value="weeks">Weeks</option>
                                         <option value="months">Months</option>
@@ -338,7 +379,10 @@ export function EditProject() {
                                     id="timeCommitment"
                                     className="w-full px-3 py-2 border rounded-md bg-background"
                                     value={formData.timeCommitment}
-                                    onChange={e => setFormData({ ...formData, timeCommitment: e.target.value })}
+                                    onChange={e => setFormData({
+                                        ...formData,
+                                        timeCommitment: e.target.value
+                                    })}
                                 >
                                     <option value="1-5 hours/week">1-5 hours/week</option>
                                     <option value="5-10 hours/week">5-10 hours/week</option>
@@ -361,8 +405,11 @@ export function EditProject() {
                                 <Input
                                     id="skills"
                                     value={formData.requiredSkills}
-                                    onChange={e => setFormData({ ...formData, requiredSkills: e.target.value })}
-                                    placeholder="Comma-separated"
+                                    onChange={e => setFormData({
+                                        ...formData,
+                                        requiredSkills: e.target.value
+                                    })}
+                                    placeholder="Python, React, UI/UX Design (comma-separated)"
                                 />
                             </div>
 
@@ -371,8 +418,11 @@ export function EditProject() {
                                 <Input
                                     id="tags"
                                     value={formData.tags}
-                                    onChange={e => setFormData({ ...formData, tags: e.target.value })}
-                                    placeholder="Comma-separated"
+                                    onChange={e => setFormData({
+                                        ...formData,
+                                        tags: e.target.value
+                                    })}
+                                    placeholder="AI, Healthcare, Mobile (comma-separated)"
                                 />
                             </div>
 
@@ -382,9 +432,13 @@ export function EditProject() {
                                     id="roles"
                                     rows={4}
                                     value={formData.openRoles}
-                                    onChange={e => setFormData({ ...formData, openRoles: e.target.value })}
-                                    placeholder="One per line"
+                                    onChange={e => setFormData({
+                                        ...formData,
+                                        openRoles: e.target.value
+                                    })}
+                                    placeholder="Frontend Developer&#10;UX Designer&#10;Data Scientist"
                                 />
+                                <p className="text-xs text-gray-500">One role per line</p>
                             </div>
                         </CardContent>
                     </Card>
@@ -401,9 +455,13 @@ export function EditProject() {
                                     id="goals"
                                     rows={4}
                                     value={formData.goals}
-                                    onChange={e => setFormData({ ...formData, goals: e.target.value })}
-                                    placeholder="One per line"
+                                    onChange={e => setFormData({
+                                        ...formData,
+                                        goals: e.target.value
+                                    })}
+                                    placeholder="Develop prototype&#10;Launch beta&#10;Publish research"
                                 />
+                                <p className="text-xs text-gray-500">One goal per line</p>
                             </div>
 
                             <div className="space-y-2">
@@ -412,7 +470,11 @@ export function EditProject() {
                                     id="timeline"
                                     rows={4}
                                     value={formData.timeline}
-                                    onChange={e => setFormData({ ...formData, timeline: e.target.value })}
+                                    onChange={e => setFormData({
+                                        ...formData,
+                                        timeline: e.target.value
+                                    })}
+                                    placeholder="Month 1: Research&#10;Month 2-3: Development"
                                 />
                             </div>
                         </CardContent>
@@ -430,7 +492,10 @@ export function EditProject() {
                                     id="location"
                                     className="w-full px-3 py-2 border rounded-md bg-background"
                                     value={formData.location}
-                                    onChange={e => setFormData({ ...formData, location: e.target.value })}
+                                    onChange={e => setFormData({
+                                        ...formData,
+                                        location: e.target.value
+                                    })}
                                 >
                                     <option value="remote">Remote/Virtual</option>
                                     <option value="in-person">In-Person</option>
@@ -444,7 +509,11 @@ export function EditProject() {
                                     <Input
                                         id="locationDetails"
                                         value={formData.locationDetails}
-                                        onChange={e => setFormData({ ...formData, locationDetails: e.target.value })}
+                                        onChange={e => setFormData({
+                                            ...formData,
+                                            locationDetails: e.target.value
+                                        })}
+                                        placeholder="City, State, Country"
                                     />
                                 </div>
                             )}
@@ -455,7 +524,11 @@ export function EditProject() {
                                     id="notes"
                                     rows={3}
                                     value={formData.additionalNotes}
-                                    onChange={e => setFormData({ ...formData, additionalNotes: e.target.value })}
+                                    onChange={e => setFormData({
+                                        ...formData,
+                                        additionalNotes: e.target.value
+                                    })}
+                                    placeholder="Any other information..."
                                 />
                             </div>
                         </CardContent>
@@ -473,13 +546,14 @@ export function EditProject() {
                         </Button>
 
                         <div className="flex gap-3">
-                            <Button type="button" variant="outline" onClick={() => navigate(`/project/${id}`)}>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                onClick={() => navigate(`/project/${id}`)}
+                            >
                                 Cancel
                             </Button>
-                            <Button
-                                type="submit"
-                                disabled={saving}
-                            >
+                            <Button type="submit" disabled={saving}>
                                 {saving ? (
                                     <>
                                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -507,7 +581,8 @@ export function EditProject() {
                         <CardContent className="space-y-4">
                             <Alert>
                                 <AlertDescription>
-                                    This action cannot be undone. This will permanently delete your project and remove all associated data.
+                                    This action cannot be undone. This will permanently delete your
+                                    project and remove all associated data.
                                 </AlertDescription>
                             </Alert>
                             <div className="flex justify-end gap-3">

@@ -1,6 +1,6 @@
 import { useState } from "react"
 import type { FormEvent } from "react"
-import { Link, useNavigate } from "react-router-dom"
+import { Link, useNavigate, useSearchParams } from "react-router-dom"  // ← add useSearchParams
 import { useAuth } from "@/contexts/AuthContext"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -30,20 +30,31 @@ export function Register() {
 
     const { register, loginWithGoogle, loginWithGithub } = useAuth()
     const navigate = useNavigate()
+    const [searchParams] = useSearchParams()   // ← ADD THIS
+
+    // ── helper: where to go after successful auth ─────────────────────────
+    const getRedirectPath = () => {
+        const redirect = searchParams.get('redirect')
+        return redirect ? decodeURIComponent(redirect) : '/dashboard'
+    }
+
+    // ── Save redirect to sessionStorage before OAuth wipes the URL ────────
+    // Google/GitHub OAuth causes a full page redirect which loses ?redirect=
+    const saveRedirectBeforeOAuth = () => {
+        const redirect = searchParams.get('redirect')
+        if (redirect) {
+            sessionStorage.setItem('authRedirect', decodeURIComponent(redirect))
+        }
+    }
 
     const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
         const { name, value, type } = e.target
         const checked = type === "checkbox" ? (e.target as HTMLInputElement).checked : undefined
-
         setFormData(prev => ({
             ...prev,
             [name]: type === "checkbox" ? checked : value
         }))
-
-        // Check password strength
-        if (name === "password") {
-            checkPasswordStrength(value)
-        }
+        if (name === "password") checkPasswordStrength(value)
     }
 
     const checkPasswordStrength = (password: string) => {
@@ -58,68 +69,49 @@ export function Register() {
 
     const validateForm = (): boolean => {
         if (!formData.firstName || !formData.lastName) {
-            setError("Please enter your full name")
-            return false
+            setError("Please enter your full name"); return false
         }
-
         if (!formData.email) {
-            setError("Please enter your email address")
-            return false
+            setError("Please enter your email address"); return false
         }
-
         if (formData.password.length < 8) {
-            setError("Password must be at least 8 characters long")
-            return false
+            setError("Password must be at least 8 characters long"); return false
         }
-
         if (!/[0-9]/.test(formData.password) || !/[!@#$%^&*]/.test(formData.password)) {
-            setError("Password must contain at least one number and one special character")
-            return false
+            setError("Password must contain at least one number and one special character"); return false
         }
-
         if (formData.password !== formData.confirmPassword) {
-            setError("Passwords do not match")
-            return false
+            setError("Passwords do not match"); return false
         }
-
         if (!formData.discipline) {
-            setError("Please select your primary discipline")
-            return false
+            setError("Please select your primary discipline"); return false
         }
-
         if (!formData.role) {
-            setError("Please select your role")
-            return false
+            setError("Please select your role"); return false
         }
-
         if (!formData.terms) {
-            setError("Please accept the Terms of Service and Privacy Policy")
-            return false
+            setError("Please accept the Terms of Service and Privacy Policy"); return false
         }
-
         return true
     }
 
+    // ── Email/password register ───────────────────────────────────────────
     const handleSubmit = async (e: FormEvent) => {
         e.preventDefault()
         setError("")
-
-        if (!validateForm()) {
-            return
-        }
-
+        if (!validateForm()) return
         setLoading(true)
-
         try {
             await register(formData.email, formData.password, {
-                firstName: formData.firstName,
-                lastName: formData.lastName,
+                firstName:  formData.firstName,
+                lastName:   formData.lastName,
                 discipline: formData.discipline,
-                role: formData.role,
-                skills: formData.skills,
-                bio: formData.bio
+                role:       formData.role,
+                skills:     formData.skills,
+                bio:        formData.bio
             })
-            navigate('/dashboard')
+            // Email/password: no OAuth redirect, ?redirect= is still in URL
+            navigate(getRedirectPath())
         } catch (err: any) {
             setError(err.message)
         } finally {
@@ -127,12 +119,23 @@ export function Register() {
         }
     }
 
+    // ── Google register ───────────────────────────────────────────────────
     const handleGoogleRegister = async () => {
         setError("")
         setLoading(true)
+        // Save BEFORE loginWithGoogle() which may do a full-page redirect
+        saveRedirectBeforeOAuth()
         try {
             await loginWithGoogle()
-            navigate('/dashboard')
+            // If loginWithGoogle uses popup (not redirect), we land here
+            // Check sessionStorage first, then fall back to searchParams
+            const pending = sessionStorage.getItem('authRedirect')
+            if (pending) {
+                sessionStorage.removeItem('authRedirect')
+                navigate(pending)
+            } else {
+                navigate(getRedirectPath())
+            }
         } catch (err: any) {
             setError(err.message)
         } finally {
@@ -140,12 +143,20 @@ export function Register() {
         }
     }
 
+    // ── GitHub register ───────────────────────────────────────────────────
     const handleGithubRegister = async () => {
         setError("")
         setLoading(true)
+        saveRedirectBeforeOAuth()
         try {
             await loginWithGithub()
-            navigate('/dashboard')
+            const pending = sessionStorage.getItem('authRedirect')
+            if (pending) {
+                sessionStorage.removeItem('authRedirect')
+                navigate(pending)
+            } else {
+                navigate(getRedirectPath())
+            }
         } catch (err: any) {
             setError(err.message)
         } finally {
@@ -153,6 +164,7 @@ export function Register() {
         }
     }
 
+    // JSX is completely unchanged — copy from your original file
     return (
         <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 dark:from-gray-900 dark:via-blue-950 dark:to-indigo-950 px-4 py-12">
             <Card className="w-full max-w-3xl shadow-2xl border-2">
@@ -186,7 +198,6 @@ export function Register() {
                                     className="h-11"
                                 />
                             </div>
-
                             <div className="space-y-2">
                                 <label htmlFor="lastName" className="text-sm font-medium text-gray-700 dark:text-gray-300">
                                     Last Name *
@@ -261,7 +272,6 @@ export function Register() {
                                     Must be at least 8 characters with a number and special character
                                 </p>
                             </div>
-
                             <div className="space-y-2">
                                 <label htmlFor="confirmPassword" className="text-sm font-medium text-gray-700 dark:text-gray-300">
                                     Confirm Password *
@@ -318,7 +328,6 @@ export function Register() {
                                     <option value="other">Other</option>
                                 </select>
                             </div>
-
                             <div className="space-y-2">
                                 <label htmlFor="role" className="text-sm font-medium text-gray-700 dark:text-gray-300">
                                     Role *

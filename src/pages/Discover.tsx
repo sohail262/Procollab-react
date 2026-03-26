@@ -37,17 +37,14 @@ import {
 import {
     collection,
     query,
-    limit,
     getDocs,
-    orderBy,
     doc,
     getDoc,
-    setDoc,
-    addDoc,
-    serverTimestamp
 } from 'firebase/firestore'
 import { db, auth } from '@/lib/firebase'
-import { hasOutgoingRequestTo } from '@/services/connectionService'
+import {
+    sendConnectionRequest,
+} from '@/services/connectionService'
 import { useToast } from '@/hooks/use-toast'
 
 interface Person {
@@ -85,7 +82,7 @@ interface TrendingTopic {
     time: number
     category: string
     color: string
-    icon: string  // lucide icon key
+    icon: string
     tags: string[]
     source: string
     sourceLabel?: string
@@ -96,25 +93,27 @@ export function Discover() {
     const { toast } = useToast()
     const [loading, setLoading] = useState(true)
     const [refreshingTopics, setRefreshingTopics] = useState(false)
-    /** Already friends — hidden from Discover list */
+
+    // ── Connection state ───────────────────────────────────────────────────────
+    /** Confirmed friends — hidden from Discover list */
     const [friendIds, setFriendIds] = useState<Set<string>>(new Set())
-    /** I sent a request; show Request sent (path: users/{them}/connectionRequests/{me}) */
+    /** I sent a request to them */
     const [outgoingPendingIds, setOutgoingPendingIds] = useState<Set<string>>(new Set())
-    /** They sent me a request; show Accept / Reject (path: users/{me}/connectionRequests/{them}) */
+    /** They sent a request to me */
     const [incomingPendingIds, setIncomingPendingIds] = useState<Set<string>>(new Set())
+    /** Transient "just sent" animation set */
     const [fadingUsers, setFadingUsers] = useState<Set<string>>(new Set())
 
-    // Search states
+    // ── Search / filter state ──────────────────────────────────────────────────
     const [peopleSearch, setPeopleSearch] = useState('')
     const [disciplineFilter, setDisciplineFilter] = useState('all')
     const [projectsSearch, setProjectsSearch] = useState('')
     const [statusFilter, setStatusFilter] = useState('all')
 
-    // Debounced search terms
     const debouncedPeopleSearch = useDebounce(peopleSearch, 300)
     const debouncedProjectsSearch = useDebounce(projectsSearch, 300)
 
-    // Pagination states
+    // ── Pagination ─────────────────────────────────────────────────────────────
     const [peopleState, peopleActions] = usePagination<Person>()
     const [projectsState, projectsActions] = usePagination<Project>()
     const [topicsState, topicsActions] = usePagination<TrendingTopic>()
@@ -132,35 +131,48 @@ export function Discover() {
         'Law'
     ]
 
+    // ── Connection status checker (REPLACES, never merges) ────────────────────
     const checkConnectionStatuses = useCallback(async (people: Person[]) => {
         if (!auth.currentUser) return
-
         const currentUserId = auth.currentUser.uid
 
         try {
-            const friendsSnapshot = await getDocs(collection(db, 'users', currentUserId, 'friends'))
-            const friendSet = new Set(friendsSnapshot.docs.map(d => d.id))
+            // Fresh read of my friends
+            const friendsSnapshot = await getDocs(
+                collection(db, 'users', currentUserId, 'friends')
+            )
+            const freshFriendSet = new Set(friendsSnapshot.docs.map(d => d.id))
 
-            const incomingSnapshot = await getDocs(collection(db, 'users', currentUserId, 'connectionRequests'))
-            const incomingSet = new Set(incomingSnapshot.docs.map(d => d.id))
+            // Fresh read of requests sent TO me
+            const incomingSnapshot = await getDocs(
+                collection(db, 'users', currentUserId, 'connectionRequests')
+            )
+            const freshIncomingSet = new Set(incomingSnapshot.docs.map(d => d.id))
 
+            // Check which of these people I sent a request to
             const others = people.filter(p => p.id !== currentUserId)
             const outgoingResults = await Promise.all(
-                others.map(async (p) =>
-                    (await hasOutgoingRequestTo(currentUserId, p.id)) ? p.id : null
-                )
+                others.map(async (p) => {
+                    const snap = await getDoc(
+                        doc(db, 'users', p.id, 'connectionRequests', currentUserId)
+                    )
+                    return snap.exists() ? p.id : null
+                })
             )
-            const outgoingSet = new Set(outgoingResults.filter(Boolean) as string[])
+            const freshOutgoingSet = new Set(
+                outgoingResults.filter(Boolean) as string[]
+            )
 
-            setFriendIds(prev => new Set([...prev, ...friendSet]))
-            setIncomingPendingIds(prev => new Set([...prev, ...incomingSet]))
-            setOutgoingPendingIds(prev => new Set([...prev, ...outgoingSet]))
+            // ✅ REPLACE (not merge) to avoid stale entries persisting
+            setFriendIds(freshFriendSet)
+            setIncomingPendingIds(freshIncomingSet)
+            setOutgoingPendingIds(freshOutgoingSet)
         } catch (error) {
             console.error('Error checking connection statuses:', error)
         }
     }, [])
 
-    // Load more functions for infinite scroll
+    // ── Load more (infinite scroll) ───────────────────────────────────────────
     const loadMorePeople = useCallback(async (): Promise<boolean> => {
         try {
             const result = await loadPaginatedUsers(peopleState.lastDoc)
@@ -192,22 +204,17 @@ export function Discover() {
 
     const loadMoreTopics = useCallback(async (): Promise<boolean> => {
         try {
-            // Use local function to get trending topics
             const topics = await loadTrendingTopics()
-            
-            // Apply pagination logic
-            const currentIndex = topicsState.lastDoc ? parseInt(topicsState.lastDoc.id) || 0 : 0
-            const pageSize = 9 // Show 9 topics per page
-            const startIndex = currentIndex
-            const endIndex = startIndex + pageSize
-            
-            const paginatedTopics = topics.slice(startIndex, endIndex)
+            const currentIndex = topicsState.lastDoc
+                ? parseInt(topicsState.lastDoc.id) || 0
+                : 0
+            const pageSize = 9
+            const endIndex = currentIndex + pageSize
+            const paginatedTopics = topics.slice(currentIndex, endIndex)
             const hasMore = endIndex < topics.length
-            
             if (paginatedTopics.length > 0) {
                 topicsActions.addItems(paginatedTopics, { id: endIndex.toString() } as any)
             }
-            
             return hasMore
         } catch (error) {
             console.error('Error loading more topics:', error)
@@ -215,12 +222,12 @@ export function Discover() {
         }
     }, [topicsState.lastDoc, topicsActions])
 
-    // Infinite scroll hooks
+    // ── Infinite scroll sentinels ─────────────────────────────────────────────
     const peopleScroll = useInfiniteScroll(loadMorePeople, { enabled: !peopleState.loading })
     const projectsScroll = useInfiniteScroll(loadMoreProjects, { enabled: !projectsState.loading })
     const topicsScroll = useInfiniteScroll(loadMoreTopics, { enabled: !topicsState.loading })
 
-    // Initial data loading
+    // ── Initial load ──────────────────────────────────────────────────────────
     useEffect(() => {
         loadInitialData()
     }, [])
@@ -228,36 +235,32 @@ export function Discover() {
     const loadInitialData = async () => {
         setLoading(true)
         try {
-            // Load initial data for all sections
             const [peopleResult, projectsResult] = await Promise.all([
                 loadPaginatedUsers(),
                 loadPaginatedProjects()
             ])
 
-            // Load trending topics using local function
             const topics = await loadTrendingTopics()
-            const initialTopics = topics.slice(0, 9) // First 9 topics
+            const initialTopics = topics.slice(0, 9)
 
-            // Set initial data with proper lastDoc for pagination
             peopleActions.setItems(peopleResult.items)
             peopleActions.setHasMore(peopleResult.hasMore)
             if (peopleResult.lastDoc) {
                 peopleActions.addItems([], peopleResult.lastDoc as any)
             }
-            
+
             projectsActions.setItems(projectsResult.items)
             projectsActions.setHasMore(projectsResult.hasMore)
             if (projectsResult.lastDoc) {
                 projectsActions.addItems([], projectsResult.lastDoc as any)
             }
-            
+
             topicsActions.setItems(initialTopics)
             topicsActions.setHasMore(topics.length > 9)
             if (topics.length > 9) {
-                topicsActions.addItems([], { id: '9' } as any) // Set lastDoc for pagination
+                topicsActions.addItems([], { id: '9' } as any)
             }
 
-            // Check connection statuses for initial people
             if (peopleResult.items.length > 0) {
                 await checkConnectionStatuses(peopleResult.items)
             }
@@ -268,43 +271,41 @@ export function Discover() {
         }
     }
 
-    // Reset and reload when filters change
+    // Reset projects on filter change
     useEffect(() => {
-        if (debouncedProjectsSearch !== projectsSearch) return // Wait for debounce
-        
+        if (debouncedProjectsSearch !== projectsSearch) return
         projectsActions.reset()
         loadMoreProjects()
     }, [statusFilter, debouncedProjectsSearch])
 
-    // --- Trending Topics Logic ---
-
+    // ── Trending topics ───────────────────────────────────────────────────────
     const fetchTopHackerNewsStories = async (count = 20) => {
         try {
-            const response = await fetch(`https://hacker-news.firebaseio.com/v0/topstories.json`)
+            const response = await fetch(
+                `https://hacker-news.firebaseio.com/v0/topstories.json`
+            )
             const storyIds = await response.json()
             const topStoryIds = storyIds.slice(0, count)
             const storyPromises = topStoryIds.map((id: number) =>
-                fetch(`https://hacker-news.firebaseio.com/v0/item/${id}.json`).then(res => res.json()).catch(() => null)
+                fetch(`https://hacker-news.firebaseio.com/v0/item/${id}.json`)
+                    .then(res => res.json())
+                    .catch(() => null)
             )
             const stories = await Promise.all(storyPromises)
-            return stories.filter((story: any) => story && story.title && story.url && !story.deleted).map((story: any) => {
-                // Create a better description from the URL domain
-                let description = story.title
-                if (story.url) {
-                    try {
-                        const domain = new URL(story.url).hostname.replace('www.', '')
-                        description = `Trending story from ${domain}: ${story.title}`
-                    } catch (e) {
-                        description = `Trending tech story: ${story.title}`
+            return stories
+                .filter((s: any) => s && s.title && s.url && !s.deleted)
+                .map((story: any) => {
+                    let description = story.title
+                    if (story.url) {
+                        try {
+                            const domain = new URL(story.url).hostname.replace('www.', '')
+                            description = `Trending story from ${domain}: ${story.title}`
+                        } catch {
+                            description = `Trending tech story: ${story.title}`
+                        }
                     }
-                }
-                
-                return {
-                    ...story,
-                    description: description,
-                    source: 'hackernews'
-                }
-            })
+                    return { ...story, description, source: 'hackernews' }
+                })
         } catch (error) {
             console.error('Error fetching Hacker News stories:', error)
             return []
@@ -313,38 +314,42 @@ export function Discover() {
 
     const fetchDevToArticles = async (count = 10) => {
         try {
-            const response = await fetch(`https://dev.to/api/articles?top=10&per_page=${count}`)
+            const response = await fetch(
+                `https://dev.to/api/articles?top=10&per_page=${count}`
+            )
             const articles = await response.json()
-            return articles.filter((article: any) => article && article.title && article.url).map((article: any) => ({
-                id: article.id,
-                title: article.title,
-                url: article.url,
-                time: new Date(article.published_at || article.created_at).getTime() / 1000,
-                tags: article.tag_list || article.tags || [],
-                description: article.description || article.social_image_alt || `Article by ${article.user?.name || 'Dev.to'}`, // Better description fallback
-                source: 'devto'
-            }))
+            return articles
+                .filter((a: any) => a && a.title && a.url)
+                .map((article: any) => ({
+                    id: article.id,
+                    title: article.title,
+                    url: article.url,
+                    time: new Date(article.published_at || article.created_at).getTime() / 1000,
+                    tags: article.tag_list || article.tags || [],
+                    description:
+                        article.description ||
+                        article.social_image_alt ||
+                        `Article by ${article.user?.name || 'Dev.to'}`,
+                    source: 'devto'
+                }))
         } catch (error) {
             console.error('Error fetching Dev.to articles:', error)
             return []
         }
     }
 
-    const fetchNewsAPIArticles = async (category: 'health' | 'science' | 'technology' | 'business', label: string, count = 10) => {
+    const fetchNewsAPIArticles = async (
+        category: 'health' | 'science' | 'technology' | 'business',
+        label: string,
+        count = 10
+    ) => {
         try {
             const apiKey = import.meta.env.VITE_NEWS_API_KEY
-            console.log(`[NewsAPI] Fetching ${label} (category: ${category})...`)
             const url = `https://newsapi.org/v2/top-headlines?country=us&category=${category}&pageSize=${count}&apiKey=${apiKey}`
-            console.log(`[NewsAPI] URL:`, url.replace(apiKey, '***'))
             const response = await fetch(url)
-            console.log(`[NewsAPI] Response status for ${label}:`, response.status)
             const data = await response.json()
-            console.log(`[NewsAPI] Response body for ${label}:`, data)
-            if (data.status !== 'ok') {
-                console.warn(`[NewsAPI] Non-ok status for ${label}:`, data.status, data.message)
-                return []
-            }
-            const articles = (data.articles || [])
+            if (data.status !== 'ok') return []
+            return (data.articles || [])
                 .filter((a: any) => a.title && a.url && a.title !== '[Removed]')
                 .map((a: any, i: number) => ({
                     id: `newsapi_${category}_${i}_${Date.now()}`,
@@ -357,8 +362,6 @@ export function Discover() {
                     sourceLabel: label,
                     _newsCategory: category
                 }))
-            console.log(`[NewsAPI] ${label} — ${articles.length} articles fetched`)
-            return articles
         } catch (error) {
             console.error(`[NewsAPI] Error fetching ${label}:`, error)
             return []
@@ -367,22 +370,41 @@ export function Discover() {
 
     const createTopicsFromStories = (stories: any[]) => {
         const categoryMap: Record<string, any> = {
-            'ai': { title: 'Artificial Intelligence', color: 'indigo', icon: 'bot', keywords: ['ai', 'artificial intelligence', 'machine learning', 'ml', 'neural', 'deep learning', 'llm', 'gpt', 'chatgpt', 'transformer'] },
-            'web': { title: 'Web Development', color: 'blue', icon: 'globe', keywords: ['javascript', 'react', 'vue', 'angular', 'node', 'web', 'frontend', 'backend', 'api', 'framework'] },
-            'devops': { title: 'DevOps & Cloud', color: 'green', icon: 'cloud', keywords: ['docker', 'kubernetes', 'devops', 'cloud', 'aws', 'azure', 'gcp', 'ci/cd', 'deployment', 'infrastructure'] },
-            'security': { title: 'Cybersecurity', color: 'red', icon: 'shield', keywords: ['security', 'cyber', 'encryption', 'vulnerability', 'privacy', 'breach', 'authentication', 'oauth'] },
-            'data': { title: 'Data Science', color: 'purple', icon: 'barchart', keywords: ['data', 'database', 'sql', 'nosql', 'analytics', 'big data', 'data science', 'visualization'] },
-            'blockchain': { title: 'Blockchain & Web3', color: 'yellow', icon: 'link2', keywords: ['blockchain', 'crypto', 'bitcoin', 'ethereum', 'web3', 'defi', 'nft', 'smart contract'] },
-            'default': { title: 'Technology', color: 'indigo', icon: 'monitor', keywords: [] }
+            ai: {
+                title: 'Artificial Intelligence', color: 'indigo', icon: 'bot',
+                keywords: ['ai', 'artificial intelligence', 'machine learning', 'ml', 'neural', 'deep learning', 'llm', 'gpt', 'chatgpt', 'transformer']
+            },
+            web: {
+                title: 'Web Development', color: 'blue', icon: 'globe',
+                keywords: ['javascript', 'react', 'vue', 'angular', 'node', 'web', 'frontend', 'backend', 'api', 'framework']
+            },
+            devops: {
+                title: 'DevOps & Cloud', color: 'green', icon: 'cloud',
+                keywords: ['docker', 'kubernetes', 'devops', 'cloud', 'aws', 'azure', 'gcp', 'ci/cd', 'deployment', 'infrastructure']
+            },
+            security: {
+                title: 'Cybersecurity', color: 'red', icon: 'shield',
+                keywords: ['security', 'cyber', 'encryption', 'vulnerability', 'privacy', 'breach', 'authentication', 'oauth']
+            },
+            data: {
+                title: 'Data Science', color: 'purple', icon: 'barchart',
+                keywords: ['data', 'database', 'sql', 'nosql', 'analytics', 'big data', 'data science', 'visualization']
+            },
+            blockchain: {
+                title: 'Blockchain & Web3', color: 'yellow', icon: 'link2',
+                keywords: ['blockchain', 'crypto', 'bitcoin', 'ethereum', 'web3', 'defi', 'nft', 'smart contract']
+            },
+            default: { title: 'Technology', color: 'indigo', icon: 'monitor', keywords: [] }
         }
 
         return stories.map(story => {
-            // NewsAPI health/law articles get their own category
             if (story.source === 'newsapi' && story._newsCategory) {
                 const isHealth = story._newsCategory === 'health'
                 let tags: string[] = []
                 if (story.tags && Array.isArray(story.tags)) {
-                    tags = story.tags.slice(0, 3).map((tag: any) => typeof tag === 'string' ? tag : tag.name || tag)
+                    tags = story.tags.slice(0, 3).map((t: any) =>
+                        typeof t === 'string' ? t : t.name || t
+                    )
                 }
                 let description = story.description || ''
                 if (!description || description === story.title) {
@@ -402,15 +424,14 @@ export function Discover() {
                     icon: isHealth ? 'heartpulse' : 'scale',
                     tags,
                     source: 'newsapi',
-                    sourceLabel: story.sourceLabel || (isHealth ? 'Health India' : 'Law India')
+                    sourceLabel: story.sourceLabel || (isHealth ? 'Health' : 'Science')
                 }
             }
 
-            const titleLower = story.title ? story.title.toLowerCase() : ''
+            const titleLower = (story.title || '').toLowerCase()
             let category = categoryMap.default
-
             for (const [, cat] of Object.entries(categoryMap)) {
-                if (cat.keywords.some((keyword: string) => titleLower.includes(keyword))) {
+                if ((cat as any).keywords.some((kw: string) => titleLower.includes(kw))) {
                     category = cat
                     break
                 }
@@ -418,27 +439,26 @@ export function Discover() {
 
             let tags: string[] = []
             if (story.tags && Array.isArray(story.tags)) {
-                tags = story.tags.slice(0, 3).map((tag: any) => typeof tag === 'string' ? tag : tag.name || tag)
+                tags = story.tags.slice(0, 3).map((t: any) =>
+                    typeof t === 'string' ? t : t.name || t
+                )
             }
 
             let description = story.description || ''
-            
             if (!description || description === story.title) {
-                const categoryDescriptions: Record<string, string> = {
-                    'Artificial Intelligence': 'Explore the latest developments in AI technology, machine learning algorithms, and their real-world applications.',
-                    'Web Development': 'Discover new frameworks, tools, and best practices for building modern web applications.',
-                    'DevOps & Cloud': 'Learn about cloud infrastructure, deployment strategies, and DevOps automation tools.',
-                    'Cybersecurity': 'Stay informed about security vulnerabilities, protection methods, and privacy concerns.',
-                    'Data Science': 'Dive into data analysis techniques, visualization tools, and database technologies.',
-                    'Blockchain & Web3': 'Understand cryptocurrency trends, blockchain technology, and decentralized applications.',
-                    'Technology': 'Get insights into the latest tech trends, innovations, and industry developments.'
+                const fallbacks: Record<string, string> = {
+                    'Artificial Intelligence': 'Explore the latest developments in AI and machine learning.',
+                    'Web Development': 'Discover new frameworks and best practices for modern web apps.',
+                    'DevOps & Cloud': 'Learn about cloud infrastructure and DevOps automation.',
+                    'Cybersecurity': 'Stay informed about security vulnerabilities and privacy.',
+                    'Data Science': 'Dive into data analysis techniques and visualization.',
+                    'Blockchain & Web3': 'Understand cryptocurrency trends and blockchain tech.',
+                    'Technology': 'Get insights into the latest tech trends and innovations.'
                 }
-                description = categoryDescriptions[category.title] || 'Stay updated with the latest technology trends and developments in the tech industry.'
+                description = fallbacks[(category as any).title] ||
+                    'Stay updated with the latest technology trends.'
             }
-            
-            if (description.length > 150) {
-                description = description.substring(0, 150) + '...'
-            }
+            if (description.length > 150) description = description.substring(0, 150) + '...'
 
             return {
                 id: story.source ? `${story.source}_${story.id}` : `${story.id || Date.now()}`,
@@ -446,9 +466,9 @@ export function Discover() {
                 description,
                 url: story.url,
                 time: story.time || Date.now() / 1000,
-                category: category.title,
-                color: category.color,
-                icon: category.icon,
+                category: (category as any).title,
+                color: (category as any).color,
+                icon: (category as any).icon,
                 tags,
                 source: story.source || 'unknown'
             }
@@ -457,34 +477,31 @@ export function Discover() {
 
     const loadTrendingTopics = async () => {
         try {
-            const [hackerNewsStories, devToArticles, healthArticles, lawArticles] = await Promise.all([
-                fetchTopHackerNewsStories(20).catch(() => []),
-                fetchDevToArticles(10).catch(() => []),
-                fetchNewsAPIArticles('health', 'Health', 8).catch(() => []),
-                fetchNewsAPIArticles('science', 'Science & Law', 8).catch(() => [])
-            ])
+            const [hackerNewsStories, devToArticles, healthArticles, lawArticles] =
+                await Promise.all([
+                    fetchTopHackerNewsStories(20).catch(() => []),
+                    fetchDevToArticles(10).catch(() => []),
+                    fetchNewsAPIArticles('health', 'Health', 8).catch(() => []),
+                    fetchNewsAPIArticles('science', 'Science & Law', 8).catch(() => [])
+                ])
 
-            const allStories = [...hackerNewsStories, ...devToArticles, ...healthArticles, ...lawArticles]
-
-            if (allStories.length === 0) {
-                return []
-            }
+            const allStories = [
+                ...hackerNewsStories,
+                ...devToArticles,
+                ...healthArticles,
+                ...lawArticles
+            ]
+            if (allStories.length === 0) return []
 
             const topics = createTopicsFromStories(allStories)
-            
-            // Remove duplicates based on title to avoid duplicate keys
-            const uniqueTopics = topics.filter((topic, index, self) => 
-                index === self.findIndex(t => t.title === topic.title)
+            const unique = topics.filter((t, i, self) =>
+                i === self.findIndex(x => x.title === t.title)
             )
-            
-            // Ensure unique IDs by adding timestamp
-            const topicsWithUniqueIds = uniqueTopics.map((topic, index) => ({
-                ...topic,
-                id: `${topic.source}_${topic.id}_${Date.now()}_${index}`
+            const withIds = unique.map((t, i) => ({
+                ...t,
+                id: `${t.source}_${t.id}_${Date.now()}_${i}`
             }))
-            
-            const shuffled = topicsWithUniqueIds.sort(() => 0.5 - Math.random())
-            return shuffled
+            return withIds.sort(() => 0.5 - Math.random())
         } catch (error) {
             console.error('Error loading trending topics:', error)
             return []
@@ -497,7 +514,6 @@ export function Discover() {
             topicsActions.reset()
             const topics = await loadTrendingTopics()
             const initialTopics = topics.slice(0, 9)
-            
             topicsActions.setItems(initialTopics)
             topicsActions.setHasMore(topics.length > 9)
             if (topics.length > 9) {
@@ -510,59 +526,16 @@ export function Discover() {
         }
     }
 
+    // ── Connect handler ───────────────────────────────────────────────────────
     const handleConnect = async (userId: string) => {
-        if (!auth.currentUser) {
-            console.error('User not authenticated')
-            return
-        }
-
+        if (!auth.currentUser) return
         try {
-            const currentUser = auth.currentUser
-            const targetUserRef = doc(db, 'users', userId)
-            const requestRef = doc(targetUserRef, 'connectionRequests', currentUser.uid)
-
-            // Check if request already exists
-            const requestDoc = await getDoc(requestRef)
-            if (requestDoc.exists()) {
-                setOutgoingPendingIds(prev => new Set([...prev, userId]))
-                return
-            }
-
-            // Get current user data for the request
-            const currentUserDoc = await getDoc(doc(db, 'users', currentUser.uid))
-            const currentUserData = currentUserDoc.data()
-            const currentUserName = currentUserData ? `${currentUserData.firstName} ${currentUserData.lastName}` : currentUser.email
-
-            // Create connection request
-            await setDoc(requestRef, {
-                from: currentUser.uid,
-                fromName: currentUserName,
-                fromEmail: currentUser.email,
-                sentAt: serverTimestamp(),
-                status: 'pending'
-            })
-
-            // Create notification
-            await addDoc(collection(targetUserRef, 'notifications'), {
-                title: 'New Connection Request',
-                body: `${currentUserName} wants to connect with you!`,
-                icon: currentUserData?.photoURL || null,
-                url: `/profile/${currentUser.uid}`,
-                timestamp: serverTimestamp(),
-                read: false,
-                type: 'connection_request',
-                data: {
-                    fromUserId: currentUser.uid,
-                    fromUserName: currentUserName
-                }
-            })
-
+            // ✅ Centralized service — handles guard, write, and notification
+            await sendConnectionRequest(auth.currentUser.uid, userId)
             setOutgoingPendingIds(prev => new Set([...prev, userId]))
-            setFadingUsers(prev => {
-                const next = new Set(prev)
-                next.add(userId)
-                return next
-            })
+
+            // Brief "sent" animation
+            setFadingUsers(prev => new Set([...prev, userId]))
             setTimeout(() => {
                 setFadingUsers(prev => {
                     const next = new Set(prev)
@@ -578,43 +551,48 @@ export function Discover() {
         }
     }
 
-    const filteredPeople = peopleState.items.filter(person => {
-        // Filter out current user
-        if (auth.currentUser && person.id === auth.currentUser.uid) {
-            return false
-        }
+    // ── Filtered lists ────────────────────────────────────────────────────────
+    // ── Filtered lists ────────────────────────────────────────────────────────────
+const filteredPeople = peopleState.items.filter(person => {
+    // Hide self
+    if (auth.currentUser && person.id === auth.currentUser.uid) return false
+    // Hide confirmed friends
+    if (friendIds.has(person.id)) return false
+    // ✅ Hide outgoing pending — already sent, no action needed in Discover
+    if (outgoingPendingIds.has(person.id)) return false
+    // ✅ Keep incoming pending visible — user needs to respond
+    // (they'll see "Respond" button that navigates to profile)
 
-        if (friendIds.has(person.id)) {
-            return false
-        }
+    const matchesSearch =
+        debouncedPeopleSearch === '' ||
+        person.firstName?.toLowerCase().includes(debouncedPeopleSearch.toLowerCase()) ||
+        person.lastName?.toLowerCase().includes(debouncedPeopleSearch.toLowerCase()) ||
+        (person.skills || []).some(s =>
+            s?.toLowerCase().includes(debouncedPeopleSearch.toLowerCase())
+        )
 
-        // Pending connections are handled in the header (incoming / sent); keep Discover clean
-        if (outgoingPendingIds.has(person.id) || incomingPendingIds.has(person.id)) {
-            return false
-        }
+    const matchesDiscipline =
+        disciplineFilter === 'all' ||
+        person.discipline
+            ?.toLowerCase()
+            .replace(/ & /g, '-')
+            .replace(/ /g, '-') === disciplineFilter
 
-        const matchesSearch = debouncedPeopleSearch === '' ||
-            (person.firstName && person.firstName.toLowerCase().includes(debouncedPeopleSearch.toLowerCase())) ||
-            (person.lastName && person.lastName.toLowerCase().includes(debouncedPeopleSearch.toLowerCase())) ||
-            (person.skills || []).some(skill => skill && skill.toLowerCase().includes(debouncedPeopleSearch.toLowerCase()))
-
-        const matchesDiscipline = disciplineFilter === 'all' ||
-            (person.discipline && person.discipline.toLowerCase().replace(/ & /g, '-').replace(/ /g, '-') === disciplineFilter)
-
-        return matchesSearch && matchesDiscipline
-    })
-
+    return matchesSearch && matchesDiscipline
+})
     const filteredProjects = projectsState.items.filter(project => {
-        const matchesSearch = debouncedProjectsSearch === '' ||
+        const matchesSearch =
+            debouncedProjectsSearch === '' ||
             project.title.toLowerCase().includes(debouncedProjectsSearch.toLowerCase()) ||
             project.description.toLowerCase().includes(debouncedProjectsSearch.toLowerCase()) ||
-            (project.tags || []).some(tag => tag.toLowerCase().includes(debouncedProjectsSearch.toLowerCase()))
-
+            (project.tags || []).some(t =>
+                t.toLowerCase().includes(debouncedProjectsSearch.toLowerCase())
+            )
         const matchesStatus = statusFilter === 'all' || project.status === statusFilter
-
         return matchesSearch && matchesStatus
     })
 
+    // ── Render ────────────────────────────────────────────────────────────────
     return (
         <DashboardLayout>
             <div className="mb-8">
@@ -626,34 +604,42 @@ export function Discover() {
                 </p>
             </div>
 
-            {/* Discover People Section */}
+            {/* ── Find Collaborators ── */}
             <section id="discover-people" className="mb-12">
                 <div className="flex flex-col lg:flex-row lg:justify-between lg:items-center mb-6 gap-4">
                     <div>
                         <h2 className="text-2xl font-bold">Find Collaborators</h2>
                         <p className="text-sm text-muted-foreground mt-1 max-w-xl">
-                            Invites you send or receive are in the connections menu (header). Withdraw sent requests from the Sent tab there.
+                            Invites you send or receive are in the connections menu (header).
+                            Withdraw sent requests from the Sent tab there.
                         </p>
                     </div>
                     <div className="flex flex-col sm:flex-row gap-3">
                         <div className="relative flex-1 sm:flex-none">
-                            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-500" />
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
                             <Input
                                 type="text"
                                 placeholder="Search by name or skill"
                                 className="pl-10 w-full sm:w-64"
                                 value={peopleSearch}
-                                onChange={(e) => setPeopleSearch(e.target.value)}
+                                onChange={e => setPeopleSearch(e.target.value)}
                             />
                         </div>
                         <select
                             className="px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-sm"
                             value={disciplineFilter}
-                            onChange={(e) => setDisciplineFilter(e.target.value)}
+                            onChange={e => setDisciplineFilter(e.target.value)}
                         >
-                            {disciplines.map((discipline, index) => (
-                                <option key={index} value={index === 0 ? 'all' : discipline.toLowerCase().replace(/ & /g, '-').replace(/ /g, '-')}>
-                                    {discipline}
+                            {disciplines.map((d, i) => (
+                                <option
+                                    key={i}
+                                    value={
+                                        i === 0
+                                            ? 'all'
+                                            : d.toLowerCase().replace(/ & /g, '-').replace(/ /g, '-')
+                                    }
+                                >
+                                    {d}
                                 </option>
                             ))}
                         </select>
@@ -663,7 +649,7 @@ export function Discover() {
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {loading ? (
                         <div className="col-span-full text-center py-12">
-                            <div className="animate-spin inline-block w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full mb-4"></div>
+                            <div className="animate-spin inline-block w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full mb-4" />
                             <p className="text-gray-500">Loading collaborators...</p>
                         </div>
                     ) : filteredPeople.length === 0 ? (
@@ -672,21 +658,25 @@ export function Discover() {
                             <p className="text-gray-500">No collaborators found</p>
                         </div>
                     ) : (
-                        filteredPeople.map((person) => {
+                        filteredPeople.map(person => {
+                            const isOutgoing = outgoingPendingIds.has(person.id)
+                            const isIncoming = incomingPendingIds.has(person.id)
                             const isFading = fadingUsers.has(person.id)
 
                             return (
                                 <Card
                                     key={person.id}
-                                    className={`hover:shadow-lg transition-all duration-500 group ${isFading ? 'opacity-90' : ''
-                                        }`}
+                                    className="hover:shadow-lg transition-all duration-300 group"
                                 >
                                     <CardContent className="p-5">
                                         <div className="flex items-start justify-between mb-4 gap-2">
                                             <div className="flex items-center gap-3 min-w-0">
                                                 <img
-                                                    src={person.photoURL || `https://api.dicebear.com/7.x/${person.avatarStyle || 'avataaars'}/svg?seed=${encodeURIComponent(person.avatarSeed || person.email || person.id)}`}
-                                                    alt={`${person.firstName || ''} ${person.lastName || ''}`}
+                                                    src={
+                                                        person.photoURL ||
+                                                        `https://api.dicebear.com/7.x/${person.avatarStyle || 'avataaars'}/svg?seed=${encodeURIComponent(person.avatarSeed || person.email || person.id)}`
+                                                    }
+                                                    alt={`${person.firstName} ${person.lastName}`}
                                                     className="w-12 h-12 rounded-full border border-gray-200 dark:border-gray-700 cursor-pointer hover:border-blue-500 transition-colors shrink-0"
                                                     onClick={() => navigate(`/profile/${person.id}`)}
                                                 />
@@ -697,58 +687,88 @@ export function Discover() {
                                                     >
                                                         {person.firstName} {person.lastName}
                                                     </h3>
-                                                    <p className="text-xs text-gray-500 dark:text-gray-400">{person.role}</p>
+                                                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                                                        {person.role}
+                                                    </p>
                                                 </div>
                                             </div>
-                                            <div className="flex flex-col items-end gap-1 shrink-0">
-                                                <Button
-                                                    size="sm"
-                                                    variant={isFading ? 'outline' : 'secondary'}
-                                                    className={`h-8 px-3 text-xs ${isFading ? 'text-green-600 border-green-200 bg-green-50 dark:bg-green-900/30 dark:border-green-800 dark:text-green-400' : ''}`}
-                                                    onClick={() => handleConnect(person.id)}
-                                                    disabled={isFading}
-                                                >
-                                                    {isFading ? (
-                                                        <>
-                                                            <Check className="h-3 w-3 mr-1" />
-                                                            Request sent
-                                                        </>
-                                                    ) : (
-                                                        <>
-                                                            <UserPlus className="h-3 w-3 mr-1" />
-                                                            Connect
-                                                        </>
-                                                    )}
-                                                </Button>
+
+                                            {/* ✅ Connection button — correct state for all cases */}
+                                            <div className="shrink-0">
+                                                {isOutgoing || isFading ? (
+                                                    <Button
+                                                        size="sm"
+                                                        variant="outline"
+                                                        className="h-8 px-3 text-xs text-amber-600 border-amber-200 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-800 dark:text-amber-400"
+                                                        disabled
+                                                    >
+                                                        <Check className="h-3 w-3 mr-1" />
+                                                        Request Sent
+                                                    </Button>
+                                                ) : isIncoming ? (
+                                                    <Button
+                                                        size="sm"
+                                                        className="h-8 px-3 text-xs bg-green-600 hover:bg-green-700"
+                                                        onClick={() => navigate(`/profile/${person.id}`)}
+                                                    >
+                                                        <Check className="h-3 w-3 mr-1" />
+                                                        Respond
+                                                    </Button>
+                                                ) : (
+                                                    <Button
+                                                        size="sm"
+                                                        variant="secondary"
+                                                        className="h-8 px-3 text-xs"
+                                                        onClick={() => handleConnect(person.id)}
+                                                    >
+                                                        <UserPlus className="h-3 w-3 mr-1" />
+                                                        Connect
+                                                    </Button>
+                                                )}
                                             </div>
                                         </div>
 
                                         <div className="space-y-3">
                                             <div className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400">
                                                 <BookOpen className="h-3 w-3" />
-                                                {person.discipline || <span className="italic text-gray-400">No discipline listed</span>}
+                                                {person.discipline || (
+                                                    <span className="italic text-gray-400">
+                                                        No discipline listed
+                                                    </span>
+                                                )}
                                             </div>
-
                                             <p className="text-sm text-gray-600 dark:text-gray-300 line-clamp-2 min-h-[2.5rem]">
-                                                {person.bio || <span className="italic text-gray-400">No bio available</span>}
+                                                {person.bio || (
+                                                    <span className="italic text-gray-400">
+                                                        No bio available
+                                                    </span>
+                                                )}
                                             </p>
-
                                             <div className="flex flex-wrap gap-1.5 pt-1">
                                                 {(person.skills || []).length > 0 ? (
                                                     <>
-                                                        {person.skills.slice(0, 3).map((skill, index) => (
-                                                            <Badge key={index} variant="outline" className="text-[10px] px-2 py-0.5 h-5 bg-gray-50 dark:bg-gray-800/50">
+                                                        {person.skills.slice(0, 3).map((skill, i) => (
+                                                            <Badge
+                                                                key={i}
+                                                                variant="outline"
+                                                                className="text-[10px] px-2 py-0.5 h-5 bg-gray-50 dark:bg-gray-800/50"
+                                                            >
                                                                 {skill}
                                                             </Badge>
                                                         ))}
                                                         {person.skills.length > 3 && (
-                                                            <Badge variant="outline" className="text-[10px] px-2 py-0.5 h-5">
+                                                            <Badge
+                                                                variant="outline"
+                                                                className="text-[10px] px-2 py-0.5 h-5"
+                                                            >
                                                                 +{person.skills.length - 3}
                                                             </Badge>
                                                         )}
                                                     </>
                                                 ) : (
-                                                    <span className="text-[10px] italic text-gray-400">No skills listed</span>
+                                                    <span className="text-[10px] italic text-gray-400">
+                                                        No skills listed
+                                                    </span>
                                                 )}
                                             </div>
                                         </div>
@@ -757,18 +777,20 @@ export function Discover() {
                             )
                         })
                     )}
-                    
-                    {/* Infinite scroll sentinel for people */}
+
                     {!loading && peopleState.hasMore && (
-                        <div ref={peopleScroll.sentinelRef} className="col-span-full flex justify-center py-8">
+                        <div
+                            ref={peopleScroll.sentinelRef}
+                            className="col-span-full flex justify-center py-8"
+                        >
                             {peopleScroll.isLoading ? (
                                 <div className="flex items-center gap-2 text-gray-500">
                                     <Loader2 className="h-4 w-4 animate-spin" />
                                     <span>Loading more collaborators...</span>
                                 </div>
                             ) : (
-                                <Button 
-                                    variant="outline" 
+                                <Button
+                                    variant="outline"
                                     onClick={peopleScroll.loadMore}
                                     className="px-6 py-2"
                                 >
@@ -780,25 +802,25 @@ export function Discover() {
                 </div>
             </section>
 
-            {/* Discover Projects Section */}
+            {/* ── Explore Projects ── */}
             <section id="discover-projects" className="mb-12">
                 <div className="flex flex-col lg:flex-row lg:justify-between lg:items-center mb-6 gap-4">
                     <h2 className="text-2xl font-bold">Explore Projects</h2>
                     <div className="flex flex-col sm:flex-row gap-3">
                         <div className="relative flex-1 sm:flex-none">
-                            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-500" />
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
                             <Input
                                 type="text"
                                 placeholder="Search projects"
                                 className="pl-10 w-full sm:w-64"
                                 value={projectsSearch}
-                                onChange={(e) => setProjectsSearch(e.target.value)}
+                                onChange={e => setProjectsSearch(e.target.value)}
                             />
                         </div>
                         <select
                             className="px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-sm"
                             value={statusFilter}
-                            onChange={(e) => setStatusFilter(e.target.value)}
+                            onChange={e => setStatusFilter(e.target.value)}
                         >
                             <option value="all">All Statuses</option>
                             <option value="recruiting">Recruiting</option>
@@ -812,7 +834,7 @@ export function Discover() {
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                     {loading ? (
                         <div className="col-span-full text-center py-12">
-                            <div className="animate-spin inline-block w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full mb-4"></div>
+                            <div className="animate-spin inline-block w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full mb-4" />
                             <p className="text-gray-500">Loading projects...</p>
                         </div>
                     ) : filteredProjects.length === 0 ? (
@@ -821,22 +843,24 @@ export function Discover() {
                             <p className="text-gray-500">No projects found</p>
                         </div>
                     ) : (
-                        filteredProjects.map((project) => (
+                        filteredProjects.map(project => (
                             <DiscoverProjectCard key={project.id} project={project} />
                         ))
                     )}
-                    
-                    {/* Infinite scroll sentinel for projects */}
+
                     {!loading && projectsState.hasMore && (
-                        <div ref={projectsScroll.sentinelRef} className="col-span-full flex justify-center py-8">
+                        <div
+                            ref={projectsScroll.sentinelRef}
+                            className="col-span-full flex justify-center py-8"
+                        >
                             {projectsScroll.isLoading ? (
                                 <div className="flex items-center gap-2 text-gray-500">
                                     <Loader2 className="h-4 w-4 animate-spin" />
                                     <span>Loading more projects...</span>
                                 </div>
                             ) : (
-                                <Button 
-                                    variant="outline" 
+                                <Button
+                                    variant="outline"
                                     onClick={projectsScroll.loadMore}
                                     className="px-6 py-2"
                                 >
@@ -848,7 +872,7 @@ export function Discover() {
                 </div>
             </section>
 
-            {/* Trending Topics Section */}
+            {/* ── Trending Topics ── */}
             <section className="mb-8">
                 <div className="flex justify-between items-center mb-6">
                     <h2 className="text-2xl font-bold">Trending Topics</h2>
@@ -863,6 +887,7 @@ export function Discover() {
                         Refresh
                     </Button>
                 </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     {topicsState.items.length === 0 ? (
                         <div className="col-span-full text-center py-8">
@@ -870,7 +895,7 @@ export function Discover() {
                             <p className="text-gray-500">No trending topics yet</p>
                         </div>
                     ) : (
-                        topicsState.items.map((topic) => {
+                        topicsState.items.map(topic => {
                             const iconMap: Record<string, LucideIcon> = {
                                 bot: Bot,
                                 globe: Globe,
@@ -884,60 +909,77 @@ export function Discover() {
                             }
                             const TopicIcon = iconMap[topic.icon] || Monitor
                             return (
-                            <Card key={topic.id} className="hover:shadow-lg transition-all hover:border-blue-500">
-                                <CardContent className="p-6">
-                                    <div className="flex items-center justify-between mb-4">
-                                        <TopicIcon className="h-6 w-6 text-gray-600 dark:text-gray-300" />
-                                        <Badge variant="secondary" className="text-xs">{topic.sourceLabel || topic.source}</Badge>
-                                    </div>
-                                    <h3 className="text-lg font-bold mb-3 line-clamp-2" title={topic.title}>
-                                        {topic.title}
-                                    </h3>
-                                    {topic.description && topic.description !== topic.title && (
-                                        <p className="text-sm text-gray-600 dark:text-gray-300 mb-4 line-clamp-3">
-                                            {topic.description}
-                                        </p>
-                                    )}
-                                    <div className="flex flex-wrap gap-2 mb-4">
-                                        <Badge variant="outline" className="text-xs bg-gray-50 dark:bg-gray-800">
-                                            {topic.category}
-                                        </Badge>
-                                        {topic.tags.slice(0, 2).map((tag, i) => (
-                                            <Badge key={i} variant="outline" className="text-xs bg-gray-50 dark:bg-gray-800">
-                                                {tag}
+                                <Card
+                                    key={topic.id}
+                                    className="hover:shadow-lg transition-all hover:border-blue-500"
+                                >
+                                    <CardContent className="p-6">
+                                        <div className="flex items-center justify-between mb-4">
+                                            <TopicIcon className="h-6 w-6 text-gray-600 dark:text-gray-300" />
+                                            <Badge variant="secondary" className="text-xs">
+                                                {topic.sourceLabel || topic.source}
                                             </Badge>
-                                        ))}
-                                    </div>
-                                    <div className="flex justify-between items-center mt-auto">
-                                        <span className="text-xs text-gray-500">
-                                            Trending in tech
-                                        </span>
-                                        <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={() => window.open(topic.url, '_blank')}
-                                            className="text-blue-600 hover:text-blue-800 text-sm font-medium flex items-center gap-1"
+                                        </div>
+                                        <h3
+                                            className="text-lg font-bold mb-3 line-clamp-2"
+                                            title={topic.title}
                                         >
-                                            Read <ExternalLink className="h-3 w-3" />
-                                        </Button>
-                                    </div>
-                                </CardContent>
-                            </Card>
+                                            {topic.title}
+                                        </h3>
+                                        {topic.description && topic.description !== topic.title && (
+                                            <p className="text-sm text-gray-600 dark:text-gray-300 mb-4 line-clamp-3">
+                                                {topic.description}
+                                            </p>
+                                        )}
+                                        <div className="flex flex-wrap gap-2 mb-4">
+                                            <Badge
+                                                variant="outline"
+                                                className="text-xs bg-gray-50 dark:bg-gray-800"
+                                            >
+                                                {topic.category}
+                                            </Badge>
+                                            {topic.tags.slice(0, 2).map((tag, i) => (
+                                                <Badge
+                                                    key={i}
+                                                    variant="outline"
+                                                    className="text-xs bg-gray-50 dark:bg-gray-800"
+                                                >
+                                                    {tag}
+                                                </Badge>
+                                            ))}
+                                        </div>
+                                        <div className="flex justify-between items-center mt-auto">
+                                            <span className="text-xs text-gray-500">
+                                                Trending in tech
+                                            </span>
+                                            <Button
+                                                variant="ghost"
+                                                size="sm"
+                                                onClick={() => window.open(topic.url, '_blank')}
+                                                className="text-blue-600 hover:text-blue-800 text-sm font-medium flex items-center gap-1"
+                                            >
+                                                Read <ExternalLink className="h-3 w-3" />
+                                            </Button>
+                                        </div>
+                                    </CardContent>
+                                </Card>
                             )
                         })
                     )}
-                    
-                    {/* Infinite scroll sentinel for trending topics */}
+
                     {topicsState.hasMore && (
-                        <div ref={topicsScroll.sentinelRef} className="col-span-full flex justify-center py-8">
+                        <div
+                            ref={topicsScroll.sentinelRef}
+                            className="col-span-full flex justify-center py-8"
+                        >
                             {topicsScroll.isLoading ? (
                                 <div className="flex items-center gap-2 text-gray-500">
                                     <Loader2 className="h-4 w-4 animate-spin" />
                                     <span>Loading more topics...</span>
                                 </div>
                             ) : (
-                                <Button 
-                                    variant="outline" 
+                                <Button
+                                    variant="outline"
                                     onClick={topicsScroll.loadMore}
                                     className="px-6 py-2"
                                 >

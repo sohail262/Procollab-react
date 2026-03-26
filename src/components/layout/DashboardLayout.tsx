@@ -4,6 +4,9 @@ import { Button } from '@/components/ui/button'
 import { ModeToggle } from '@/components/mode-toggle'
 import { ConnectionRequestsDropdown } from '@/components/ConnectionRequestsDropdown'
 import { NotificationsDropdown } from '@/components/NotificationsDropdown'
+import { AnimatePresence } from 'framer-motion'
+import { NotificationPermissionPrompt } from '@/components/NotificationPermissionPrompt'
+import { useNotificationPrompt } from '@/hooks/useNotificationPrompt'
 import {
     LayoutDashboard,
     FolderKanban,
@@ -44,6 +47,9 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
     const navigate = useNavigate()
     const [sidebarOpen, setSidebarOpen] = useState(false)
     const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
+
+    // Notification prompt hook
+    const { showPrompt, handleDismiss, handleAccept } = useNotificationPrompt(user?.uid ?? null)
 
     // Search state
     const [searchQuery, setSearchQuery] = useState('')
@@ -303,6 +309,16 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                     onClick={() => setSidebarOpen(false)}
                 ></div>
             )}
+
+            {/* Notification Permission Prompt */}
+            <AnimatePresence>
+                {showPrompt && user && (
+                    <NotificationPermissionPrompt
+                        onAccept={() => handleAccept(user.uid)}
+                        onDismiss={handleDismiss}
+                    />
+                )}
+            </AnimatePresence>
         </div>
     )
 }

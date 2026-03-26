@@ -2,18 +2,20 @@ import {
     doc,
     getDoc,
     deleteDoc,
-    setDoc,
-    addDoc,
-    collection,
     writeBatch,
     serverTimestamp,
+    collection,
 } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
+import {
+    buildNotificationDoc,
+    buildConnectionAcceptedNotif,
+    buildConnectionRejectedNotif,
+    buildConnectionWithdrawnNotif,
+    buildConnectionRequestNotif,  // ← we add this below
+} from '@/services/notificationService'
 
-/**
- * Outgoing request (I sent to them): users/{theirUid}/connectionRequests/{myUid}
- * Incoming (they sent to me): users/{myUid}/connectionRequests/{theirUid}
- */
+// ─── Status check ────────────────────────────────────────────────────────────
 
 export async function hasOutgoingRequestTo(
     myUid: string,
@@ -24,94 +26,196 @@ export async function hasOutgoingRequestTo(
     return snap.exists()
 }
 
+export async function getConnectionStatus(
+    myUid: string,
+    otherUid: string
+): Promise<'none' | 'pending_out' | 'pending_in' | 'connected'> {
+    // 1. Check friends (both sides should have it, check mine)
+    const friendSnap = await getDoc(doc(db, 'users', myUid, 'friends', otherUid))
+    if (friendSnap.exists()) return 'connected'
+
+    // 2. Check if I sent a request to them
+    const outSnap = await getDoc(
+        doc(db, 'users', otherUid, 'connectionRequests', myUid)
+    )
+    if (outSnap.exists()) return 'pending_out'
+
+    // 3. Check if they sent a request to me
+    const inSnap = await getDoc(
+        doc(db, 'users', myUid, 'connectionRequests', otherUid)
+    )
+    if (inSnap.exists()) return 'pending_in'
+
+    return 'none'
+}
+
+// ─── Send ─────────────────────────────────────────────────────────────────────
+
+export async function sendConnectionRequest(
+    senderUid: string,
+    targetUid: string
+): Promise<void> {
+    // Guard: already connected or pending
+    const status = await getConnectionStatus(senderUid, targetUid)
+    if (status !== 'none') return
+
+    const senderDoc = await getDoc(doc(db, 'users', senderUid))
+    const senderData = senderDoc.data()
+    const senderName = senderData
+        ? `${senderData.firstName || ''} ${senderData.lastName || ''}`.trim() ||
+          senderData.email
+        : 'Someone'
+
+    const batch = writeBatch(db)
+
+    // Write connectionRequest doc under TARGET's sub-collection
+    // Doc ID = senderUid so we can always look it up directionally
+    batch.set(
+        doc(db, 'users', targetUid, 'connectionRequests', senderUid),
+        {
+            from: senderUid,
+            fromName: senderName,
+            fromEmail: senderData?.email ?? '',
+            sentAt: serverTimestamp(),
+            status: 'pending',
+        }
+    )
+
+    // Notify target using unified service
+    buildNotificationDoc(
+        batch,
+        targetUid,
+        buildConnectionRequestNotif(senderName, senderUid, senderData?.photoURL ?? null)
+    )
+
+    await batch.commit()
+}
+
+// ─── Accept ───────────────────────────────────────────────────────────────────
+
 export async function acceptConnectionRequest(
     receiverUid: string,
     senderUid: string
 ): Promise<void> {
-    const batch = writeBatch(db)
-
-    const requestRef = doc(db, 'users', receiverUid, 'connectionRequests', senderUid)
+    const requestRef = doc(
+        db, 'users', receiverUid, 'connectionRequests', senderUid
+    )
     const requestSnap = await getDoc(requestRef)
     if (!requestSnap.exists()) return
 
     const data = requestSnap.data()
     const fromName = (data.fromName as string) || 'Someone'
 
-    const currentUserDoc = await getDoc(doc(db, 'users', receiverUid))
-    const currentUserData = currentUserDoc.data()
-    const currentUserName = currentUserData
-        ? `${currentUserData.firstName || ''} ${currentUserData.lastName || ''}`.trim() || currentUserData.email
+    const receiverDoc = await getDoc(doc(db, 'users', receiverUid))
+    const receiverData = receiverDoc.data()
+    const receiverName = receiverData
+        ? `${receiverData.firstName || ''} ${receiverData.lastName || ''}`.trim() ||
+          receiverData.email
         : 'Someone'
 
-    const currentUserFriendRef = doc(db, 'users', receiverUid, 'friends', senderUid)
-    batch.set(currentUserFriendRef, {
+    const batch = writeBatch(db)
+
+    // ✅ Write to BOTH sides' friends sub-collections
+    batch.set(doc(db, 'users', receiverUid, 'friends', senderUid), {
         userId: senderUid,
         name: fromName,
         addedAt: serverTimestamp(),
         status: 'active',
     })
-
-    const otherUserFriendRef = doc(db, 'users', senderUid, 'friends', receiverUid)
-    batch.set(otherUserFriendRef, {
+    batch.set(doc(db, 'users', senderUid, 'friends', receiverUid), {
         userId: receiverUid,
-        name: currentUserName,
+        name: receiverName,
         addedAt: serverTimestamp(),
         status: 'active',
     })
 
+    // ✅ Delete the connectionRequest doc
     batch.delete(requestRef)
 
-    const notificationRef = doc(collection(db, 'users', senderUid, 'notifications'))
-    batch.set(notificationRef, {
-        title: 'Connection Accepted',
-        body: `${currentUserName} accepted your connection request!`,
-        icon: currentUserData?.photoURL || null,
-        url: `/profile/${receiverUid}`,
-        timestamp: serverTimestamp(),
-        read: false,
-        type: 'connection_accepted',
-    })
+    // ✅ Notify sender
+    buildNotificationDoc(
+        batch,
+        senderUid,
+        buildConnectionAcceptedNotif(
+            receiverName,
+            receiverUid,
+            receiverData?.photoURL ?? null
+        )
+    )
 
     await batch.commit()
 }
+
+// ─── Reject ───────────────────────────────────────────────────────────────────
 
 export async function rejectConnectionRequest(
     receiverUid: string,
     senderUid: string
 ): Promise<void> {
-    const currentUserDoc = await getDoc(doc(db, 'users', receiverUid))
-    const currentUserData = currentUserDoc.data()
-    const currentUserName = currentUserData
-        ? `${currentUserData.firstName || ''} ${currentUserData.lastName || ''}`.trim() || currentUserData.email
+    const requestRef = doc(
+        db, 'users', receiverUid, 'connectionRequests', senderUid
+    )
+    const requestSnap = await getDoc(requestRef)
+    if (!requestSnap.exists()) return
+
+    const receiverDoc = await getDoc(doc(db, 'users', receiverUid))
+    const receiverData = receiverDoc.data()
+    const receiverName = receiverData
+        ? `${receiverData.firstName || ''} ${receiverData.lastName || ''}`.trim() ||
+          receiverData.email
         : 'Someone'
 
-    await deleteDoc(doc(db, 'users', receiverUid, 'connectionRequests', senderUid))
+    const batch = writeBatch(db)
+    batch.delete(requestRef)
 
-    await setDoc(doc(collection(db, 'users', senderUid, 'notifications')), {
-        title: 'Connection Request Declined',
-        body: `${currentUserName} declined your connection request.`,
-        timestamp: serverTimestamp(),
-        read: false,
-        type: 'connection_rejected',
-    })
+    buildNotificationDoc(
+        batch,
+        senderUid,
+        buildConnectionRejectedNotif(receiverName, receiverUid)
+    )
+
+    await batch.commit()
 }
 
-/** Remove outgoing request: users/{targetUserId}/connectionRequests/{senderUid} */
+// ─── Withdraw ─────────────────────────────────────────────────────────────────
+
 export async function withdrawConnectionRequest(
     senderUid: string,
     targetUserId: string
 ): Promise<void> {
-    const ref = doc(db, 'users', targetUserId, 'connectionRequests', senderUid)
+    const ref = doc(
+        db, 'users', targetUserId, 'connectionRequests', senderUid
+    )
     const snap = await getDoc(ref)
     if (!snap.exists()) return
 
-    await deleteDoc(ref)
+    const senderDoc = await getDoc(doc(db, 'users', senderUid))
+    const senderData = senderDoc.data()
+    const senderName = senderData
+        ? `${senderData.firstName || ''} ${senderData.lastName || ''}`.trim() ||
+          senderData.email
+        : 'Someone'
 
-    await addDoc(collection(db, 'users', targetUserId, 'notifications'), {
-        title: 'Connection request withdrawn',
-        body: 'A user withdrew their connection request.',
-        timestamp: serverTimestamp(),
-        read: false,
-        type: 'connection_withdrawn',
-    })
+    const batch = writeBatch(db)
+    batch.delete(ref)
+
+    buildNotificationDoc(
+        batch,
+        targetUserId,
+        buildConnectionWithdrawnNotif(senderName, senderUid)
+    )
+
+    await batch.commit()
+}
+
+// ─── Remove connection (unfriend) ─────────────────────────────────────────────
+
+export async function removeConnection(
+    myUid: string,
+    otherUid: string
+): Promise<void> {
+    const batch = writeBatch(db)
+    batch.delete(doc(db, 'users', myUid, 'friends', otherUid))
+    batch.delete(doc(db, 'users', otherUid, 'friends', myUid))
+    await batch.commit()
 }

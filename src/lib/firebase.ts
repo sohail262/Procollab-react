@@ -1,9 +1,9 @@
 // Firebase configuration
-import { initializeApp } from 'firebase/app';
-import { getAuth } from 'firebase/auth';
-import { getFirestore, connectFirestoreEmulator } from 'firebase/firestore';
-import { getStorage } from 'firebase/storage';
-import { getDatabase } from 'firebase/database';
+import { initializeApp, getApps, getApp } from 'firebase/app'
+import { getAuth } from 'firebase/auth'
+import { getFirestore } from 'firebase/firestore'
+import { getStorage } from 'firebase/storage'
+import { getDatabase } from 'firebase/database'
 
 // Validate required environment variables
 const requiredEnvVars = [
@@ -13,11 +13,11 @@ const requiredEnvVars = [
     'VITE_FIREBASE_STORAGE_BUCKET',
     'VITE_FIREBASE_MESSAGING_SENDER_ID',
     'VITE_FIREBASE_APP_ID'
-];
+]
 
 for (const envVar of requiredEnvVars) {
     if (!import.meta.env[envVar]) {
-        throw new Error(`Missing required environment variable: ${envVar}`);
+        throw new Error(`Missing required environment variable: ${envVar}`)
     }
 }
 
@@ -30,19 +30,20 @@ const firebaseConfig = {
     messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
     appId: import.meta.env.VITE_FIREBASE_APP_ID,
     measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID
-};
+}
 
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
+// ✅ Prevent duplicate app initialization (important for FCM)
+const app = getApps().length === 0
+    ? initializeApp(firebaseConfig)
+    : getApp()
 
-// Initialize Firebase services with modern cache settings
-export const auth = getAuth(app);
-export const db = getFirestore(app);
-export const storage = getStorage(app);
-export const database = getDatabase(app);
+// Initialize Firebase services
+export const auth = getAuth(app)
+export const db = getFirestore(app)
+export const storage = getStorage(app)
+export const database = getDatabase(app)
 
-// Modern Firestore initialization with cache settings
-// The new approach uses initializeFirestore with cache settings instead of enableIndexedDbPersistence
-// This is handled automatically by getFirestore() in modern Firebase SDK
+// ✅ Export app — required by fcmService.ts for getMessaging(app)
+export { app }
 
-export default app;
+export default app

@@ -34,6 +34,14 @@ export interface Task {
     createdAt: Timestamp | Date
     updatedAt: Timestamp | Date
     createdBy: string
+    // Review-related fields
+    statusNote?: string // member's note when updating status
+    reviewStatus?: 'pending_review' | 'approved' | 'changes_requested' | null
+    reviewNote?: string // owner's feedback
+    reviewedBy?: string // owner uid
+    reviewedAt?: Timestamp | Date
+    submittedAt?: Timestamp | Date // when member submitted for review
+    submittedBy?: string // member uid
 }
 
 export interface TimeLog {

@@ -43,7 +43,7 @@ export function GanttChart({ readOnly: _readOnly = false }: GanttChartProps) {
     const { id: projectId } = useParams();
     const { user } = useAuth();
 
-    const [tasks, setTasks] = useState<Task[]>([]);
+    const [allTasks, setAllTasks] = useState<Task[]>([]);
     const [loading, setLoading] = useState(true);
     const [viewMode, setViewMode] = useState<'day' | 'week'>('day');
     const [filterStatus, setFilterStatus] = useState<string>('all');
@@ -61,8 +61,7 @@ export function GanttChart({ readOnly: _readOnly = false }: GanttChartProps) {
                     id: d.id,
                     ...d.data(),
                 })) as Task[];
-                // Only tasks that have a dueDate are meaningful on the timeline
-                setTasks(raw.filter(t => t.dueDate));
+                setAllTasks(raw);
                 setLoading(false);
             },
             (err) => {
@@ -73,6 +72,12 @@ export function GanttChart({ readOnly: _readOnly = false }: GanttChartProps) {
 
         return () => unsubscribe();
     }, [projectId, user]);
+
+    // Filter tasks that have due dates for timeline display
+    const tasksWithDueDates = useMemo(() => 
+        allTasks.filter(t => t.dueDate), 
+        [allTasks]
+    );
 
     // ── Safe date converter ───────────────────────────────────────────────────
     const toDate = (value: any): Date => {
@@ -85,22 +90,22 @@ export function GanttChart({ readOnly: _readOnly = false }: GanttChartProps) {
 
     // ── Derived stats for student motivation ─────────────────────────────────
     const stats = useMemo(() => {
-        const total = tasks.length;
-        const done = tasks.filter(t => t.status === 'done').length;
-        const overdue = tasks.filter(t => {
+        const total = allTasks.length;
+        const done = allTasks.filter(t => t.status === 'done').length;
+        const overdue = tasksWithDueDates.filter(t => {
             const due = toDate(t.dueDate);
             return isPast(due) && t.status !== 'done';
         }).length;
-        const dueToday = tasks.filter(t => isToday(toDate(t.dueDate))).length;
+        const dueToday = tasksWithDueDates.filter(t => isToday(toDate(t.dueDate))).length;
         const pct = total > 0 ? Math.round((done / total) * 100) : 0;
         return { total, done, overdue, dueToday, pct };
-    }, [tasks]);
+    }, [allTasks, tasksWithDueDates]);
 
     // ── Build chart data ──────────────────────────────────────────────────────
     const data = useMemo(() => {
         const filtered = filterStatus === 'all'
-            ? tasks
-            : tasks.filter(t => t.status === filterStatus);
+            ? tasksWithDueDates
+            : tasksWithDueDates.filter(t => t.status === filterStatus);
 
         return filtered
             .map((task) => {
@@ -126,7 +131,7 @@ export function GanttChart({ readOnly: _readOnly = false }: GanttChartProps) {
                 };
             })
             .sort((a, b) => a.startDate - b.startDate);
-    }, [tasks, viewMode, filterStatus]);
+    }, [tasksWithDueDates, viewMode, filterStatus]);
 
     // ── Custom tooltip ────────────────────────────────────────────────────────
     const CustomTooltip = ({ active, payload }: any) => {
@@ -301,8 +306,16 @@ export function GanttChart({ readOnly: _readOnly = false }: GanttChartProps) {
                 {data.length === 0 ? (
                     <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-3">
                         <div className="text-5xl">📅</div>
-                        <p className="text-sm font-medium">No tasks with due dates</p>
-                        <p className="text-xs">Add due dates to tasks to see the timeline here.</p>
+                        <p className="text-sm font-medium">No tasks with due dates found</p>
+                        <p className="text-xs text-center max-w-md">
+                            The Gantt chart shows tasks with due dates to visualize your project timeline. 
+                            Add due dates to your tasks in the Kanban board to see them here.
+                        </p>
+                        {stats.total > 0 && (
+                            <p className="text-xs text-blue-600 font-medium">
+                                {stats.total} task(s) exist but need due dates to appear on timeline
+                            </p>
+                        )}
                     </div>
                 ) : (
                     <ResponsiveContainer width="100%" height={Math.max(data.length * 50 + 60, 300)}>
@@ -340,7 +353,7 @@ export function GanttChart({ readOnly: _readOnly = false }: GanttChartProps) {
                                     position: 'right',
                                     fontSize: 11,
                                     fill: '#64748b',
-                                    formatter: (v: number) =>
+                                    formatter: (v: any) =>
                                         `${v}${viewMode === 'week' ? 'w' : 'd'}`,
                                 }}
                             >

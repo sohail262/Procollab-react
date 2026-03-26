@@ -1,576 +1,712 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Common functions
+
+    // ─── Common Functions ──────────────────────────────────────────────────────
+
     function isSignedIn() {
       return request.auth != null;
     }
-    
+
     function isOwner(userId) {
       return request.auth.uid == userId;
     }
-    
+
     function isAdmin() {
-      return exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+      return isSignedIn() &&
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
     }
-    
+
     function isValidUser() {
       return request.auth != null && request.auth.uid != null;
     }
-    
-    function isProjectOwner(projectId) {
-      return exists(/databases/$(database)/documents/projects/$(projectId)) && 
-             get(/databases/$(database)/documents/projects/$(projectId)).data.createdBy == request.auth.uid;
+
+    // ── Single cached project doc read ────────────────────────────────────────
+    // Firestore caches get() calls within a single request evaluation.
+    // All helpers below reuse this — only ONE actual read per rule evaluation.
+    function getProject(projectId) {
+      return get(/databases/$(database)/documents/projects/$(projectId)).data;
     }
-    
+
+    function projectExists(projectId) {
+      return exists(/databases/$(database)/documents/projects/$(projectId));
+    }
+
+    // ── Is user the project creator? ──────────────────────────────────────────
+    function isProjectOwner(projectId) {
+      return projectExists(projectId) &&
+             getProject(projectId).createdBy == request.auth.uid;
+    }
+
+    // ── Is user in teamMembers map? ───────────────────────────────────────────
+    // Uses `in` operator — faster and safer than map[uid] != null
     function isProjectTeamMember(projectId) {
-      return exists(/databases/$(database)/documents/projects/$(projectId)) && 
+      return projectExists(projectId) &&
+             getProject(projectId).teamMembers != null &&
+             request.auth.uid in getProject(projectId).teamMembers;
+    }
+
+    // ── Owner OR any team member ──────────────────────────────────────────────
+    function canAccessProject(projectId) {
+      return isProjectOwner(projectId) || isProjectTeamMember(projectId);
+    }
+
+    // ── Owner or Admin/Lead role in teamMembers map ───────────────────────────
+    function isProjectTeamLead(projectId) {
+      return projectExists(projectId) &&
+             getProject(projectId).teamMembers != null &&
+             request.auth.uid in getProject(projectId).teamMembers &&
              (
-               (get(/databases/$(database)/documents/projects/$(projectId)).data.keys().hasAny(['teamMembers']) && 
-                get(/databases/$(database)/documents/projects/$(projectId)).data.teamMembers[request.auth.uid] != null) ||
-               (get(/databases/$(database)/documents/projects/$(projectId)).data.keys().hasAny(['members']) && 
-                get(/databases/$(database)/documents/projects/$(projectId)).data.members.hasAny([request.auth.uid]))
+               getProject(projectId).teamMembers[request.auth.uid].role == 'Owner' ||
+               getProject(projectId).teamMembers[request.auth.uid].role == 'Admin'
              );
     }
-    
-    function isProjectTeamLead(projectId) {
-      return exists(/databases/$(database)/documents/projects/$(projectId)) && 
-             get(/databases/$(database)/documents/projects/$(projectId)).data.teamMembers != null && 
-             get(/databases/$(database)/documents/projects/$(projectId)).data.teamMembers[request.auth.uid] != null &&
-             (get(/databases/$(database)/documents/projects/$(projectId)).data.teamMembers[request.auth.uid].role == 'Project Lead' || 
-              get(/databases/$(database)/documents/projects/$(projectId)).data.teamMembers[request.auth.uid].role == 'Admin');
+
+    // ── Task field helpers ────────────────────────────────────────────────────
+
+    // Only status + updatedAt are changing (assignee drag-drop)
+    function isOnlyStatusUpdate() {
+      return request.resource.data.diff(resource.data)
+               .affectedKeys()
+               .hasOnly(['status', 'updatedAt']);
     }
-    
-    // Collection group rules for applications
-    match /{path=**}/applications/{applicationId} {
-      // Allow users to read their own applications
-      allow read: if isValidUser() && resource.data.userId == request.auth.uid;
-      // Allow project owners and team leads to read applications for their projects
-      allow read: if isValidUser() && (
-        isProjectOwner(resource.data.projectId) || 
-        isProjectTeamLead(resource.data.projectId)
+
+    // Assignee updating status with review fields (MyTasksPanel)
+    function isAssigneeStatusUpdateWithReview() {
+      let allowedFields = ['status', 'updatedAt', 'statusNote', 'reviewStatus', 
+                          'submittedAt', 'submittedBy', 'reviewNote', 'reviewedBy', 'reviewedAt'];
+      return request.resource.data.diff(resource.data)
+               .affectedKeys()
+               .hasOnly(allowedFields);
+    }
+
+    // Task assigneeId matches current user
+    function isTaskAssignee() {
+      return resource.data.assigneeId == request.auth.uid;
+    }
+
+    // ─── Invite Tokens ─────────────────────────────────────────────────────────
+    match /inviteTokens/{token} {
+      allow read:   if true;
+      allow create: if isSignedIn();
+      allow update: if isSignedIn() &&
+                       resource.data.status == 'pending';
+      allow delete: if false;
+    }
+
+    // ─── Collection Group: connectionRequests ──────────────────────────────────
+    match /{path=**}/connectionRequests/{requestId} {
+      allow read, get: if isValidUser() && (
+        resource.data.from == request.auth.uid ||
+        resource.data.to   == request.auth.uid
       );
-      // Allow users to create applications
-      allow create: if isValidUser() && request.resource.data.userId == request.auth.uid;
-      // Allow users to update their own applications
-      allow update: if isValidUser() && resource.data.userId == request.auth.uid;
-      // Allow project owners and team leads to update applications for their projects
+      allow list:   if isValidUser();
+      allow create: if isValidUser() &&
+                       request.resource.data.from == request.auth.uid;
       allow update: if isValidUser() && (
-        isProjectOwner(resource.data.projectId) || 
+        resource.data.to   == request.auth.uid ||
+        resource.data.from == request.auth.uid
+      );
+      allow delete: if isValidUser() && (
+        resource.data.from == request.auth.uid ||
+        resource.data.to   == request.auth.uid
+      );
+    }
+
+    // ─── Collection Group: Applications ────────────────────────────────────────
+    match /{path=**}/applications/{applicationId} {
+      allow read: if isValidUser() && (
+        resource.data.userId == request.auth.uid ||
+        isProjectOwner(resource.data.projectId)  ||
         isProjectTeamLead(resource.data.projectId)
       );
-      // Allow users to delete their own applications
-      allow delete: if isValidUser() && resource.data.userId == request.auth.uid;
-      // Allow project owners to delete applications for their projects
-      allow delete: if isValidUser() && isProjectOwner(resource.data.projectId);
+      allow create: if isValidUser() &&
+                       request.resource.data.userId == request.auth.uid;
+      allow update: if isValidUser() && (
+        resource.data.userId == request.auth.uid ||
+        isProjectOwner(resource.data.projectId)  ||
+        isProjectTeamLead(resource.data.projectId)
+      );
+      allow delete: if isValidUser() && (
+        resource.data.userId == request.auth.uid ||
+        isProjectOwner(resource.data.projectId)
+      );
     }
-    
-    // User profiles
+
+    // ─── Users ─────────────────────────────────────────────────────────────────
     match /users/{userId} {
-      // Allow read access to all authenticated users (for profile viewing)
-      // Allow write access only to the user themselves or admins
       allow read, list, get: if isSignedIn();
-      allow create: if isValidUser() && isOwner(userId);
-      
-      // Allow updates to the user's own document
-      // This includes adding applications, projects, saved projects, saved projects, etc.
-      allow update, write: if isValidUser() && (isOwner(userId) || isAdmin());
-      
-      allow delete: if isSignedIn() && (isOwner(userId) || isAdmin());
-      
-      // Nested collections
+      allow create:          if isValidUser() && isOwner(userId);
+      allow update, write:   if isValidUser() && (isOwner(userId) || isAdmin());
+      allow delete:          if isSignedIn()  && (isOwner(userId) || isAdmin());
+
       match /savedProjects/{projectId} {
         allow read, list, write: if isSignedIn() && isOwner(userId);
       }
-      
-      // Nested collections
+
       match /notifications/{notificationId} {
-        // Allow the user themselves to read, write, and list
-        allow read, write, list: if isSignedIn() && isOwner(userId);
-        // Allow any authenticated user to create a notification for this user
-        allow create: if isSignedIn();
+        allow read, list:     if isSignedIn() && isOwner(userId);
+        allow update, delete: if isSignedIn() && isOwner(userId);
+        allow create: if isSignedIn()
+          && request.resource.data.title is string
+          && request.resource.data.body  is string
+          && request.resource.data.read  == false;
       }
-      
-      // Activity collection
+
       match /activity/{activityId} {
         allow read, write, list: if isSignedIn() && isOwner(userId);
       }
-      
-      // Applications subcollection
+
       match /applications/{applicationId} {
-        // Allow users to read, write, and list their own applications
-        allow read, write, list: if isSignedIn() && isOwner(userId);
-        // Allow users to create applications for themselves
-        allow create: if isSignedIn() && isOwner(userId);
+        allow read, list, write: if isSignedIn() && isOwner(userId);
+        allow create:            if isSignedIn() && isOwner(userId);
       }
-      
-      // FCM tokens
+
       match /fcmTokens/{tokenId} {
         allow read, write: if isSignedIn() && isOwner(userId);
       }
 
-       // Connection Requests subcollection
-      match /connectionRequests/{fromUserId} {
-        // Any authenticated user can send a request (create)
-        allow create: if request.auth != null;
-        // Allow users to read their own sent requests and recipients to read received requests
-        allow read: if request.auth != null && (request.auth.uid == userId || request.auth.uid == fromUserId);
-        // Allow both the recipient and sender to update or delete requests
-        allow update, delete: if request.auth != null && (request.auth.uid == userId || request.auth.uid == fromUserId);
-        // Allow write operations for accepting/rejecting requests
-        allow write: if request.auth != null && (request.auth.uid == userId || request.auth.uid == fromUserId);
-        // Allow list operations for querying connection requests
-        allow list: if request.auth != null && (request.auth.uid == userId || request.auth.uid == fromUserId);
+      match /joinedProjects/{projectId} {
+        allow read, list: if isSignedIn() && isOwner(userId);
+        allow write:      if isSignedIn() && isOwner(userId);
+        allow create:     if isSignedIn();
       }
 
-        // Connections subcollection
-      match /connections/{otherUserId} {
-        // Allow users to read/write their own connections
-        allow read, write: if request.auth != null && request.auth.uid == userId;
-        // Allow users to create connections for other users when accepting connection requests
-        // This is needed for mutual connections
-        allow create: if request.auth != null && (
-          request.auth.uid == userId || 
-          request.auth.uid == otherUserId
+      match /connectionRequests/{fromUserId} {
+        allow create: if isSignedIn();
+        allow read, list: if isSignedIn() && (
+          request.auth.uid == userId ||
+          request.auth.uid == fromUserId
         );
-        // Allow update operations for both users in the connection
-        allow update: if request.auth != null && (
-          request.auth.uid == userId || 
-          request.auth.uid == otherUserId
+        allow update, delete, write: if isSignedIn() && (
+          request.auth.uid == userId ||
+          request.auth.uid == fromUserId
         );
-        // Allow delete operations for both users in the connection
-        allow delete: if request.auth != null && (
-          request.auth.uid == userId || 
-          request.auth.uid == otherUserId
-        );
-                 // Allow list operations for querying connections
-         allow list: if request.auth != null && request.auth.uid == userId;
-       }
+      }
 
-       // Friends subcollection
-       match /friends/{friendUserId} {
-         // Allow users to read/write their own friends
-         allow read, write: if request.auth != null && request.auth.uid == userId;
-         // Allow users to create friends for other users when accepting connection requests
-         // This is needed for mutual friend relationships
-         allow create: if request.auth != null && (
-           request.auth.uid == userId || 
-           request.auth.uid == friendUserId
-         );
-         // Allow update operations for both users in the friendship
-         allow update: if request.auth != null && (
-           request.auth.uid == userId || 
-           request.auth.uid == friendUserId
-         );
-         // Allow delete operations for both users in the friendship
-         allow delete: if request.auth != null && (
-           request.auth.uid == userId || 
-           request.auth.uid == friendUserId
-         );
-         // Allow list operations for querying friends
-         allow list: if request.auth != null && request.auth.uid == userId;
-       }
+      match /connections/{otherUserId} {
+        allow read, list, write: if isSignedIn() &&
+          request.auth.uid == userId;
+        allow create, update, delete: if isSignedIn() && (
+          request.auth.uid == userId ||
+          request.auth.uid == otherUserId
+        );
+      }
+
+      match /friends/{friendUserId} {
+        allow read, list, write: if isSignedIn() &&
+          request.auth.uid == userId;
+        allow create, update, delete: if isSignedIn() && (
+          request.auth.uid == userId ||
+          request.auth.uid == friendUserId
+        );
+      }
     }
-    
-    // Projects
+
+    // ─── Projects ──────────────────────────────────────────────────────────────
     match /projects/{projectId} {
-      // Allow read access to all authenticated users
-      // Allow create to any authenticated user
-      // Allow update/delete only to project creator or admins
-      allow read, list: if isSignedIn();
-      allow create: if isValidUser();
-      
-      // Only allow updates if user is the creator or a team member with appropriate permissions
+
+      // !! CRITICAL: public read so unauthenticated users can preview on invite
+      // page AND so usePermissions/useProjectRole can read teamMembers map
+      // without triggering permission errors
+      allow read, list, get: if true;
+      allow create:          if isValidUser();
+
       allow update: if isValidUser() && (
-        resource.data.createdBy == request.auth.uid || 
-        (resource.data.teamMembers != null && 
-        resource.data.teamMembers[request.auth.uid] != null && 
-        (resource.data.teamMembers[request.auth.uid].role == 'Project Lead' || 
-          resource.data.teamMembers[request.auth.uid].role == 'Admin')) ||
-        isAdmin() ||
-        // Allow project creators and team leads to update team member roles
-        (isProjectOwner(projectId) || isProjectTeamLead(projectId))
+        isProjectOwner(projectId)    ||
+        isProjectTeamLead(projectId) ||
+        isAdmin()                    ||
+        // Invited user accepting — ONLY adds themselves to members[]
+        (
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members']) &&
+          request.resource.data.members.hasAll(resource.data.members) &&
+          request.resource.data.members.hasOnly(
+            resource.data.members.concat([request.auth.uid])
+          )
+        )
       );
-      
-      // Only allow deletion if user is the creator or an admin
+
       allow delete: if isValidUser() && (
-        resource.data.createdBy == request.auth.uid || 
-        isAdmin() ||
-        // Allow project creators and team leads to update team member roles
-        (isProjectOwner(projectId) || isProjectTeamLead(projectId))
+        isProjectOwner(projectId) || isAdmin()
       );
-      
-      // Applications
+
+      // ── Tasks ─────────────────────────────────────────────────────────────────
+      match /tasks/{taskId} {
+
+        // !! CRITICAL FIX: must include BOTH `read` AND `list`
+        // onSnapshot uses a list operation — missing `list` was causing the
+        // "Error fetching tasks: Missing or insufficient permissions" error
+        allow read, list, get: if isValidUser() && (
+          isAdmin() || canAccessProject(projectId)
+        );
+
+        // CREATE: owner, admin, team lead only — plain members cannot create
+        allow create: if isValidUser() && (
+          isAdmin()                ||
+          isProjectOwner(projectId) ||
+          isProjectTeamLead(projectId)
+        );
+
+        // UPDATE:
+        //   Owner / Admin / TeamLead → full update
+        //   Assignee (plain member)  → status + review fields OR just status + updatedAt
+        allow update: if isValidUser() && (
+          isAdmin()                    ||
+          isProjectOwner(projectId)    ||
+          isProjectTeamLead(projectId) ||
+          (isTaskAssignee() && (isOnlyStatusUpdate() || isAssigneeStatusUpdateWithReview()))
+        );
+
+        // DELETE: owner, admin, team lead only
+        allow delete: if isValidUser() && (
+          isAdmin()                ||
+          isProjectOwner(projectId) ||
+          isProjectTeamLead(projectId)
+        );
+      }
+
+      // ── Applications ──────────────────────────────────────────────────────────
       match /applications/{applicationId} {
-        // Allow project owner and team leads to read all applications
-        // Allow applicants to read their own applications
-        allow read, list: if isValidUser() && (
-          isProjectOwner(projectId) || 
-          isProjectTeamLead(projectId) || 
+        allow read, list, get: if isValidUser() && (
+          isProjectOwner(projectId)    ||
+          isProjectTeamLead(projectId) ||
           resource.data.userId == request.auth.uid
         );
-        
-        // Allow any authenticated user to create an application
-        allow create: if isValidUser() && request.resource.data.userId == request.auth.uid;
-        
-        // Allow applicants to update their own applications
-        // Also allow project creator or team leads to update any application (for accepting/rejecting)
-        allow update, write: if isValidUser() && (
+        allow create: if isValidUser() &&
+          request.resource.data.userId == request.auth.uid;
+        allow update: if isValidUser() && (
           resource.data.userId == request.auth.uid ||
-          isProjectOwner(projectId) ||
-          isProjectTeamLead(projectId) ||
-          // Also allow the project owner to update applications
-          get(/databases/$(database)/documents/projects/$(projectId)).data.createdBy == request.auth.uid
+          isProjectOwner(projectId)                ||
+          isProjectTeamLead(projectId)
         );
-        
-        // Allow applicants to delete their own applications
-        // Also allow project creator to delete applications
         allow delete: if isValidUser() && (
           resource.data.userId == request.auth.uid ||
-          isProjectOwner(projectId) ||
-          // Also allow the project owner to delete applications
-          get(/databases/$(database)/documents/projects/$(projectId)).data.createdBy == request.auth.uid
+          isProjectOwner(projectId)
         );
       }
-      
-      // Comments
+
+      // ── Comments ──────────────────────────────────────────────────────────────
       match /comments/{commentId} {
-        // Anyone can read comments
-        allow read: if isValidUser();
-        
-        // Anyone can create comments, but must include their user ID
-        allow create: if isValidUser() && request.resource.data.userId == request.auth.uid;
-        
-        // Only comment author, project owner, or admin can update/delete
+        allow read, list, get: if isValidUser();
+        allow create: if isValidUser() &&
+          request.resource.data.userId == request.auth.uid;
         allow update, delete: if isValidUser() && (
-          resource.data.userId == request.auth.uid || 
-          isProjectOwner(projectId) ||
+          resource.data.userId == request.auth.uid ||
+          isProjectOwner(projectId)                ||
           isAdmin()
         );
       }
-      
-      // Project tasks subcollection
-      match /tasks/{taskId} {
-        // Team members can read all tasks
-        allow read: if isValidUser() && 
-          (isProjectOwner(projectId) || isProjectTeamMember(projectId));
-        
-        // Team members can create tasks
-        allow create: if isValidUser() && 
-          (isProjectOwner(projectId) || isProjectTeamMember(projectId));
-        
-        // Task creators and assignees can update tasks
-        allow update: if isValidUser() && 
-          (resource.data.createdBy == request.auth.uid ||
-           resource.data.assignedTo == request.auth.uid ||
-           isProjectOwner(projectId));
-        
-        // Task creators and project creators can delete tasks
-        allow delete: if isValidUser() && 
-          (resource.data.createdBy == request.auth.uid ||
-           isProjectOwner(projectId));
-      }
-      
-      // Project messages subcollection (for team chat)
+
+      // ── Messages ──────────────────────────────────────────────────────────────
       match /messages/{messageId} {
-        // Team members can read all messages
-        allow read: if isValidUser() && 
-          (isProjectOwner(projectId) || isProjectTeamMember(projectId));
-        
-        // Team members can create messages
-        allow create: if isValidUser() && 
-          (isProjectOwner(projectId) || isProjectTeamMember(projectId)) &&
+        allow read, list, get: if isValidUser() && canAccessProject(projectId);
+        allow create: if isValidUser() &&
+          canAccessProject(projectId) &&
           request.resource.data.userId == request.auth.uid;
-        
-        // Message creators can update their own messages
-        allow update: if isValidUser() && resource.data.userId == request.auth.uid;
-        
-        // Message creators and project creators can delete messages
-        allow delete: if isValidUser() && 
-          (resource.data.userId == request.auth.uid ||
-           isProjectOwner(projectId));
-      }
-      
-      // Project files subcollection
-      match /files/{fileId} {
-        // Team members can read all files
-        allow read: if isValidUser() && 
-          (isProjectOwner(projectId) || isProjectTeamMember(projectId));
-        
-        // Team members can upload files
-        allow create: if isValidUser() && 
-          (isProjectOwner(projectId) || isProjectTeamMember(projectId)) &&
-          request.resource.data.uploadedBy == request.auth.uid;
-        
-        // File uploaders can update their own files
-        allow update: if isValidUser() && resource.data.uploadedBy == request.auth.uid;
-        
-        // File uploaders and project creators can delete files
-        allow delete: if isValidUser() && 
-          (resource.data.uploadedBy == request.auth.uid ||
-           isProjectOwner(projectId));
-      }
-      
-      // Project activities subcollection
-      match /activities/{activityId} {
-        // Team members can read all activities
-        allow read: if isValidUser() && 
-          (isProjectOwner(projectId) || isProjectTeamMember(projectId));
-        
-        // Team members can create activities
-        allow create: if isValidUser() && 
-          (isProjectOwner(projectId) || isProjectTeamMember(projectId)) &&
-          request.resource.data.userId == request.auth.uid;
-        
-        // Activity creators can update their own activities
-        allow update: if isValidUser() && resource.data.userId == request.auth.uid;
-        
-        // Activity creators and project creators can delete activities
-        allow delete: if isValidUser() && 
-          (resource.data.userId == request.auth.uid ||
-           isProjectOwner(projectId));
-      }
-      
-      // Online users subcollection (for chat presence)
-      match /onlineUsers/{userId} {
-        // Team members can read online status
-        allow read: if isValidUser() && 
-          (isProjectOwner(projectId) || isProjectTeamMember(projectId));
-        
-        // Users can update their own online status
-        allow write: if isValidUser() && request.auth.uid == userId &&
-          (isProjectOwner(projectId) || isProjectTeamMember(projectId));
-      }
-
-      // Time Logs (Dashboard)
-      match /timeLogs/{logId} {
-        allow read: if isValidUser() && (isProjectOwner(projectId) || isProjectTeamMember(projectId));
-        allow create: if isValidUser() && (isProjectOwner(projectId) || isProjectTeamMember(projectId));
-        allow update, delete: if isValidUser() && (
-          resource.data.userId == request.auth.uid || isProjectOwner(projectId)
-        );
-      }
-
-      // Resources (Dashboard)
-      match /resources/{resourceId} {
-        allow read: if isValidUser() && (isProjectOwner(projectId) || isProjectTeamMember(projectId));
-        allow write: if isValidUser() && (isProjectOwner(projectId) || isProjectTeamLead(projectId));
-      }
-
-      // Whiteboard (Dashboard)
-      match /whiteboard/{document=**} {
-        allow read: if isValidUser() && (isProjectOwner(projectId) || isProjectTeamMember(projectId));
-        allow write: if isValidUser() && (isProjectOwner(projectId) || isProjectTeamMember(projectId));
-      }
-      
-      // Members Subcollection (Dashboard)
-      match /members/{memberId} {
-        allow read: if isValidUser() && (isProjectOwner(projectId) || isProjectTeamMember(projectId));
-        allow write: if isValidUser() && (isProjectOwner(projectId) || isProjectTeamLead(projectId));
-      }
-      
-      // Diagrams subcollection (for Mermaid and Draw.io diagrams)
-      match /diagrams/{diagramId} {
-        // Team members can read all diagrams
-        allow read: if isValidUser() && 
-          (isProjectOwner(projectId) || isProjectTeamMember(projectId));
-        
-        // Allow list queries (for loading all diagrams)
-        allow list: if isValidUser() && 
-          (isProjectOwner(projectId) || isProjectTeamMember(projectId));
-        
-        // Team members can create diagrams
-        allow create: if isValidUser() && 
-          (isProjectOwner(projectId) || isProjectTeamMember(projectId)) &&
-          request.resource.data.createdBy == request.auth.uid;
-        
-        // Diagram creators can update their own diagrams
-        // Project owners and team leads can update any diagram
-        allow update: if isValidUser() && 
-          (resource.data.createdBy == request.auth.uid ||
-           isProjectOwner(projectId) ||
-           isProjectTeamLead(projectId));
-        
-        // Diagram creators and project owners can delete diagrams
-        allow delete: if isValidUser() && 
-          (resource.data.createdBy == request.auth.uid ||
-           isProjectOwner(projectId) ||
-           isProjectTeamLead(projectId));
-      }
-      
-      // Invitations subcollection (for team invites)
-      match /invitations/{inviteId} {
-        // Allow any authenticated user to read invitations (to check if they're invited)
-        allow read: if isValidUser();
-        
-        // Allow list queries
-        allow list: if isValidUser();
-        
-        // Only project owners and team leads can create invitations
-        allow create: if isValidUser() && 
-          (isProjectOwner(projectId) || isProjectTeamLead(projectId));
-        
-        // Only project owners and team leads can update/delete invitations
-        allow update, delete: if isValidUser() && 
-          (isProjectOwner(projectId) || isProjectTeamLead(projectId));
-      }
-      
-      // Join Requests subcollection (for project applications)
-      match /joinRequests/{requestId} {
-        // Allow project owners and team leads to read all requests
-        allow read: if isValidUser() && 
-          (isProjectOwner(projectId) || isProjectTeamLead(projectId));
-        
-        // Allow users to read their own request
-        allow read: if isValidUser() && resource.data.uid == request.auth.uid;
-        
-        // Allow list queries for project team
-        allow list: if isValidUser() && 
-          (isProjectOwner(projectId) || isProjectTeamLead(projectId));
-        
-        // Allow any authenticated user to create a join request
-        allow create: if isValidUser() && request.resource.data.uid == request.auth.uid;
-        
-        // Only project owners and team leads can update (accept/reject) requests
-        allow update: if isValidUser() && 
-          (isProjectOwner(projectId) || isProjectTeamLead(projectId));
-        
-        // Requesters can delete their own requests, or project owners can delete any
-        allow delete: if isValidUser() && 
-          (resource.data.uid == request.auth.uid || isProjectOwner(projectId));
-      }
-    }
-    
-    // Messages
-    match /messages/{messageId} {
-      allow read: if isValidUser() && (
-        resource.data.senderId == request.auth.uid || 
-        resource.data.recipientId == request.auth.uid
-      );
-      
-      allow create: if isValidUser() && request.resource.data.senderId == request.auth.uid;
-      allow update: if isValidUser() && resource.data.senderId == request.auth.uid;
-      allow delete: if isValidUser() && (
-        resource.data.senderId == request.auth.uid || 
-        resource.data.recipientId == request.auth.uid
-      );
-    }
-    
-    // Conversations
-    match /conversations/{conversationId} {
-      // Allow list query for conversations where user is a participant
-      allow list: if isValidUser();
-      
-      // Allow read if user is a participant (handles both array and object formats)
-      allow read: if isValidUser() && (
-        (resource.data.participants is list && resource.data.participants.hasAny([request.auth.uid])) ||
-        (resource.data.participants is map && resource.data.participants[request.auth.uid] == true)
-      );
-      
-      // Allow create if user is including themselves as a participant (handles both formats)
-      allow create: if isValidUser() && (
-        (request.resource.data.participants is list && request.resource.data.participants.hasAny([request.auth.uid])) ||
-        (request.resource.data.participants is map && request.resource.data.participants[request.auth.uid] == true)
-      );
-      
-      // Allow update if user is a participant (handles both formats)
-      allow update: if isValidUser() && (
-        (resource.data.participants is list && resource.data.participants.hasAny([request.auth.uid])) ||
-        (resource.data.participants is map && resource.data.participants[request.auth.uid] == true)
-      );
-      
-      // Allow delete if user is a participant and the creator (handles both formats)
-      allow delete: if isValidUser() && (
-        ((resource.data.participants is list && resource.data.participants.hasAny([request.auth.uid])) ||
-         (resource.data.participants is map && resource.data.participants[request.auth.uid] == true)) &&
-        resource.data.createdBy == request.auth.uid
-      );
-      
-      match /messages/{messageId} {
-        // Allow list query for messages in conversations where user is a participant
-        allow list: if isValidUser() && (
-          exists(/databases/$(database)/documents/conversations/$(conversationId)) &&
-          ((get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants is list && 
-            get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants.hasAny([request.auth.uid])) ||
-           (get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants is map && 
-            get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants[request.auth.uid] == true))
-        );
-        
-        // Allow read if user is a participant in the conversation
-        allow read: if isValidUser() && (
-          exists(/databases/$(database)/documents/conversations/$(conversationId)) &&
-          ((get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants is list && 
-            get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants.hasAny([request.auth.uid])) ||
-           (get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants is map && 
-            get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants[request.auth.uid] == true))
-        );
-        
-        // Allow create if user is a participant and is the sender
-        allow create: if isValidUser() && (
-          exists(/databases/$(database)/documents/conversations/$(conversationId)) &&
-          ((get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants is list && 
-            get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants.hasAny([request.auth.uid])) ||
-           (get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants is map && 
-            get(/databases/$(database)/documents/conversations/$(conversationId)).data.participants[request.auth.uid] == true)) &&
-          request.resource.data.senderId == request.auth.uid
-        );
-        
-        // Allow update if user is the sender
-        allow update: if isValidUser() && (
-          resource.data.senderId == request.auth.uid
-        );
-        
-        // Allow delete if user is the sender
+        allow update: if isValidUser() &&
+          resource.data.userId == request.auth.uid;
         allow delete: if isValidUser() && (
-          resource.data.senderId == request.auth.uid
+          resource.data.userId == request.auth.uid ||
+          isProjectOwner(projectId)
         );
       }
+
+      // ── Files ─────────────────────────────────────────────────────────────────
+      match /files/{fileId} {
+        allow read, list, get: if isValidUser() && canAccessProject(projectId);
+        allow create: if isValidUser() &&
+          canAccessProject(projectId) &&
+          request.resource.data.uploadedBy == request.auth.uid;
+        allow update: if isValidUser() &&
+          resource.data.uploadedBy == request.auth.uid;
+        allow delete: if isValidUser() && (
+          resource.data.uploadedBy == request.auth.uid ||
+          isProjectOwner(projectId)
+        );
+      }
+
+      // ── Activities ────────────────────────────────────────────────────────────
+      match /activities/{activityId} {
+        allow read, list, get: if isValidUser() && canAccessProject(projectId);
+        allow create: if isValidUser() &&
+          canAccessProject(projectId) &&
+          request.resource.data.userId == request.auth.uid;
+        allow update: if isValidUser() &&
+          resource.data.userId == request.auth.uid;
+        allow delete: if isValidUser() && (
+          resource.data.userId == request.auth.uid ||
+          isProjectOwner(projectId)
+        );
+      }
+
+      // ── Online Users ──────────────────────────────────────────────────────────
+      match /onlineUsers/{userId} {
+        allow read, list, get: if isValidUser() && canAccessProject(projectId);
+        allow write: if isValidUser() &&
+          request.auth.uid == userId &&
+          canAccessProject(projectId);
+      }
+
+      // ── Time Logs ─────────────────────────────────────────────────────────────
+      match /timeLogs/{logId} {
+        allow read, list, get: if isValidUser() && canAccessProject(projectId);
+        allow create:          if isValidUser() && canAccessProject(projectId);
+        allow update, delete: if isValidUser() && (
+          resource.data.userId == request.auth.uid ||
+          isProjectOwner(projectId)
+        );
+      }
+
+      // ── Resources ─────────────────────────────────────────────────────────────
+      match /resources/{resourceId} {
+        allow read, list, get: if isValidUser() && canAccessProject(projectId);
+        allow write: if isValidUser() && (
+          isProjectOwner(projectId) ||
+          isProjectTeamLead(projectId)
+        );
+      }
+
+      // ── Whiteboard ────────────────────────────────────────────────────────────
+      match /whiteboard/{document=**} {
+        allow read, list, get: if isValidUser() && canAccessProject(projectId);
+        allow write:           if isValidUser() && canAccessProject(projectId);
+      }
+
+      // ── Members sub-collection ────────────────────────────────────────────────
+      // READ + LIST: any project member
+      //   - TaskDialog reads this to populate assignee dropdown
+      //   - Must allow `list` so getDocs() works
+      // WRITE: owner, lead, or the member themselves
+      match /members/{memberId} {
+        allow read, list, get: if isValidUser() && (
+          canAccessProject(projectId) ||
+          // Allow user to read their own member doc even before
+          // they appear in teamMembers map (invite acceptance flow)
+          request.auth.uid == memberId
+        );
+        allow write: if isValidUser() && (
+          isProjectOwner(projectId)    ||
+          isProjectTeamLead(projectId) ||
+          request.auth.uid == memberId
+        );
+      }
+
+      // ── Diagrams ──────────────────────────────────────────────────────────────
+      match /diagrams/{diagramId} {
+        allow read, list, get: if isValidUser() && canAccessProject(projectId);
+        allow create: if isValidUser() &&
+          canAccessProject(projectId) &&
+          request.resource.data.createdBy == request.auth.uid;
+        allow update: if isValidUser() && (
+          resource.data.createdBy == request.auth.uid ||
+          isProjectOwner(projectId)                   ||
+          isProjectTeamLead(projectId)
+        );
+        allow delete: if isValidUser() && (
+          resource.data.createdBy == request.auth.uid ||
+          isProjectOwner(projectId)                   ||
+          isProjectTeamLead(projectId)
+        );
+      }
+
+      // ── Invitations ───────────────────────────────────────────────────────────
+      match /invitations/{inviteId} {
+        allow read, list, get: if isValidUser();
+        allow create: if isValidUser() && (
+          isProjectOwner(projectId) ||
+          isProjectTeamLead(projectId)
+        );
+        allow update: if isValidUser() && (
+          isProjectOwner(projectId)    ||
+          isProjectTeamLead(projectId) ||
+          resource.data.email == request.auth.token.email
+        );
+        allow delete: if isValidUser() && (
+          isProjectOwner(projectId) ||
+          isProjectTeamLead(projectId)
+        );
+      }
+
+      // ── Join Requests ─────────────────────────────────────────────────────────
+      match /joinRequests/{requestId} {
+        allow read, get: if isValidUser() && (
+          isProjectOwner(projectId)    ||
+          isProjectTeamLead(projectId) ||
+          resource.data.uid == request.auth.uid
+        );
+        allow list: if isValidUser() && (
+          isProjectOwner(projectId) ||
+          isProjectTeamLead(projectId)
+        );
+        allow create: if isValidUser() &&
+          request.resource.data.uid == request.auth.uid;
+        allow update: if isValidUser() && (
+          isProjectOwner(projectId) ||
+          isProjectTeamLead(projectId)
+        );
+        allow delete: if isValidUser() && (
+          resource.data.uid == request.auth.uid ||
+          isProjectOwner(projectId)
+        );
+      }
+
+      // ── Documents ─────────────────────────────────────────────────────────────
+      match /documents/{documentId} {
+        allow read, list, get: if isValidUser() && canAccessProject(projectId);
+        allow create: if isValidUser() &&
+          canAccessProject(projectId) &&
+          request.resource.data.createdBy == request.auth.uid;
+        allow update: if isValidUser() && (
+          resource.data.createdBy == request.auth.uid ||
+          isProjectOwner(projectId)                   ||
+          isProjectTeamLead(projectId)
+        );
+        allow delete: if isValidUser() && (
+          resource.data.createdBy == request.auth.uid ||
+          isProjectOwner(projectId)
+        );
+      }
+
+      // ── Budget ────────────────────────────────────────────────────────────────
+      match /budget/{configId} {
+        allow read, list, get: if isValidUser() && canAccessProject(projectId);
+        allow write: if isValidUser() && (
+          isProjectOwner(projectId) ||
+          isProjectTeamLead(projectId)
+        );
+      }
+
+      // ── Expenses ──────────────────────────────────────────────────────────────
+      match /expenses/{expenseId} {
+        allow read, list, get: if isValidUser() && canAccessProject(projectId);
+        allow create: if isValidUser() &&
+          canAccessProject(projectId) &&
+          request.resource.data.createdBy == request.auth.uid;
+        allow update: if isValidUser() && (
+          resource.data.createdBy == request.auth.uid ||
+          isProjectOwner(projectId)                   ||
+          isProjectTeamLead(projectId)
+        );
+        allow delete: if isValidUser() && (
+          resource.data.createdBy == request.auth.uid ||
+          isProjectOwner(projectId)
+        );
+      }
+
+      // ── Sprints ───────────────────────────────────────────────────────────────
+      match /sprints/{sprintId} {
+        allow read, list, get: if isValidUser() && canAccessProject(projectId);
+        allow create, update, delete: if isValidUser() && (
+          isProjectOwner(projectId) ||
+          isProjectTeamLead(projectId)
+        );
+      }
+
+      // ── Meetings ──────────────────────────────────────────────────────────────
+      match /meetings/{meetingId} {
+        allow read, list, get: if isValidUser() && canAccessProject(projectId);
+        allow create: if isValidUser() &&
+          canAccessProject(projectId) &&
+          request.resource.data.createdBy == request.auth.uid;
+        allow update: if isValidUser() && (
+          resource.data.createdBy == request.auth.uid ||
+          isProjectOwner(projectId)                   ||
+          isProjectTeamLead(projectId)
+        );
+        allow delete: if isValidUser() && (
+          resource.data.createdBy == request.auth.uid ||
+          isProjectOwner(projectId)
+        );
+      }
+
+    } // end /projects/{projectId}
+
+    // ─── Direct Messages ────────────────────────────────────────────────────────
+    match /messages/{messageId} {
+      allow read, list, get: if isValidUser() && (
+        resource.data.senderId    == request.auth.uid ||
+        resource.data.recipientId == request.auth.uid
+      );
+      allow create: if isValidUser() &&
+        request.resource.data.senderId == request.auth.uid;
+      allow update: if isValidUser() &&
+        resource.data.senderId == request.auth.uid;
+      allow delete: if isValidUser() && (
+        resource.data.senderId    == request.auth.uid ||
+        resource.data.recipientId == request.auth.uid
+      );
     }
-    
-    // Global Notifications
+
+    // ─── Conversations ──────────────────────────────────────────────────────────
+    match /conversations/{conversationId} {
+      allow list: if isValidUser();
+
+      allow read, get: if isValidUser() && (
+        (resource.data.participants is list &&
+          resource.data.participants.hasAny([request.auth.uid])) ||
+        (resource.data.participants is map &&
+          resource.data.participants[request.auth.uid] == true)
+      );
+
+      allow create: if isValidUser() && (
+        (request.resource.data.participants is list &&
+          request.resource.data.participants.hasAny([request.auth.uid])) ||
+        (request.resource.data.participants is map &&
+          request.resource.data.participants[request.auth.uid] == true)
+      );
+
+      allow update: if isValidUser() && (
+        (resource.data.participants is list &&
+          resource.data.participants.hasAny([request.auth.uid])) ||
+        (resource.data.participants is map &&
+          resource.data.participants[request.auth.uid] == true)
+      );
+
+      allow delete: if isValidUser() &&
+        resource.data.createdBy == request.auth.uid && (
+          (resource.data.participants is list &&
+            resource.data.participants.hasAny([request.auth.uid])) ||
+          (resource.data.participants is map &&
+            resource.data.participants[request.auth.uid] == true)
+        );
+
+      // ── Conversation Messages ─────────────────────────────────────────────────
+      match /messages/{messageId} {
+        function isConvoParticipant() {
+          let convo = get(
+            /databases/$(database)/documents/conversations/$(conversationId)
+          ).data;
+          return (
+            (convo.participants is list &&
+              convo.participants.hasAny([request.auth.uid])) ||
+            (convo.participants is map &&
+              convo.participants[request.auth.uid] == true)
+          );
+        }
+
+        allow read, list, get: if isValidUser() && isConvoParticipant();
+        allow create: if isValidUser() &&
+          isConvoParticipant() &&
+          request.resource.data.senderId == request.auth.uid;
+        allow update: if isValidUser() &&
+          resource.data.senderId == request.auth.uid;
+        allow delete: if isValidUser() &&
+          resource.data.senderId == request.auth.uid;
+      }
+    }
+
+    // ─── Global Notifications ───────────────────────────────────────────────────
     match /notifications/{notificationId} {
-      // Allow users to read their own notifications
-      allow read: if isValidUser() && resource.data.userId == request.auth.uid;
-      // Allow any authenticated user to create a notification
+      allow read, list, get: if isValidUser() &&
+        resource.data.userId == request.auth.uid;
       allow create: if isValidUser();
-      // Allow users to update their own notifications
-      allow update: if isValidUser() && resource.data.userId == request.auth.uid;
-      // Allow users to delete their own notifications
-      allow delete: if isValidUser() && resource.data.userId == request.auth.uid;
+      allow update: if isValidUser() &&
+        resource.data.userId == request.auth.uid;
+      allow delete: if isValidUser() &&
+        resource.data.userId == request.auth.uid;
     }
-    
-    // System settings and public data
+
+    // ─── Reports ────────────────────────────────────────────────────────────────
+    match /reports/{reportId} {
+      allow create: if isValidUser() &&
+        request.resource.data.reportedBy == request.auth.uid;
+      allow read, list, get: if isValidUser() && (
+        resource.data.reportedBy == request.auth.uid ||
+        isAdmin()
+      );
+      allow update, delete: if isValidUser() && isAdmin();
+    }
+
+    // ─── FCM Queue ──────────────────────────────────────────────────────────────
+    match /fcmQueue/{docId} {
+      allow create: if isValidUser()
+        && request.resource.data.recipientUserId is string
+        && request.resource.data.tokens is list
+        && request.resource.data.tokens.size() > 0
+        && request.resource.data.tokens.size() <= 10;
+      allow read, update, delete: if false;
+    }
+
+    // ─── System ─────────────────────────────────────────────────────────────────
     match /system/{document=**} {
-      allow read: if isValidUser();
-      allow write: if isValidUser() && isAdmin();
+      allow read, list, get: if isValidUser();
+      allow write:           if isValidUser() && isAdmin();
     }
-    
-    // Public data that anyone can read
+
+    // ─── Public Data ────────────────────────────────────────────────────────────
     match /public/{document=**} {
-      allow read: if true;
-      allow write: if isValidUser() && isAdmin();
+      allow read, list, get: if true;
+      allow write:           if isValidUser() && isAdmin();
     }
-    
-    // Platform announcements - readable by all, writable by admins
+
+    // ─── Announcements ──────────────────────────────────────────────────────────
     match /announcements/{announcementId} {
-      allow read, list: if isSignedIn();
+      allow read, list, get:        if isSignedIn();
       allow create, update, delete: if isValidUser() && isAdmin();
     }
-    
-    // Admin activity logs - admin only
+
+    // ─── Admin Logs ─────────────────────────────────────────────────────────────
     match /adminLogs/{logId} {
-      allow read, list: if isValidUser() && isAdmin();
-      allow create: if isValidUser() && isAdmin();
-      allow update, delete: if false; // Logs should not be modified or deleted
+      allow read, list, get: if isValidUser() && isAdmin();
+      allow create:          if isValidUser() && isAdmin();
+      allow update, delete:  if false;
     }
-    
-    // Moderation queue - users can create for their projects, admins can read and update
+
+    // ─── Moderation Queue ───────────────────────────────────────────────────────
     match /moderationQueue/{itemId} {
-      allow read, list: if isValidUser() && isAdmin();
-      allow create: if isValidUser() && request.resource.data.userId == request.auth.uid;
-      allow update: if isValidUser() && isAdmin();
-      allow delete: if isValidUser() && isAdmin();
+      allow read, list, get: if isValidUser() && isAdmin();
+      allow create: if isValidUser() &&
+        request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isValidUser() && isAdmin();
     }
-  }
+
+    // ─── Events ─────────────────────────────────────────────────────────────────
+    match /events/{eventId} {
+      allow read, list, get:        if isSignedIn();
+      allow create, update, delete: if isValidUser() && isAdmin();
+    }
+
+    // ─── Event Teams ────────────────────────────────────────────────────────────
+    match /eventTeams/{teamId} {
+      allow read, list, get: if isSignedIn();
+      allow create: if isValidUser() &&
+        request.resource.data.captainId == request.auth.uid;
+      allow update: if isValidUser() &&
+        resource.data.captainId == request.auth.uid;
+      allow delete: if isValidUser() && (
+        resource.data.captainId == request.auth.uid ||
+        isAdmin()
+      );
+    }
+
+    // ─── Event Join Requests ─────────────────────────────────────────────────────
+    match /eventJoinRequests/{requestId} {
+      allow read, get: if isValidUser() && (
+        resource.data.userId == request.auth.uid ||
+        (
+          exists(/databases/$(database)/documents/eventTeams/$(resource.data.teamId)) &&
+          get(/databases/$(database)/documents/eventTeams/$(resource.data.teamId))
+            .data.captainId == request.auth.uid
+        )
+      );
+      allow list:   if isValidUser();
+      allow create: if isValidUser() &&
+        request.resource.data.userId == request.auth.uid;
+      allow update: if isValidUser() && (
+        exists(/databases/$(database)/documents/eventTeams/$(resource.data.teamId)) &&
+        get(/databases/$(database)/documents/eventTeams/$(resource.data.teamId))
+          .data.captainId == request.auth.uid
+      );
+      allow delete: if isValidUser() && (
+        resource.data.userId == request.auth.uid ||
+        (
+          exists(/databases/$(database)/documents/eventTeams/$(resource.data.teamId)) &&
+          get(/databases/$(database)/documents/eventTeams/$(resource.data.teamId))
+            .data.captainId == request.auth.uid
+        )
+      );
+    }
+
+  } // end match /databases/{database}/documents
 }

@@ -18,19 +18,44 @@ import {
     Users, FolderKanban, TrendingUp, Bell, Star, Shield, Activity,
     Megaphone, Settings2, RefreshCw, Trash2, Edit, Eye, Search,
     UserCog, BarChart3, AlertCircle, CheckCircle2, Clock, Plus,
-    XCircle, Info, AlertTriangle
+    XCircle, Info, AlertTriangle, Flag
 } from 'lucide-react'
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, Legend } from 'recharts'
+import {
+    LineChart, Line, XAxis, YAxis, CartesianGrid,
+    Tooltip, ResponsiveContainer, BarChart, Bar, Legend
+} from 'recharts'
 import {
     loadPlatformStats, loadAllUsers, loadAllProjects, loadAnnouncements,
     loadGrowthData, loadAdminLogs, updateUserRole, toggleUserDisabled,
     deleteUser, updateProjectStatus, toggleProjectFeatured, deleteProject,
     createAnnouncement, updateAnnouncement, deleteAnnouncement, logAdminAction,
     loadModerationQueue, reviewModerationItem,
-    type PlatformStats, type UserData, type ProjectData, type Announcement, type GrowthDataPoint, type ActivityLog, type ModerationItem
+    type PlatformStats, type UserData, type ProjectData,
+    type Announcement, type GrowthDataPoint, type ActivityLog, type ModerationItem
 } from '@/services/adminService'
 import { useToast } from '@/hooks/use-toast'
 import { getFlagMessage } from '@/services/contentModerationService'
+import {
+    collection, query, where, getDocs, orderBy,
+    doc, updateDoc, serverTimestamp
+} from 'firebase/firestore'
+import { db } from '@/lib/firebase'
+
+// ─── Types ───────────────────────────────────────────────
+interface Report {
+    id: string
+    projectId: string
+    projectTitle: string
+    reportedBy: string
+    reporterEmail: string
+    ownerId: string
+    reason: string
+    details?: string
+    status: 'pending' | 'resolved' | 'dismissed'
+    createdAt: any
+    resolvedAt?: any
+    resolvedBy?: string
+}
 
 export function AdminDashboard() {
     const { user } = useAuth()
@@ -47,33 +72,66 @@ export function AdminDashboard() {
     const [growthData, setGrowthData] = useState<GrowthDataPoint[]>([])
     const [activityLogs, setActivityLogs] = useState<ActivityLog[]>([])
     const [moderationQueue, setModerationQueue] = useState<ModerationItem[]>([])
+    const [reports, setReports] = useState<Report[]>([])
     const [reviewNotes, setReviewNotes] = useState('')
 
     // Filter states
     const [userSearch, setUserSearch] = useState('')
     const [projectSearch, setProjectSearch] = useState('')
     const [projectStatusFilter, setProjectStatusFilter] = useState('all')
+    const [reportStatusFilter, setReportStatusFilter] = useState('all')
 
     // Dialog states
     const [announcementDialog, setAnnouncementDialog] = useState(false)
-    const [deleteDialog, setDeleteDialog] = useState<{ type: string; id: string; name: string } | null>(null)
-    const [newAnnouncement, setNewAnnouncement] = useState({ title: '', message: '', type: 'info' as const })
+    const [deleteDialog, setDeleteDialog] = useState<{
+        type: string
+        id: string
+        name: string
+    } | null>(null)
+    const [newAnnouncement, setNewAnnouncement] = useState({
+        title: '',
+        message: '',
+        type: 'info' as const
+    })
 
     useEffect(() => {
         loadData()
     }, [])
 
+    // ─── Load all data ────────────────────────────────────
+    const loadReports = async (): Promise<Report[]> => {
+        try {
+            const reportsRef = collection(db, 'reports')
+            const q = query(reportsRef, orderBy('createdAt', 'desc'))
+            const snap = await getDocs(q)
+            return snap.docs.map(d => ({ id: d.id, ...d.data() } as Report))
+        } catch (error) {
+            console.error('Error loading reports:', error)
+            return []
+        }
+    }
+
     const loadData = async () => {
         setLoading(true)
         try {
-            const [statsData, usersData, projectsData, announcementsData, growthDataRes, logsData, moderationData] = await Promise.all([
+            const [
+                statsData,
+                usersData,
+                projectsData,
+                announcementsData,
+                growthDataRes,
+                logsData,
+                moderationData,
+                reportsData
+            ] = await Promise.all([
                 loadPlatformStats(),
                 loadAllUsers(),
                 loadAllProjects(),
                 loadAnnouncements(),
                 loadGrowthData(30),
                 loadAdminLogs(),
-                loadModerationQueue()
+                loadModerationQueue(),
+                loadReports()
             ])
             setStats(statsData)
             setUsers(usersData)
@@ -82,6 +140,7 @@ export function AdminDashboard() {
             setGrowthData(growthDataRes)
             setActivityLogs(logsData)
             setModerationQueue(moderationData)
+            setReports(reportsData)
         } catch (error) {
             console.error('Error loading admin data:', error)
         } finally {
@@ -95,6 +154,7 @@ export function AdminDashboard() {
         setRefreshing(false)
     }
 
+    // ─── Formatters ──────────────────────────────────────
     const formatDate = (timestamp: any) => {
         if (!timestamp) return 'N/A'
         const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp)
@@ -111,101 +171,221 @@ export function AdminDashboard() {
         return `${Math.floor(seconds / 86400)}d ago`
     }
 
-    // User actions
-    const handleUserRoleChange = async (userId: string, role: string, userName: string) => {
+    // ─── User actions ─────────────────────────────────────
+    const handleUserRoleChange = async (
+        userId: string,
+        role: string,
+        userName: string
+    ) => {
         try {
             await updateUserRole(userId, role)
-            await logAdminAction('change_role', user!.uid, user!.displayName || user!.email || '', 'user', userId, userName, `Changed role to ${role}`)
+            await logAdminAction(
+                'change_role', user!.uid,
+                user!.displayName || user!.email || '',
+                'user', userId, userName,
+                `Changed role to ${role}`
+            )
             setUsers(users.map(u => u.id === userId ? { ...u, role } : u))
-            toast({ title: 'Role Updated', description: `${userName}'s role updated to ${role}`, variant: 'success' })
+            toast({
+                title: 'Role Updated',
+                description: `${userName}'s role updated to ${role}`,
+                variant: 'success'
+            })
         } catch (error) {
             console.error('Error updating role:', error)
-            toast({ title: 'Update Failed', description: 'Failed to update user role', variant: 'destructive' })
+            toast({
+                title: 'Update Failed',
+                description: 'Failed to update user role',
+                variant: 'destructive'
+            })
         }
     }
 
-    const handleToggleUserDisabled = async (userId: string, disabled: boolean, userName: string) => {
+    const handleToggleUserDisabled = async (
+        userId: string,
+        disabled: boolean,
+        userName: string
+    ) => {
         try {
             await toggleUserDisabled(userId, disabled)
-            await logAdminAction(disabled ? 'disable_user' : 'enable_user', user!.uid, user!.displayName || '', 'user', userId, userName)
+            await logAdminAction(
+                disabled ? 'disable_user' : 'enable_user',
+                user!.uid, user!.displayName || '',
+                'user', userId, userName
+            )
             setUsers(users.map(u => u.id === userId ? { ...u, disabled } : u))
-            toast({ title: disabled ? 'User Disabled' : 'User Enabled', description: `${userName} has been ${disabled ? 'disabled' : 'enabled'}`, variant: 'success' })
+            toast({
+                title: disabled ? 'User Disabled' : 'User Enabled',
+                description: `${userName} has been ${disabled ? 'disabled' : 'enabled'}`,
+                variant: 'success'
+            })
         } catch (error) {
             console.error('Error toggling user:', error)
-            toast({ title: 'Action Failed', description: 'Failed to update user status', variant: 'destructive' })
+            toast({
+                title: 'Action Failed',
+                description: 'Failed to update user status',
+                variant: 'destructive'
+            })
         }
     }
 
-    // Project actions
-    const handleProjectStatusChange = async (projectId: string, status: string, projectTitle: string) => {
+    // ─── Project actions ──────────────────────────────────
+    const handleProjectStatusChange = async (
+        projectId: string,
+        status: string,
+        projectTitle: string
+    ) => {
         try {
             await updateProjectStatus(projectId, status)
-            await logAdminAction('change_status', user!.uid, user!.displayName || '', 'project', projectId, projectTitle, `Changed status to ${status}`)
-            setProjects(projects.map(p => p.id === projectId ? { ...p, status } : p))
+            await logAdminAction(
+                'change_status', user!.uid, user!.displayName || '',
+                'project', projectId, projectTitle,
+                `Changed status to ${status}`
+            )
+            setProjects(projects.map(p =>
+                p.id === projectId ? { ...p, status } : p
+            ))
         } catch (error) {
             console.error('Error updating status:', error)
         }
     }
 
-    const handleToggleFeatured = async (projectId: string, featured: boolean, projectTitle: string) => {
+    const handleToggleFeatured = async (
+        projectId: string,
+        featured: boolean,
+        projectTitle: string
+    ) => {
         try {
             await toggleProjectFeatured(projectId, featured)
-            await logAdminAction(featured ? 'feature_project' : 'unfeature_project', user!.uid, user!.displayName || '', 'project', projectId, projectTitle)
-            setProjects(projects.map(p => p.id === projectId ? { ...p, featured } : p))
+            await logAdminAction(
+                featured ? 'feature_project' : 'unfeature_project',
+                user!.uid, user!.displayName || '',
+                'project', projectId, projectTitle
+            )
+            setProjects(projects.map(p =>
+                p.id === projectId ? { ...p, featured } : p
+            ))
         } catch (error) {
             console.error('Error toggling featured:', error)
         }
     }
 
-    // Delete handlers
+    // ─── Delete handler ───────────────────────────────────
     const handleDelete = async () => {
         if (!deleteDialog) return
         try {
             if (deleteDialog.type === 'user') {
                 await deleteUser(deleteDialog.id)
-                await logAdminAction('delete_user', user!.uid, user!.displayName || '', 'user', deleteDialog.id, deleteDialog.name)
+                await logAdminAction(
+                    'delete_user', user!.uid, user!.displayName || '',
+                    'user', deleteDialog.id, deleteDialog.name
+                )
                 setUsers(users.filter(u => u.id !== deleteDialog.id))
             } else if (deleteDialog.type === 'project') {
                 await deleteProject(deleteDialog.id)
-                await logAdminAction('delete_project', user!.uid, user!.displayName || '', 'project', deleteDialog.id, deleteDialog.name)
+                await logAdminAction(
+                    'delete_project', user!.uid, user!.displayName || '',
+                    'project', deleteDialog.id, deleteDialog.name
+                )
                 setProjects(projects.filter(p => p.id !== deleteDialog.id))
+                // Also mark any reports for this project as resolved
+                setReports(reports.map(r =>
+                    r.projectId === deleteDialog.id
+                        ? { ...r, status: 'resolved' }
+                        : r
+                ))
             } else if (deleteDialog.type === 'announcement') {
                 await deleteAnnouncement(deleteDialog.id)
                 setAnnouncements(announcements.filter(a => a.id !== deleteDialog.id))
             }
-            toast({ title: 'Deleted', description: `${deleteDialog.type} "${deleteDialog.name}" has been deleted`, variant: 'success' })
+            toast({
+                title: 'Deleted',
+                description: `${deleteDialog.type} "${deleteDialog.name}" has been deleted`,
+                variant: 'success'
+            })
         } catch (error) {
             console.error('Error deleting:', error)
-            toast({ title: 'Delete Failed', description: `Failed to delete ${deleteDialog.type}`, variant: 'destructive' })
+            toast({
+                title: 'Delete Failed',
+                description: `Failed to delete ${deleteDialog.type}`,
+                variant: 'destructive'
+            })
         } finally {
             setDeleteDialog(null)
         }
     }
 
-    // Announcement actions
+    // ─── Announcement actions ─────────────────────────────
     const handleCreateAnnouncement = async () => {
         try {
-            const id = await createAnnouncement(newAnnouncement.title, newAnnouncement.message, newAnnouncement.type, null, user!.uid)
+            await createAnnouncement(
+                newAnnouncement.title,
+                newAnnouncement.message,
+                newAnnouncement.type,
+                null,
+                user!.uid
+            )
             await loadAnnouncements().then(setAnnouncements)
             setAnnouncementDialog(false)
             setNewAnnouncement({ title: '', message: '', type: 'info' })
-            toast({ title: 'Announcement Created', description: 'Your announcement has been published', variant: 'success' })
+            toast({
+                title: 'Announcement Created',
+                description: 'Your announcement has been published',
+                variant: 'success'
+            })
         } catch (error) {
             console.error('Error creating announcement:', error)
-            toast({ title: 'Creation Failed', description: 'Failed to create announcement', variant: 'destructive' })
+            toast({
+                title: 'Creation Failed',
+                description: 'Failed to create announcement',
+                variant: 'destructive'
+            })
         }
     }
 
     const handleToggleAnnouncement = async (id: string, active: boolean) => {
         try {
             await updateAnnouncement(id, { active })
-            setAnnouncements(announcements.map(a => a.id === id ? { ...a, active } : a))
+            setAnnouncements(announcements.map(a =>
+                a.id === id ? { ...a, active } : a
+            ))
         } catch (error) {
             console.error('Error updating announcement:', error)
         }
     }
 
-    // Filtered data
+    // ─── Report actions ───────────────────────────────────
+    const handleResolveReport = async (
+        reportId: string,
+        action: 'resolved' | 'dismissed'
+    ) => {
+        try {
+            await updateDoc(doc(db, 'reports', reportId), {
+                status: action,
+                resolvedAt: serverTimestamp(),
+                resolvedBy: user?.uid
+            })
+            setReports(prev =>
+                prev.map(r =>
+                    r.id === reportId ? { ...r, status: action } : r
+                )
+            )
+            toast({
+                title: action === 'resolved' ? 'Report Resolved' : 'Report Dismissed',
+                description: `The report has been ${action}.`,
+                variant: 'success'
+            })
+        } catch (error) {
+            console.error('Error resolving report:', error)
+            toast({
+                title: 'Error',
+                description: 'Failed to update report status.',
+                variant: 'destructive'
+            })
+        }
+    }
+
+    // ─── Filtered data ────────────────────────────────────
     const filteredUsers = users.filter(u =>
         u.email?.toLowerCase().includes(userSearch.toLowerCase()) ||
         u.displayName?.toLowerCase().includes(userSearch.toLowerCase()) ||
@@ -213,28 +393,83 @@ export function AdminDashboard() {
     )
 
     const filteredProjects = projects.filter(p => {
-        const matchesSearch = p.title?.toLowerCase().includes(projectSearch.toLowerCase()) ||
+        const matchesSearch =
+            p.title?.toLowerCase().includes(projectSearch.toLowerCase()) ||
             p.creatorName?.toLowerCase().includes(projectSearch.toLowerCase())
-        const matchesStatus = projectStatusFilter === 'all' || p.status === projectStatusFilter
+        const matchesStatus =
+            projectStatusFilter === 'all' || p.status === projectStatusFilter
         return matchesSearch && matchesStatus
     })
 
+    const filteredReports = reports.filter(r =>
+        reportStatusFilter === 'all' || r.status === reportStatusFilter
+    )
+
+    const pendingReportsCount = reports.filter(r => r.status === 'pending').length
+
+    // ─── Helpers ──────────────────────────────────────────
     const statCards = [
-        { title: 'Total Users', value: stats?.totalUsers || 0, icon: Users, color: 'blue', change: `+${stats?.newSignups || 0} this month` },
-        { title: 'Total Projects', value: stats?.totalProjects || 0, icon: FolderKanban, color: 'green', change: '' },
-        { title: 'Active Users', value: stats?.activeUsers || 0, icon: Activity, color: 'purple', change: 'Last 7 days' },
-        { title: 'Featured', value: stats?.featuredProjects || 0, icon: Star, color: 'yellow', change: 'Projects' },
+        {
+            title: 'Total Users',
+            value: stats?.totalUsers || 0,
+            icon: Users,
+            color: 'blue',
+            change: `+${stats?.newSignups || 0} this month`
+        },
+        {
+            title: 'Total Projects',
+            value: stats?.totalProjects || 0,
+            icon: FolderKanban,
+            color: 'green',
+            change: ''
+        },
+        {
+            title: 'Active Users',
+            value: stats?.activeUsers || 0,
+            icon: Activity,
+            color: 'purple',
+            change: 'Last 7 days'
+        },
+        {
+            title: 'Featured',
+            value: stats?.featuredProjects || 0,
+            icon: Star,
+            color: 'yellow',
+            change: 'Projects'
+        },
     ]
 
     const getAnnouncementIcon = (type: string) => {
         switch (type) {
-            case 'warning': return <AlertTriangle className="h-4 w-4 text-yellow-500" />
-            case 'error': return <XCircle className="h-4 w-4 text-red-500" />
-            case 'success': return <CheckCircle2 className="h-4 w-4 text-green-500" />
-            default: return <Info className="h-4 w-4 text-blue-500" />
+            case 'warning':
+                return <AlertTriangle className="h-4 w-4 text-yellow-500" />
+            case 'error':
+                return <XCircle className="h-4 w-4 text-red-500" />
+            case 'success':
+                return <CheckCircle2 className="h-4 w-4 text-green-500" />
+            default:
+                return <Info className="h-4 w-4 text-blue-500" />
         }
     }
 
+    const getReportStatusColor = (status: string) => {
+        switch (status) {
+            case 'pending': return 'border-l-red-500'
+            case 'resolved': return 'border-l-green-500'
+            case 'dismissed': return 'border-l-gray-400'
+            default: return 'border-l-gray-300'
+        }
+    }
+
+    const getReportBadgeVariant = (status: string) => {
+        switch (status) {
+            case 'pending': return 'destructive'
+            case 'resolved': return 'default'
+            default: return 'outline'
+        }
+    }
+
+    // ─────────────────────────────────────────────────────
     return (
         <DashboardLayout>
             <div className="mb-6">
@@ -244,9 +479,15 @@ export function AdminDashboard() {
                             <Shield className="h-8 w-8 text-red-600" />
                             Admin Dashboard
                         </h1>
-                        <p className="text-muted-foreground mt-1">Manage users, projects, and platform settings</p>
+                        <p className="text-muted-foreground mt-1">
+                            Manage users, projects, and platform settings
+                        </p>
                     </div>
-                    <Button onClick={handleRefresh} variant="outline" disabled={refreshing}>
+                    <Button
+                        onClick={handleRefresh}
+                        variant="outline"
+                        disabled={refreshing}
+                    >
                         <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
                         Refresh
                     </Button>
@@ -254,23 +495,69 @@ export function AdminDashboard() {
             </div>
 
             <Tabs value={activeTab} onValueChange={setActiveTab}>
-                <TabsList className="mb-6">
-                    <TabsTrigger value="overview"><BarChart3 className="h-4 w-4 mr-2" />Overview</TabsTrigger>
+                <TabsList className="mb-6 flex-wrap gap-1">
+                    {/* Overview */}
+                    <TabsTrigger value="overview">
+                        <BarChart3 className="h-4 w-4 mr-2" />
+                        Overview
+                    </TabsTrigger>
+
+                    {/* Moderation */}
                     <TabsTrigger value="moderation" className="relative">
-                        <Shield className="h-4 w-4 mr-2" />Moderation
+                        <Shield className="h-4 w-4 mr-2" />
+                        Moderation
                         {moderationQueue.length > 0 && (
-                            <Badge variant="destructive" className="ml-2 h-5 min-w-[20px] px-1">
+                            <Badge
+                                variant="destructive"
+                                className="ml-2 h-5 min-w-[20px] px-1"
+                            >
                                 {moderationQueue.length}
                             </Badge>
                         )}
                     </TabsTrigger>
-                    <TabsTrigger value="users"><Users className="h-4 w-4 mr-2" />Users</TabsTrigger>
-                    <TabsTrigger value="projects"><FolderKanban className="h-4 w-4 mr-2" />Projects</TabsTrigger>
-                    <TabsTrigger value="announcements"><Megaphone className="h-4 w-4 mr-2" />Announcements</TabsTrigger>
-                    <TabsTrigger value="activity"><Activity className="h-4 w-4 mr-2" />Activity</TabsTrigger>
+
+                    {/* Reports ✅ */}
+                    <TabsTrigger value="reports" className="relative">
+                        <Flag className="h-4 w-4 mr-2" />
+                        Reports
+                        {pendingReportsCount > 0 && (
+                            <Badge
+                                variant="destructive"
+                                className="ml-2 h-5 min-w-[20px] px-1"
+                            >
+                                {pendingReportsCount}
+                            </Badge>
+                        )}
+                    </TabsTrigger>
+
+                    {/* Users */}
+                    <TabsTrigger value="users">
+                        <Users className="h-4 w-4 mr-2" />
+                        Users
+                    </TabsTrigger>
+
+                    {/* Projects */}
+                    <TabsTrigger value="projects">
+                        <FolderKanban className="h-4 w-4 mr-2" />
+                        Projects
+                    </TabsTrigger>
+
+                    {/* Announcements */}
+                    <TabsTrigger value="announcements">
+                        <Megaphone className="h-4 w-4 mr-2" />
+                        Announcements
+                    </TabsTrigger>
+
+                    {/* Activity */}
+                    <TabsTrigger value="activity">
+                        <Activity className="h-4 w-4 mr-2" />
+                        Activity
+                    </TabsTrigger>
                 </TabsList>
 
-                {/* Overview Tab */}
+                {/* ══════════════════════════════════════════
+                    OVERVIEW TAB
+                ══════════════════════════════════════════ */}
                 <TabsContent value="overview">
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
                         {statCards.map((stat, i) => (
@@ -278,9 +565,17 @@ export function AdminDashboard() {
                                 <CardContent className="p-6">
                                     <div className="flex justify-between items-start">
                                         <div>
-                                            <p className="text-sm text-muted-foreground">{stat.title}</p>
-                                            <h3 className="text-3xl font-bold mt-2">{loading ? '...' : stat.value}</h3>
-                                            {stat.change && <p className="text-xs text-muted-foreground mt-1">{stat.change}</p>}
+                                            <p className="text-sm text-muted-foreground">
+                                                {stat.title}
+                                            </p>
+                                            <h3 className="text-3xl font-bold mt-2">
+                                                {loading ? '...' : stat.value}
+                                            </h3>
+                                            {stat.change && (
+                                                <p className="text-xs text-muted-foreground mt-1">
+                                                    {stat.change}
+                                                </p>
+                                            )}
                                         </div>
                                         <div className={`p-3 rounded-lg bg-${stat.color}-100 dark:bg-${stat.color}-900/30`}>
                                             <stat.icon className={`h-6 w-6 text-${stat.color}-600`} />
@@ -290,19 +585,35 @@ export function AdminDashboard() {
                             </Card>
                         ))}
                     </div>
+
                     <Card>
-                        <CardHeader><CardTitle>Growth Trends (Last 30 Days)</CardTitle></CardHeader>
+                        <CardHeader>
+                            <CardTitle>Growth Trends (Last 30 Days)</CardTitle>
+                        </CardHeader>
                         <CardContent>
                             <div className="h-[300px]">
                                 <ResponsiveContainer width="100%" height="100%">
                                     <LineChart data={growthData}>
                                         <CartesianGrid strokeDasharray="3 3" />
-                                        <XAxis dataKey="date" tickFormatter={(v) => v.slice(5)} />
+                                        <XAxis
+                                            dataKey="date"
+                                            tickFormatter={(v) => v.slice(5)}
+                                        />
                                         <YAxis />
                                         <Tooltip />
                                         <Legend />
-                                        <Line type="monotone" dataKey="users" stroke="#3b82f6" name="New Users" />
-                                        <Line type="monotone" dataKey="projects" stroke="#10b981" name="New Projects" />
+                                        <Line
+                                            type="monotone"
+                                            dataKey="users"
+                                            stroke="#3b82f6"
+                                            name="New Users"
+                                        />
+                                        <Line
+                                            type="monotone"
+                                            dataKey="projects"
+                                            stroke="#10b981"
+                                            name="New Projects"
+                                        />
                                     </LineChart>
                                 </ResponsiveContainer>
                             </div>
@@ -310,7 +621,9 @@ export function AdminDashboard() {
                     </Card>
                 </TabsContent>
 
-                {/* Moderation Tab */}
+                {/* ══════════════════════════════════════════
+                    MODERATION TAB
+                ══════════════════════════════════════════ */}
                 <TabsContent value="moderation">
                     <Card>
                         <CardHeader>
@@ -319,7 +632,7 @@ export function AdminDashboard() {
                                 Content Moderation Queue
                             </CardTitle>
                             <CardDescription>
-                                Review projects that have been flagged for potential issues before they go live.
+                                Review projects flagged for potential issues before they go live.
                             </CardDescription>
                         </CardHeader>
                         <CardContent>
@@ -336,13 +649,21 @@ export function AdminDashboard() {
                             ) : (
                                 <div className="space-y-4">
                                     {moderationQueue.map((item) => (
-                                        <Card key={item.id} className="border-l-4 border-l-yellow-500">
+                                        <Card
+                                            key={item.id}
+                                            className="border-l-4 border-l-yellow-500"
+                                        >
                                             <CardContent className="p-6">
                                                 <div className="flex flex-col lg:flex-row lg:items-start gap-4">
                                                     <div className="flex-1">
                                                         <div className="flex items-center gap-2 mb-2">
-                                                            <h3 className="text-lg font-semibold">{item.projectTitle}</h3>
-                                                            <Badge variant="outline" className="bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400">
+                                                            <h3 className="text-lg font-semibold">
+                                                                {item.projectTitle}
+                                                            </h3>
+                                                            <Badge
+                                                                variant="outline"
+                                                                className="bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400"
+                                                            >
                                                                 Risk Score: {item.riskScore}
                                                             </Badge>
                                                         </div>
@@ -350,21 +671,35 @@ export function AdminDashboard() {
                                                             {item.projectDescription || 'No description provided'}
                                                         </p>
                                                         <div className="flex items-center gap-4 text-sm text-gray-500 mb-4">
-                                                            <span>Created by: <strong>{item.creatorName}</strong></span>
+                                                            <span>
+                                                                Created by: <strong>{item.creatorName}</strong>
+                                                            </span>
                                                             <span>•</span>
                                                             <span>{formatTimeAgo(item.createdAt)}</span>
                                                         </div>
 
                                                         {/* Flags */}
                                                         <div className="space-y-2">
-                                                            <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Issues Found:</p>
+                                                            <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                                                                Issues Found:
+                                                            </p>
                                                             {item.flags.map((flag, idx) => (
-                                                                <div key={idx} className={`flex items-start gap-2 text-sm p-2 rounded ${flag.severity === 'high' ? 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400' :
-                                                                        flag.severity === 'medium' ? 'bg-yellow-50 dark:bg-yellow-900/20 text-yellow-700 dark:text-yellow-400' :
-                                                                            'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400'
-                                                                    }`}>
+                                                                <div
+                                                                    key={idx}
+                                                                    className={`flex items-start gap-2 text-sm p-2 rounded ${
+                                                                        flag.severity === 'high'
+                                                                            ? 'bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400'
+                                                                            : flag.severity === 'medium'
+                                                                            ? 'bg-yellow-50 dark:bg-yellow-900/20 text-yellow-700 dark:text-yellow-400'
+                                                                            : 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400'
+                                                                    }`}
+                                                                >
                                                                     <span>
-                                                                        {flag.severity === 'high' ? '🔴' : flag.severity === 'medium' ? '🟡' : '🔵'}
+                                                                        {flag.severity === 'high'
+                                                                            ? '🔴'
+                                                                            : flag.severity === 'medium'
+                                                                            ? '🟡'
+                                                                            : '🔵'}
                                                                     </span>
                                                                     <span>{getFlagMessage(flag)}</span>
                                                                 </div>
@@ -386,12 +721,26 @@ export function AdminDashboard() {
                                                             onClick={async () => {
                                                                 if (!user) return
                                                                 try {
-                                                                    await reviewModerationItem(item.id, item.projectId, 'approved', user.uid, reviewNotes)
-                                                                    toast({ title: 'Approved', description: 'Project has been approved.', variant: 'success' })
+                                                                    await reviewModerationItem(
+                                                                        item.id,
+                                                                        item.projectId,
+                                                                        'approved',
+                                                                        user.uid,
+                                                                        reviewNotes
+                                                                    )
+                                                                    toast({
+                                                                        title: 'Approved',
+                                                                        description: 'Project has been approved.',
+                                                                        variant: 'success'
+                                                                    })
                                                                     setReviewNotes('')
                                                                     loadData()
-                                                                } catch (err) {
-                                                                    toast({ title: 'Error', description: 'Failed to approve project.', variant: 'destructive' })
+                                                                } catch {
+                                                                    toast({
+                                                                        title: 'Error',
+                                                                        description: 'Failed to approve project.',
+                                                                        variant: 'destructive'
+                                                                    })
                                                                 }
                                                             }}
                                                         >
@@ -403,12 +752,26 @@ export function AdminDashboard() {
                                                             onClick={async () => {
                                                                 if (!user) return
                                                                 try {
-                                                                    await reviewModerationItem(item.id, item.projectId, 'rejected', user.uid, reviewNotes)
-                                                                    toast({ title: 'Rejected', description: 'Project has been rejected.', variant: 'success' })
+                                                                    await reviewModerationItem(
+                                                                        item.id,
+                                                                        item.projectId,
+                                                                        'rejected',
+                                                                        user.uid,
+                                                                        reviewNotes
+                                                                    )
+                                                                    toast({
+                                                                        title: 'Rejected',
+                                                                        description: 'Project has been rejected.',
+                                                                        variant: 'success'
+                                                                    })
                                                                     setReviewNotes('')
                                                                     loadData()
-                                                                } catch (err) {
-                                                                    toast({ title: 'Error', description: 'Failed to reject project.', variant: 'destructive' })
+                                                                } catch {
+                                                                    toast({
+                                                                        title: 'Error',
+                                                                        description: 'Failed to reject project.',
+                                                                        variant: 'destructive'
+                                                                    })
                                                                 }
                                                             }}
                                                         >
@@ -417,7 +780,12 @@ export function AdminDashboard() {
                                                         </Button>
                                                         <Button
                                                             variant="outline"
-                                                            onClick={() => window.open(`/project/${item.projectId}`, '_blank')}
+                                                            onClick={() =>
+                                                                window.open(
+                                                                    `/project/${item.projectId}`,
+                                                                    '_blank'
+                                                                )
+                                                            }
                                                         >
                                                             <Eye className="h-4 w-4 mr-2" />
                                                             View Project
@@ -433,7 +801,192 @@ export function AdminDashboard() {
                     </Card>
                 </TabsContent>
 
-                {/* Users Tab */}
+                {/* ══════════════════════════════════════════
+                    REPORTS TAB ✅
+                ══════════════════════════════════════════ */}
+                <TabsContent value="reports">
+                    <Card>
+                        <CardHeader>
+                            <div className="flex justify-between items-center flex-wrap gap-4">
+                                <div>
+                                    <CardTitle className="flex items-center gap-2">
+                                        <Flag className="h-5 w-5 text-red-500" />
+                                        Project Reports
+                                    </CardTitle>
+                                    <CardDescription className="mt-1">
+                                        Review reports submitted by users about projects.
+                                    </CardDescription>
+                                </div>
+
+                                {/* Status filter */}
+                                <Select
+                                    value={reportStatusFilter}
+                                    onValueChange={setReportStatusFilter}
+                                >
+                                    <SelectTrigger className="w-36">
+                                        <SelectValue placeholder="Filter" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="all">All Reports</SelectItem>
+                                        <SelectItem value="pending">Pending</SelectItem>
+                                        <SelectItem value="resolved">Resolved</SelectItem>
+                                        <SelectItem value="dismissed">Dismissed</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        </CardHeader>
+
+                        <CardContent>
+                            {filteredReports.length === 0 ? (
+                                <div className="text-center py-12">
+                                    <CheckCircle2 className="h-16 w-16 mx-auto text-green-500 mb-4" />
+                                    <h3 className="text-xl font-semibold mb-2">No Reports</h3>
+                                    <p className="text-muted-foreground">
+                                        {reportStatusFilter === 'all'
+                                            ? 'No project reports at this time.'
+                                            : `No ${reportStatusFilter} reports.`}
+                                    </p>
+                                </div>
+                            ) : (
+                                <ScrollArea className="h-[600px]">
+                                    <div className="space-y-4 pr-2">
+                                        {filteredReports.map((report) => (
+                                            <Card
+                                                key={report.id}
+                                                className={`border-l-4 ${getReportStatusColor(report.status)}`}
+                                            >
+                                                <CardContent className="p-5">
+                                                    <div className="flex flex-col md:flex-row md:items-start gap-4">
+
+                                                        {/* Info */}
+                                                        <div className="flex-1 space-y-2">
+                                                            {/* Title + badge */}
+                                                            <div className="flex items-center gap-2 flex-wrap">
+                                                                <h3 className="font-semibold text-base">
+                                                                    {report.projectTitle}
+                                                                </h3>
+                                                                <Badge
+                                                                    variant={getReportBadgeVariant(report.status) as any}
+                                                                    className="capitalize"
+                                                                >
+                                                                    {report.status}
+                                                                </Badge>
+                                                            </div>
+
+                                                            {/* Reason */}
+                                                            <div className="flex items-center gap-2 text-sm">
+                                                                <span className="font-medium text-red-600 dark:text-red-400">
+                                                                    Reason:
+                                                                </span>
+                                                                <span>{report.reason}</span>
+                                                            </div>
+
+                                                            {/* Details */}
+                                                            {report.details && (
+                                                                <p className="text-sm text-gray-600 dark:text-gray-400 bg-gray-50 dark:bg-gray-800 p-2 rounded">
+                                                                    {report.details}
+                                                                </p>
+                                                            )}
+
+                                                            {/* Meta */}
+                                                            <div className="flex items-center gap-3 text-xs text-gray-500 flex-wrap">
+                                                                <span>
+                                                                    Reported by:{' '}
+                                                                    <strong>{report.reporterEmail}</strong>
+                                                                </span>
+                                                                <span>•</span>
+                                                                <span>{formatTimeAgo(report.createdAt)}</span>
+                                                                {report.resolvedAt && (
+                                                                    <>
+                                                                        <span>•</span>
+                                                                        <span>
+                                                                            {report.status === 'resolved'
+                                                                                ? 'Resolved'
+                                                                                : 'Dismissed'}{' '}
+                                                                            {formatTimeAgo(report.resolvedAt)}
+                                                                        </span>
+                                                                    </>
+                                                                )}
+                                                            </div>
+                                                        </div>
+
+                                                        {/* Actions */}
+                                                        <div className="flex flex-col gap-2 md:w-44 flex-shrink-0">
+                                                            {/* View project */}
+                                                            <Button
+                                                                size="sm"
+                                                                variant="outline"
+                                                                onClick={() =>
+                                                                    window.open(
+                                                                        `/project/${report.projectId}`,
+                                                                        '_blank'
+                                                                    )
+                                                                }
+                                                            >
+                                                                <Eye className="h-4 w-4 mr-2" />
+                                                                View Project
+                                                            </Button>
+
+                                                            {/* Only show action buttons for pending */}
+                                                            {report.status === 'pending' && (
+                                                                <>
+                                                                    {/* Resolve */}
+                                                                    <Button
+                                                                        size="sm"
+                                                                        className="bg-green-600 hover:bg-green-700 text-white"
+                                                                        onClick={() =>
+                                                                            handleResolveReport(report.id, 'resolved')
+                                                                        }
+                                                                    >
+                                                                        <CheckCircle2 className="h-4 w-4 mr-2" />
+                                                                        Mark Resolved
+                                                                    </Button>
+
+                                                                    {/* Dismiss */}
+                                                                    <Button
+                                                                        size="sm"
+                                                                        variant="outline"
+                                                                        className="text-gray-600"
+                                                                        onClick={() =>
+                                                                            handleResolveReport(report.id, 'dismissed')
+                                                                        }
+                                                                    >
+                                                                        <XCircle className="h-4 w-4 mr-2" />
+                                                                        Dismiss
+                                                                    </Button>
+
+                                                                    {/* Delete project */}
+                                                                    <Button
+                                                                        size="sm"
+                                                                        variant="destructive"
+                                                                        onClick={() =>
+                                                                            setDeleteDialog({
+                                                                                type: 'project',
+                                                                                id: report.projectId,
+                                                                                name: report.projectTitle
+                                                                            })
+                                                                        }
+                                                                    >
+                                                                        <Trash2 className="h-4 w-4 mr-2" />
+                                                                        Delete Project
+                                                                    </Button>
+                                                                </>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                </CardContent>
+                                            </Card>
+                                        ))}
+                                    </div>
+                                </ScrollArea>
+                            )}
+                        </CardContent>
+                    </Card>
+                </TabsContent>
+
+                {/* ══════════════════════════════════════════
+                    USERS TAB
+                ══════════════════════════════════════════ */}
                 <TabsContent value="users">
                     <Card>
                         <CardHeader>
@@ -441,7 +994,12 @@ export function AdminDashboard() {
                                 <CardTitle>User Management</CardTitle>
                                 <div className="relative w-64">
                                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                                    <Input placeholder="Search users..." className="pl-9" value={userSearch} onChange={(e) => setUserSearch(e.target.value)} />
+                                    <Input
+                                        placeholder="Search users..."
+                                        className="pl-9"
+                                        value={userSearch}
+                                        onChange={(e) => setUserSearch(e.target.value)}
+                                    />
                                 </div>
                             </div>
                         </CardHeader>
@@ -465,17 +1023,35 @@ export function AdminDashboard() {
                                                     <div className="flex items-center gap-3">
                                                         <Avatar className="h-8 w-8">
                                                             <AvatarImage src={u.photoURL} />
-                                                            <AvatarFallback>{(u.firstName?.[0] || u.email?.[0] || 'U').toUpperCase()}</AvatarFallback>
+                                                            <AvatarFallback>
+                                                                {(u.firstName?.[0] || u.email?.[0] || 'U').toUpperCase()}
+                                                            </AvatarFallback>
                                                         </Avatar>
                                                         <div>
-                                                            <p className="font-medium">{u.displayName || `${u.firstName} ${u.lastName}` || u.email}</p>
-                                                            <p className="text-xs text-muted-foreground">{u.email}</p>
+                                                            <p className="font-medium">
+                                                                {u.displayName ||
+                                                                    `${u.firstName} ${u.lastName}` ||
+                                                                    u.email}
+                                                            </p>
+                                                            <p className="text-xs text-muted-foreground">
+                                                                {u.email}
+                                                            </p>
                                                         </div>
                                                     </div>
                                                 </TableCell>
                                                 <TableCell>
-                                                    <Select value={u.role || 'member'} onValueChange={(v) => handleUserRoleChange(u.id, v, u.displayName || u.email || '')}>
-                                                        <SelectTrigger className="w-24"><SelectValue /></SelectTrigger>
+                                                    <Select
+                                                        value={u.role || 'member'}
+                                                        onValueChange={(v) =>
+                                                            handleUserRoleChange(
+                                                                u.id, v,
+                                                                u.displayName || u.email || ''
+                                                            )
+                                                        }
+                                                    >
+                                                        <SelectTrigger className="w-24">
+                                                            <SelectValue />
+                                                        </SelectTrigger>
                                                         <SelectContent>
                                                             <SelectItem value="admin">Admin</SelectItem>
                                                             <SelectItem value="member">Member</SelectItem>
@@ -485,11 +1061,40 @@ export function AdminDashboard() {
                                                 <TableCell>{u.discipline || '-'}</TableCell>
                                                 <TableCell>{formatDate(u.createdAt)}</TableCell>
                                                 <TableCell>
-                                                    <Switch checked={!u.disabled} onCheckedChange={(checked) => handleToggleUserDisabled(u.id, !checked, u.displayName || u.email || '')} />
+                                                    <Switch
+                                                        checked={!u.disabled}
+                                                        onCheckedChange={(checked) =>
+                                                            handleToggleUserDisabled(
+                                                                u.id, !checked,
+                                                                u.displayName || u.email || ''
+                                                            )
+                                                        }
+                                                    />
                                                 </TableCell>
                                                 <TableCell>
-                                                    <Button variant="ghost" size="icon" onClick={() => window.open(`/profile/${u.id}`, '_blank')}><Eye className="h-4 w-4" /></Button>
-                                                    <Button variant="ghost" size="icon" className="text-red-600" onClick={() => setDeleteDialog({ type: 'user', id: u.id, name: u.displayName || u.email || '' })}><Trash2 className="h-4 w-4" /></Button>
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        onClick={() =>
+                                                            window.open(`/profile/${u.id}`, '_blank')
+                                                        }
+                                                    >
+                                                        <Eye className="h-4 w-4" />
+                                                    </Button>
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        className="text-red-600"
+                                                        onClick={() =>
+                                                            setDeleteDialog({
+                                                                type: 'user',
+                                                                id: u.id,
+                                                                name: u.displayName || u.email || ''
+                                                            })
+                                                        }
+                                                    >
+                                                        <Trash2 className="h-4 w-4" />
+                                                    </Button>
                                                 </TableCell>
                                             </TableRow>
                                         ))}
@@ -500,19 +1105,31 @@ export function AdminDashboard() {
                     </Card>
                 </TabsContent>
 
-                {/* Projects Tab */}
+                {/* ══════════════════════════════════════════
+                    PROJECTS TAB
+                ══════════════════════════════════════════ */}
                 <TabsContent value="projects">
                     <Card>
                         <CardHeader>
-                            <div className="flex justify-between items-center gap-4">
+                            <div className="flex justify-between items-center gap-4 flex-wrap">
                                 <CardTitle>Project Management</CardTitle>
                                 <div className="flex gap-2">
                                     <div className="relative w-64">
                                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                                        <Input placeholder="Search projects..." className="pl-9" value={projectSearch} onChange={(e) => setProjectSearch(e.target.value)} />
+                                        <Input
+                                            placeholder="Search projects..."
+                                            className="pl-9"
+                                            value={projectSearch}
+                                            onChange={(e) => setProjectSearch(e.target.value)}
+                                        />
                                     </div>
-                                    <Select value={projectStatusFilter} onValueChange={setProjectStatusFilter}>
-                                        <SelectTrigger className="w-32"><SelectValue placeholder="Status" /></SelectTrigger>
+                                    <Select
+                                        value={projectStatusFilter}
+                                        onValueChange={setProjectStatusFilter}
+                                    >
+                                        <SelectTrigger className="w-32">
+                                            <SelectValue placeholder="Status" />
+                                        </SelectTrigger>
                                         <SelectContent>
                                             <SelectItem value="all">All</SelectItem>
                                             <SelectItem value="recruiting">Recruiting</SelectItem>
@@ -543,13 +1160,22 @@ export function AdminDashboard() {
                                                 <TableCell>
                                                     <div>
                                                         <p className="font-medium">{p.title}</p>
-                                                        <p className="text-xs text-muted-foreground">{p.primaryDiscipline}</p>
+                                                        <p className="text-xs text-muted-foreground">
+                                                            {p.primaryDiscipline}
+                                                        </p>
                                                     </div>
                                                 </TableCell>
                                                 <TableCell>{p.creatorName}</TableCell>
                                                 <TableCell>
-                                                    <Select value={p.status} onValueChange={(v) => handleProjectStatusChange(p.id, v, p.title)}>
-                                                        <SelectTrigger className="w-28"><SelectValue /></SelectTrigger>
+                                                    <Select
+                                                        value={p.status}
+                                                        onValueChange={(v) =>
+                                                            handleProjectStatusChange(p.id, v, p.title)
+                                                        }
+                                                    >
+                                                        <SelectTrigger className="w-28">
+                                                            <SelectValue />
+                                                        </SelectTrigger>
                                                         <SelectContent>
                                                             <SelectItem value="recruiting">Recruiting</SelectItem>
                                                             <SelectItem value="active">Active</SelectItem>
@@ -559,12 +1185,38 @@ export function AdminDashboard() {
                                                     </Select>
                                                 </TableCell>
                                                 <TableCell>
-                                                    <Switch checked={p.featured || false} onCheckedChange={(checked) => handleToggleFeatured(p.id, checked, p.title)} />
+                                                    <Switch
+                                                        checked={p.featured || false}
+                                                        onCheckedChange={(checked) =>
+                                                            handleToggleFeatured(p.id, checked, p.title)
+                                                        }
+                                                    />
                                                 </TableCell>
                                                 <TableCell>{formatDate(p.createdAt)}</TableCell>
                                                 <TableCell>
-                                                    <Button variant="ghost" size="icon" onClick={() => window.open(`/project/${p.id}`, '_blank')}><Eye className="h-4 w-4" /></Button>
-                                                    <Button variant="ghost" size="icon" className="text-red-600" onClick={() => setDeleteDialog({ type: 'project', id: p.id, name: p.title })}><Trash2 className="h-4 w-4" /></Button>
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        onClick={() =>
+                                                            window.open(`/project/${p.id}`, '_blank')
+                                                        }
+                                                    >
+                                                        <Eye className="h-4 w-4" />
+                                                    </Button>
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        className="text-red-600"
+                                                        onClick={() =>
+                                                            setDeleteDialog({
+                                                                type: 'project',
+                                                                id: p.id,
+                                                                name: p.title
+                                                            })
+                                                        }
+                                                    >
+                                                        <Trash2 className="h-4 w-4" />
+                                                    </Button>
                                                 </TableCell>
                                             </TableRow>
                                         ))}
@@ -575,22 +1227,67 @@ export function AdminDashboard() {
                     </Card>
                 </TabsContent>
 
-                {/* Announcements Tab */}
+                {/* ══════════════════════════════════════════
+                    ANNOUNCEMENTS TAB
+                ══════════════════════════════════════════ */}
                 <TabsContent value="announcements">
                     <Card>
                         <CardHeader>
                             <div className="flex justify-between items-center">
                                 <CardTitle>Platform Announcements</CardTitle>
-                                <Dialog open={announcementDialog} onOpenChange={setAnnouncementDialog}>
-                                    <DialogTrigger asChild><Button><Plus className="h-4 w-4 mr-2" />New Announcement</Button></DialogTrigger>
+                                <Dialog
+                                    open={announcementDialog}
+                                    onOpenChange={setAnnouncementDialog}
+                                >
+                                    <DialogTrigger asChild>
+                                        <Button>
+                                            <Plus className="h-4 w-4 mr-2" />
+                                            New Announcement
+                                        </Button>
+                                    </DialogTrigger>
                                     <DialogContent>
-                                        <DialogHeader><DialogTitle>Create Announcement</DialogTitle></DialogHeader>
+                                        <DialogHeader>
+                                            <DialogTitle>Create Announcement</DialogTitle>
+                                        </DialogHeader>
                                         <div className="space-y-4 py-4">
-                                            <div><Label>Title</Label><Input value={newAnnouncement.title} onChange={(e) => setNewAnnouncement({ ...newAnnouncement, title: e.target.value })} /></div>
-                                            <div><Label>Message</Label><Textarea value={newAnnouncement.message} onChange={(e) => setNewAnnouncement({ ...newAnnouncement, message: e.target.value })} /></div>
-                                            <div><Label>Type</Label>
-                                                <Select value={newAnnouncement.type} onValueChange={(v: any) => setNewAnnouncement({ ...newAnnouncement, type: v })}>
-                                                    <SelectTrigger><SelectValue /></SelectTrigger>
+                                            <div>
+                                                <Label>Title</Label>
+                                                <Input
+                                                    value={newAnnouncement.title}
+                                                    onChange={(e) =>
+                                                        setNewAnnouncement({
+                                                            ...newAnnouncement,
+                                                            title: e.target.value
+                                                        })
+                                                    }
+                                                />
+                                            </div>
+                                            <div>
+                                                <Label>Message</Label>
+                                                <Textarea
+                                                    value={newAnnouncement.message}
+                                                    onChange={(e) =>
+                                                        setNewAnnouncement({
+                                                            ...newAnnouncement,
+                                                            message: e.target.value
+                                                        })
+                                                    }
+                                                />
+                                            </div>
+                                            <div>
+                                                <Label>Type</Label>
+                                                <Select
+                                                    value={newAnnouncement.type}
+                                                    onValueChange={(v: any) =>
+                                                        setNewAnnouncement({
+                                                            ...newAnnouncement,
+                                                            type: v
+                                                        })
+                                                    }
+                                                >
+                                                    <SelectTrigger>
+                                                        <SelectValue />
+                                                    </SelectTrigger>
                                                     <SelectContent>
                                                         <SelectItem value="info">Info</SelectItem>
                                                         <SelectItem value="success">Success</SelectItem>
@@ -600,7 +1297,11 @@ export function AdminDashboard() {
                                                 </Select>
                                             </div>
                                         </div>
-                                        <DialogFooter><Button onClick={handleCreateAnnouncement}>Create</Button></DialogFooter>
+                                        <DialogFooter>
+                                            <Button onClick={handleCreateAnnouncement}>
+                                                Create
+                                            </Button>
+                                        </DialogFooter>
                                     </DialogContent>
                                 </Dialog>
                             </div>
@@ -608,45 +1309,95 @@ export function AdminDashboard() {
                         <CardContent>
                             <div className="space-y-4">
                                 {announcements.map((a) => (
-                                    <div key={a.id} className="flex items-center justify-between p-4 border rounded-lg">
+                                    <div
+                                        key={a.id}
+                                        className="flex items-center justify-between p-4 border rounded-lg"
+                                    >
                                         <div className="flex items-center gap-3">
                                             {getAnnouncementIcon(a.type)}
                                             <div>
                                                 <p className="font-medium">{a.title}</p>
-                                                <p className="text-sm text-muted-foreground">{a.message}</p>
-                                                <p className="text-xs text-muted-foreground mt-1">{formatTimeAgo(a.createdAt)}</p>
+                                                <p className="text-sm text-muted-foreground">
+                                                    {a.message}
+                                                </p>
+                                                <p className="text-xs text-muted-foreground mt-1">
+                                                    {formatTimeAgo(a.createdAt)}
+                                                </p>
                                             </div>
                                         </div>
                                         <div className="flex items-center gap-2">
-                                            <Switch checked={a.active} onCheckedChange={(checked) => handleToggleAnnouncement(a.id, checked)} />
-                                            <Button variant="ghost" size="icon" className="text-red-600" onClick={() => setDeleteDialog({ type: 'announcement', id: a.id, name: a.title })}><Trash2 className="h-4 w-4" /></Button>
+                                            <Switch
+                                                checked={a.active}
+                                                onCheckedChange={(checked) =>
+                                                    handleToggleAnnouncement(a.id, checked)
+                                                }
+                                            />
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                className="text-red-600"
+                                                onClick={() =>
+                                                    setDeleteDialog({
+                                                        type: 'announcement',
+                                                        id: a.id,
+                                                        name: a.title
+                                                    })
+                                                }
+                                            >
+                                                <Trash2 className="h-4 w-4" />
+                                            </Button>
                                         </div>
                                     </div>
                                 ))}
-                                {announcements.length === 0 && <p className="text-center text-muted-foreground py-8">No announcements yet</p>}
+                                {announcements.length === 0 && (
+                                    <p className="text-center text-muted-foreground py-8">
+                                        No announcements yet
+                                    </p>
+                                )}
                             </div>
                         </CardContent>
                     </Card>
                 </TabsContent>
 
-                {/* Activity Tab */}
+                {/* ══════════════════════════════════════════
+                    ACTIVITY TAB
+                ══════════════════════════════════════════ */}
                 <TabsContent value="activity">
                     <Card>
-                        <CardHeader><CardTitle>Admin Activity Log</CardTitle></CardHeader>
+                        <CardHeader>
+                            <CardTitle>Admin Activity Log</CardTitle>
+                        </CardHeader>
                         <CardContent>
                             <ScrollArea className="h-[500px]">
                                 <div className="space-y-3">
                                     {activityLogs.map((log) => (
-                                        <div key={log.id} className="flex items-start gap-3 p-3 border rounded-lg">
-                                            <div className="w-2 h-2 bg-blue-500 rounded-full mt-2" />
+                                        <div
+                                            key={log.id}
+                                            className="flex items-start gap-3 p-3 border rounded-lg"
+                                        >
+                                            <div className="w-2 h-2 bg-blue-500 rounded-full mt-2 flex-shrink-0" />
                                             <div>
-                                                <p className="text-sm"><span className="font-medium">{log.userName}</span> {log.action.replace(/_/g, ' ')} {log.targetType}: <span className="font-medium">{log.targetName}</span></p>
-                                                {log.details && <p className="text-xs text-muted-foreground">{log.details}</p>}
-                                                <p className="text-xs text-muted-foreground mt-1">{formatTimeAgo(log.timestamp)}</p>
+                                                <p className="text-sm">
+                                                    <span className="font-medium">{log.userName}</span>{' '}
+                                                    {log.action.replace(/_/g, ' ')} {log.targetType}:{' '}
+                                                    <span className="font-medium">{log.targetName}</span>
+                                                </p>
+                                                {log.details && (
+                                                    <p className="text-xs text-muted-foreground">
+                                                        {log.details}
+                                                    </p>
+                                                )}
+                                                <p className="text-xs text-muted-foreground mt-1">
+                                                    {formatTimeAgo(log.timestamp)}
+                                                </p>
                                             </div>
                                         </div>
                                     ))}
-                                    {activityLogs.length === 0 && <p className="text-center text-muted-foreground py-8">No activity logs yet</p>}
+                                    {activityLogs.length === 0 && (
+                                        <p className="text-center text-muted-foreground py-8">
+                                            No activity logs yet
+                                        </p>
+                                    )}
                                 </div>
                             </ScrollArea>
                         </CardContent>
@@ -654,16 +1405,25 @@ export function AdminDashboard() {
                 </TabsContent>
             </Tabs>
 
-            {/* Delete Confirmation Dialog */}
+            {/* ══════════════════════════════════════════
+                DELETE CONFIRMATION DIALOG
+            ══════════════════════════════════════════ */}
             <Dialog open={!!deleteDialog} onOpenChange={() => setDeleteDialog(null)}>
                 <DialogContent>
                     <DialogHeader>
                         <DialogTitle>Confirm Deletion</DialogTitle>
-                        <DialogDescription>Are you sure you want to delete {deleteDialog?.type} "{deleteDialog?.name}"? This action cannot be undone.</DialogDescription>
+                        <DialogDescription>
+                            Are you sure you want to delete {deleteDialog?.type}{' '}
+                            "{deleteDialog?.name}"? This action cannot be undone.
+                        </DialogDescription>
                     </DialogHeader>
                     <DialogFooter>
-                        <Button variant="outline" onClick={() => setDeleteDialog(null)}>Cancel</Button>
-                        <Button variant="destructive" onClick={handleDelete}>Delete</Button>
+                        <Button variant="outline" onClick={() => setDeleteDialog(null)}>
+                            Cancel
+                        </Button>
+                        <Button variant="destructive" onClick={handleDelete}>
+                            Delete
+                        </Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>

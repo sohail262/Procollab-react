@@ -12,6 +12,7 @@ import { Label }      from '@/components/ui/label'
 import { Progress }   from '@/components/ui/progress'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator }  from '@/components/ui/separator'
+import { DatePicker } from '@/components/ui/date-time-picker'
 import {
     Select, SelectContent,
     SelectItem, SelectTrigger, SelectValue,
@@ -738,13 +739,13 @@ export function TemplateGallery({
                                         <Label htmlFor="start-date">
                                             Start Date
                                         </Label>
-                                        <Input
-                                            id="start-date"
-                                            type="date"
-                                            value={setupForm.startDate}
-                                            onChange={e => setSetupForm(f => ({
-                                                ...f, startDate: e.target.value,
+                                        <DatePicker
+                                            date={setupForm.startDate ? new Date(setupForm.startDate) : undefined}
+                                            onDateChange={(date) => setSetupForm(f => ({
+                                                ...f, 
+                                                startDate: date ? date.toISOString().split('T')[0] : new Date().toISOString().split('T')[0]
                                             }))}
+                                            placeholder="Select project start date"
                                         />
                                     </div>
 

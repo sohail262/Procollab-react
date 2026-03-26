@@ -5,7 +5,7 @@ import { ProtectedRoute } from '@/components/ProtectedRoute'
 import { AdminRoute } from '@/components/AdminRoute'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { Toaster } from '@/components/ui/toaster'
-
+const InviteAccept = lazy(() => import('@/pages/InviteAccept'))
 // Lazy load components to reduce initial bundle size
 const Landing = lazy(() => import('@/pages/Landing').then(module => ({ default: module.Landing })))
 const Login = lazy(() => import('@/pages/Login').then(module => ({ default: module.Login })))
@@ -44,7 +44,7 @@ function App() {
               <Route path="/" element={<Landing />} />
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Register />} />
-              
+              <Route path="/invite" element={<InviteAccept />} />
               {/* Test Route for Profile Redesign */}
               <Route 
                 path="/test/profile-redesign" 
