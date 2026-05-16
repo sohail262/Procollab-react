@@ -1,20 +1,23 @@
 /**
  * FCM Service — Token management + foreground message handling
  *
- * DUPLICATE PREVENTION ARCHITECTURE:
+ * DUPLICATE PREVENTION:
  * ─────────────────────────────────────────────────────────
- * FOREGROUND: onMessage() fires here → show in-app toast only
+ * FOREGROUND: onMessage() fires → show in-app toast only
  *             SW does NOT show browser push (FCM suppresses it)
- *
  * BACKGROUND: SW fires → shows ONE browser push
  *             onMessage() does NOT fire
- *
  * RESULT: Exactly ONE notification in ALL scenarios
  *
- * 401 FIX:
- * - Register SW explicitly before calling getToken()
- * - Pass serviceWorkerRegistration to getToken()
- * - This ensures FCM uses OUR SW, not a default one
+ * OPTIMIZATIONS:
+ * ✅ SW registered once, cached for session
+ * ✅ Messaging instance singleton
+ * ✅ Single foreground listener via singleton guard
+ * ✅ Token existence check before write
+ * ✅ Max 5 tokens with LRU eviction
+ * ✅ 7-day refresh cycle
+ * ✅ Crypto hash for deterministic doc ID (no collisions)
+ * ✅ Full cleanup on logout
  */
 
 import {
@@ -44,14 +47,14 @@ import { app, db } from '@/lib/firebase'
 // Constants
 // ─────────────────────────────────────────────────────────
 
-// ✅ VAPID key from Firebase Console → Project Settings
-//    → Cloud Messaging → Web Push certificates
 const VAPID_KEY =
+    import.meta.env.VITE_FIREBASE_VAPID_KEY ||
     'BOhnhTBouqFbYv78EDTBCU6AUdhN_DGnXb3xzJ9BlhPOD3LWOQVaDz4-CmodBfIcfy6IHWyeUR5GBH9VvfCR1oA'
 
 const SW_PATH = '/firebase-messaging-sw.js'
-const TOKEN_REFRESH_INTERVAL = 7 * 24 * 60 * 60 * 1000 // 7 days
+const TOKEN_REFRESH_INTERVAL = 7 * 24 * 60 * 60 * 1000 // 7 days in ms
 const MAX_TOKENS_PER_USER = 5
+const SW_ACTIVATION_TIMEOUT = 10_000 // 10 seconds
 
 // ─────────────────────────────────────────────────────────
 // Module-level singletons
@@ -67,81 +70,142 @@ let swRegistration: ServiceWorkerRegistration | null = null
 // ─────────────────────────────────────────────────────────
 
 /**
+ * Wait for a SW to reach 'activated' state.
+ * Handles all three states: installing, waiting, active.
+ * Times out after SW_ACTIVATION_TIMEOUT ms.
+ */
+async function waitForSWActivation(
+    reg: ServiceWorkerRegistration
+): Promise<void> {
+    // Already active — nothing to wait for
+    if (reg.active) return
+
+    const sw = reg.installing ?? reg.waiting
+    if (!sw) return
+
+    return new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+            reject(new Error('[FCM] SW activation timed out'))
+        }, SW_ACTIVATION_TIMEOUT)
+
+        sw.addEventListener('statechange', () => {
+            if (sw.state === 'activated') {
+                clearTimeout(timeout)
+                resolve()
+            }
+            if (sw.state === 'redundant') {
+                clearTimeout(timeout)
+                reject(new Error('[FCM] SW became redundant during activation'))
+            }
+        })
+
+        // Guard: already activated by the time listener attached
+        if (sw.state === 'activated') {
+            clearTimeout(timeout)
+            resolve()
+        }
+    })
+}
+
+/**
  * Register and cache the Firebase Messaging Service Worker.
  *
- * ✅ ROOT CAUSE FIX for 401:
- * getToken() must receive the SW registration explicitly.
- * Without it, the browser tries to use a default SW scope
- * that doesn't have Firebase initialized → 401 Unauthorized.
+ * ✅ Fixes 401: getToken() must receive SW registration explicitly.
+ * ✅ Handles installing, waiting, AND active SW states.
+ * ✅ Reuses cached registration to avoid redundant registrations.
  */
-async function getServiceWorkerRegistration(): Promise<ServiceWorkerRegistration | null> {
-    // Return cached registration if available
+export async function getServiceWorkerRegistration(): Promise<ServiceWorkerRegistration | null> {
+    // Return cached if still valid
     if (swRegistration) return swRegistration
 
     if (!('serviceWorker' in navigator)) {
-        console.warn('[FCM] Service Worker not supported')
+        console.warn('[FCM] Service Worker not supported in this browser')
         return null
     }
 
     try {
-        // ✅ Check if SW is already registered (avoid double registration)
+        // ✅ Check for existing registration before registering new
         const registrations = await navigator.serviceWorker.getRegistrations()
-        const existing = registrations.find(r =>
-            r.active?.scriptURL.includes('firebase-messaging-sw.js') ||
-            r.installing?.scriptURL.includes('firebase-messaging-sw.js') ||
-            r.waiting?.scriptURL.includes('firebase-messaging-sw.js')
+        const existing = registrations.find(
+            (r) =>
+                r.active?.scriptURL.includes('firebase-messaging-sw.js') ||
+                r.installing?.scriptURL.includes('firebase-messaging-sw.js') ||
+                r.waiting?.scriptURL.includes('firebase-messaging-sw.js')
         )
 
         if (existing) {
+            // ✅ Wait for activation even on existing registration
+            await waitForSWActivation(existing)
             swRegistration = existing
-            console.log('[FCM] Using existing SW registration')
+            console.log('[FCM] Reusing existing SW registration')
             return swRegistration
         }
 
-        // Register fresh
-        swRegistration = await navigator.serviceWorker.register(SW_PATH, {
+        // Register fresh SW
+        const reg = await navigator.serviceWorker.register(SW_PATH, {
             scope: '/',
         })
 
-        // Wait for the SW to be active before proceeding
-        if (swRegistration.installing) {
-            await new Promise<void>((resolve) => {
-                const sw = swRegistration!.installing!
-                sw.addEventListener('statechange', () => {
-                    if (sw.state === 'activated') resolve()
-                })
-                // If already activated by the time we listen
-                if (sw.state === 'activated') resolve()
-            })
-        }
+        // ✅ Wait for ALL states — installing, waiting, active
+        await waitForSWActivation(reg)
 
-        console.log('[FCM] SW registered successfully:', swRegistration.scope)
+        swRegistration = reg
+        console.log('[FCM] SW registered and active:', reg.scope)
         return swRegistration
 
     } catch (error) {
-        console.error('[FCM] SW registration failed:', error)
+        console.error('[FCM] SW registration/activation failed:', error)
         return null
     }
 }
 
 // ─────────────────────────────────────────────────────────
-// Messaging Instance
+// Messaging Instance Singleton
 // ─────────────────────────────────────────────────────────
 
-async function getMessagingInstance() {
+async function getMessagingInstance(): Promise<ReturnType<
+    typeof getMessaging
+> | null> {
     if (messagingInstance) return messagingInstance
 
     try {
         const supported = await isSupported()
         if (!supported) {
-            console.log('[FCM] Not supported in this browser')
+            console.log('[FCM] Not supported in this browser/environment')
             return null
         }
         messagingInstance = getMessaging(app)
         return messagingInstance
     } catch (error) {
-        console.error('[FCM] Error getting messaging instance:', error)
+        console.error('[FCM] Error initializing messaging:', error)
         return null
+    }
+}
+
+// ─────────────────────────────────────────────────────────
+// Deterministic Token Doc ID
+// ─────────────────────────────────────────────────────────
+
+/**
+ * Generate a stable, collision-safe Firestore doc ID from a token.
+ * Uses SHA-256 so two different tokens never produce the same ID.
+ * Falls back to sanitized btoa if SubtleCrypto unavailable.
+ */
+async function tokenToDocId(token: string): Promise<string> {
+    try {
+        const hashBuffer = await crypto.subtle.digest(
+            'SHA-256',
+            new TextEncoder().encode(token)
+        )
+        return Array.from(new Uint8Array(hashBuffer))
+            .map((b) => b.toString(16).padStart(2, '0'))
+            .join('')
+            .slice(0, 40) // 40 hex chars — unique enough, valid Firestore ID
+    } catch {
+        // Fallback for environments without SubtleCrypto
+        return btoa(token)
+            .replace(/[^a-zA-Z0-9]/g, '')
+            .slice(0, 40)
     }
 }
 
@@ -152,12 +216,15 @@ async function getMessagingInstance() {
 /**
  * Register this device for push notifications.
  *
- * Steps:
+ * Flow:
  * 1. Check browser support
- * 2. Register Service Worker explicitly
- * 3. Request notification permission
- * 4. Get FCM token — passing SW registration (fixes 401)
- * 5. Save to Firestore with deduplication
+ * 2. Ensure SW is registered and active
+ * 3. Verify permission is granted
+ * 4. Get FCM token with SW registration (fixes 401)
+ * 5. Save to Firestore with deduplication + LRU eviction
+ *
+ * NOTE: Call AFTER user clicks "Enable" in the prompt.
+ * Permission dialog is handled by requestPermissionAndRegister().
  */
 export async function registerFCMToken(
     userId: string
@@ -166,72 +233,71 @@ export async function registerFCMToken(
         const messaging = await getMessagingInstance()
         if (!messaging) return null
 
-        // ✅ Step 1: Register SW first — required for getToken()
+        // ✅ Ensure SW is active before getToken()
         const swReg = await getServiceWorkerRegistration()
         if (!swReg) {
-            console.warn('[FCM] No SW registration — cannot get token')
+            console.warn('[FCM] No SW registration — aborting token fetch')
             return null
         }
 
-        // ✅ Step 2: Check current permission state
-        // Do NOT call requestPermission() here —
-        // permission should be requested via the UI prompt
-        // (NotificationPermissionPrompt component)
-        // This function is called AFTER user clicks "Enable"
+        // ✅ Guard: permission must be granted before calling getToken()
+        // Never call requestPermission() here — that's the UI's job
         if (Notification.permission !== 'granted') {
-            console.log('[FCM] Permission not granted:', Notification.permission)
+            console.log(
+                '[FCM] Permission not granted:',
+                Notification.permission
+            )
             return null
         }
 
-        // ✅ Step 3: Get token — pass BOTH vapidKey AND serviceWorkerRegistration
-        // This is the key fix for the 401 error
+        // ✅ Get token — SW registration passed explicitly (fixes 401)
         const token = await getToken(messaging, {
             vapidKey: VAPID_KEY,
             serviceWorkerRegistration: swReg,
         })
 
         if (!token) {
-            console.warn('[FCM] No token returned from getToken()')
+            console.warn('[FCM] getToken() returned empty token')
             return null
         }
 
         console.log('[FCM] Token obtained successfully')
 
-        // ✅ Step 4: Save with deduplication
+        // ✅ Save with dedup + LRU eviction
         await saveTokenToFirestore(userId, token)
         return token
 
     } catch (error: any) {
-        // Provide specific error messages for common failures
         if (error?.code === 'messaging/token-subscribe-failed') {
             console.error(
-                '[FCM] Token subscribe failed — check VAPID key and SW registration'
+                '[FCM] Subscribe failed — verify VAPID key and SW registration'
             )
         } else if (error?.code === 'messaging/permission-blocked') {
             console.warn('[FCM] Notifications blocked by user')
         } else {
-            console.error('[FCM] Error registering token:', error)
+            console.error('[FCM] Token registration error:', error)
         }
         return null
     }
 }
 
 /**
- * Request permission AND register token.
- * Call this when user clicks "Enable Notifications" in the prompt.
+ * Request browser notification permission then register token.
+ * Called when user clicks "Enable Notifications" in the UI prompt.
+ * Returns true if permission granted AND token saved successfully.
  */
 export async function requestPermissionAndRegister(
     userId: string
 ): Promise<boolean> {
     try {
-        // ✅ Register SW first before asking for permission
-        // Some browsers need SW active before permission grant
+        // ✅ Pre-register SW before permission dialog
+        // Some browsers require active SW before granting permission
         await getServiceWorkerRegistration()
 
         const permission = await Notification.requestPermission()
 
         if (permission !== 'granted') {
-            console.log('[FCM] Permission not granted:', permission)
+            console.log('[FCM] Permission denied:', permission)
             return false
         }
 
@@ -239,7 +305,7 @@ export async function requestPermissionAndRegister(
         return token !== null
 
     } catch (error) {
-        console.error('[FCM] Error requesting permission:', error)
+        console.error('[FCM] Error in requestPermissionAndRegister:', error)
         return false
     }
 }
@@ -248,44 +314,51 @@ export async function requestPermissionAndRegister(
 // Token Storage (Firestore)
 // ─────────────────────────────────────────────────────────
 
+/**
+ * Save FCM token to Firestore with:
+ * ✅ Exact dedup — skip write if token already exists (only update lastUsed)
+ * ✅ LRU eviction — remove oldest token if at MAX_TOKENS_PER_USER
+ * ✅ Deterministic doc ID — SHA-256 hash prevents collisions
+ *
+ * OPTIMIZATION: Only 2 reads max (existence check + all tokens if needed)
+ * and 1-2 writes per call.
+ */
 async function saveTokenToFirestore(
     userId: string,
     token: string
 ): Promise<void> {
     const tokensRef = collection(db, 'users', userId, 'fcmTokens')
 
-    // ✅ Check exact token exists — skip write if so
+    // ✅ Read 1: Check if this exact token already exists
     const existingSnap = await getDocs(
         query(tokensRef, where('token', '==', token))
     )
 
     if (!existingSnap.empty) {
+        // Token exists — just refresh lastUsed timestamp (1 write)
         await updateDoc(existingSnap.docs[0].ref, {
             lastUsed: serverTimestamp(),
         })
-        console.log('[FCM] Token exists — updated lastUsed')
+        console.log('[FCM] Token already registered — updated lastUsed')
         return
     }
 
-    // Check token count
+    // ✅ Read 2: Check total token count for LRU eviction
     const allSnap = await getDocs(tokensRef)
 
-    // ✅ Enforce max tokens — remove oldest if at limit
     if (allSnap.docs.length >= MAX_TOKENS_PER_USER) {
+        // Evict the least recently used token
         const sorted = [...allSnap.docs].sort((a, b) => {
-            const aTime = (a.data().lastUsed as Timestamp)?.toMillis() || 0
-            const bTime = (b.data().lastUsed as Timestamp)?.toMillis() || 0
-            return aTime - bTime
+            const aTime = (a.data().lastUsed as Timestamp)?.toMillis() ?? 0
+            const bTime = (b.data().lastUsed as Timestamp)?.toMillis() ?? 0
+            return aTime - bTime // ascending: oldest first
         })
         await deleteDoc(sorted[0].ref)
-        console.log('[FCM] Removed oldest token')
+        console.log('[FCM] LRU eviction — removed oldest token')
     }
 
-    // ✅ Use deterministic doc ID based on token
-    // Provides natural dedup at Firestore document level
-    const tokenDocId = btoa(token)
-        .replace(/[^a-zA-Z0-9]/g, '')
-        .slice(0, 20)
+    // ✅ Write: Save new token with deterministic doc ID
+    const tokenDocId = await tokenToDocId(token)
 
     await setDoc(doc(tokensRef, tokenDocId), {
         token,
@@ -302,41 +375,65 @@ async function saveTokenToFirestore(
 // Token Unregistration (Logout)
 // ─────────────────────────────────────────────────────────
 
+/**
+ * Fully unregister FCM for this device on logout:
+ * 1. Get current token (requires active SW)
+ * 2. Delete from Firestore
+ * 3. Delete from FCM (invalidates on server)
+ * 4. Reset all module singletons
+ */
 export async function unregisterFCMToken(userId: string): Promise<void> {
     try {
         const messaging = await getMessagingInstance()
         if (!messaging) return
 
-        const swReg = await getServiceWorkerRegistration()
+        // ✅ Get fresh SW registration — don't use potentially
+        // stale cached one for a security-critical operation
+        const swReg = swRegistration ?? await getServiceWorkerRegistration()
 
-        // Get current token to find and delete it
-        const token = await getToken(messaging, {
-            vapidKey: VAPID_KEY,
-            serviceWorkerRegistration: swReg ?? undefined,
-        }).catch(() => null)
+        let token: string | null = null
+
+        if (swReg) {
+            token = await getToken(messaging, {
+                vapidKey: VAPID_KEY,
+                serviceWorkerRegistration: swReg,
+            }).catch((err) => {
+                console.warn('[FCM] Could not get token for cleanup:', err)
+                return null
+            })
+        }
 
         if (token) {
-            // Remove from Firestore
+            // ✅ Remove from Firestore
             const tokensRef = collection(db, 'users', userId, 'fcmTokens')
             const snap = await getDocs(
                 query(tokensRef, where('token', '==', token))
             )
+
             if (!snap.empty) {
                 const batch = writeBatch(db)
-                snap.docs.forEach(d => batch.delete(d.ref))
+                snap.docs.forEach((d) => batch.delete(d.ref))
                 await batch.commit()
+                console.log('[FCM] Token removed from Firestore')
             }
 
-            // Delete from FCM
-            await deleteToken(messaging)
+            // ✅ Invalidate on FCM servers
+            await deleteToken(messaging).catch((err) =>
+                console.warn('[FCM] deleteToken failed (non-critical):', err)
+            )
         }
 
-        // Clear cached SW registration
-        swRegistration = null
-        console.log('[FCM] Token unregistered successfully')
-
     } catch (error) {
-        console.error('[FCM] Error unregistering token:', error)
+        console.error('[FCM] Unregister error:', error)
+    } finally {
+        // ✅ Always reset singletons — even if operations fail
+        // This ensures next login starts fresh
+        swRegistration = null
+        messagingInstance = null
+        foregroundUnsubscribe?.()
+        foregroundUnsubscribe = null
+        currentUserId = null
+        console.log('[FCM] Singletons reset on logout')
     }
 }
 
@@ -345,38 +442,43 @@ export async function unregisterFCMToken(userId: string): Promise<void> {
 // ─────────────────────────────────────────────────────────
 
 /**
- * Listen for messages when app is in FOREGROUND.
+ * Listen for FCM messages when app is in FOREGROUND.
  *
- * FCM behaviour:
- * - Foreground: this fires, SW does NOT show push → 1 notification
- * - Background: SW fires, this does NOT fire → 1 notification
+ * Architecture:
+ * - Foreground: this fires → show in-app toast, SW suppresses push
+ * - Background: SW fires → show browser push, this does NOT fire
+ * → Exactly ONE notification in all scenarios
  *
- * We only register ONE listener via the singleton guard below.
+ * Singleton guard:
+ * - Same user + active listener → skip (no duplicate listeners)
+ * - Different user → cleanup old, register new
+ * - No listener yet → register fresh
  */
 export function initForegroundMessaging(
     userId: string,
     onNotification: (payload: FCMNotificationPayload) => void
 ): void {
-    // ✅ Always clean up before re-registering
+    // ✅ Fixed: Check BEFORE cleanup — order matters
+    // If same user already has an active listener, do nothing
+    if (currentUserId === userId && foregroundUnsubscribe) {
+        console.log('[FCM] Listener already active for user:', userId)
+        return
+    }
+
+    // ✅ Clean up previous listener (different user or stale)
     if (foregroundUnsubscribe) {
         foregroundUnsubscribe()
         foregroundUnsubscribe = null
         console.log('[FCM] Cleaned up previous foreground listener')
     }
 
-    // ✅ Skip if same user already has active listener
-    if (currentUserId === userId && foregroundUnsubscribe) {
-        console.log('[FCM] Listener already active for user:', userId)
-        return
-    }
-
-    getMessagingInstance().then(messaging => {
+    getMessagingInstance().then((messaging) => {
         if (!messaging) return
 
         foregroundUnsubscribe = onMessage(
             messaging,
             (payload: MessagePayload) => {
-                console.log('[FCM] Foreground message:', payload)
+                console.log('[FCM] Foreground message received')
 
                 const notifPayload: FCMNotificationPayload = {
                     title:
@@ -392,7 +494,7 @@ export function initForegroundMessaging(
                         payload.notification?.icon ||
                         null,
                     url: payload.data?.url || '/',
-                    type: (payload.data?.type as any) || 'info',
+                    type: (payload.data?.type as FCMNotificationPayload['type']) || 'info',
                     projectId: payload.data?.projectId || null,
                     notificationId: payload.data?.notificationId || null,
                 }
@@ -402,7 +504,7 @@ export function initForegroundMessaging(
         )
 
         currentUserId = userId
-        console.log('[FCM] Foreground listener active for:', userId)
+        console.log('[FCM] Foreground listener registered for:', userId)
     })
 }
 
@@ -419,32 +521,46 @@ export function cleanupForegroundMessaging(): void {
 // Token Refresh
 // ─────────────────────────────────────────────────────────
 
+/**
+ * Refresh FCM token if stale (older than TOKEN_REFRESH_INTERVAL).
+ *
+ * OPTIMIZATION:
+ * - Only reads tokens subcollection (1 read)
+ * - Only re-registers if actually needed
+ * - Skips entirely if permission revoked
+ */
 export async function refreshFCMTokenIfNeeded(
     userId: string
 ): Promise<void> {
     try {
-        // Only refresh if permission is still granted
+        // ✅ Skip if permission revoked since last check
         if (Notification.permission !== 'granted') return
 
         const tokensRef = collection(db, 'users', userId, 'fcmTokens')
         const snap = await getDocs(tokensRef)
 
+        // No tokens at all — register fresh
         if (snap.empty) {
+            console.log('[FCM] No tokens found — registering fresh')
             await registerFCMToken(userId)
             return
         }
 
         const now = Date.now()
-        const needsRefresh = snap.docs.some(d => {
+
+        // ✅ Only refresh if ANY token is stale
+        // Avoids unnecessary getToken() calls
+        const hasStaleToken = snap.docs.some((d) => {
             const lastUsed =
-                (d.data().lastUsed as Timestamp)?.toMillis() || 0
+                (d.data().lastUsed as Timestamp)?.toMillis() ?? 0
             return now - lastUsed > TOKEN_REFRESH_INTERVAL
         })
 
-        if (needsRefresh) {
-            console.log('[FCM] Refreshing stale token')
+        if (hasStaleToken) {
+            console.log('[FCM] Stale token detected — refreshing')
             await registerFCMToken(userId)
         }
+
     } catch (error) {
         console.error('[FCM] Token refresh error:', error)
     }

@@ -1,14 +1,22 @@
 /**
  * Unified Notification Service
  *
- * Single source of truth for writing notifications.
- * Every notification write goes through here — ensures:
- * ✅ Consistent schema (title, body, url — never message/link)
+ * Single source of truth for ALL in-app notification writes.
+ * Every write goes through here — guarantees:
+ *
+ * ✅ Consistent schema (title/body/url — never message/link)
  * ✅ Firestore in-app notification written
- * ✅ FCM data payload attached (for push delivery)
- * ✅ No duplicates — dedup via notificationId
- * ✅ Batched writes for multiple recipients
- * ✅ Admin UID caching (5 min TTL)
+ * ✅ notificationId embedded for SW push dedup
+ * ✅ Batched writes — multiple recipients in one commit
+ * ✅ 499-doc chunk limit respected
+ * ✅ Admin UID cache — 5-min TTL, covers all privileged roles
+ * ✅ No redundant reads — cache-first admin lookup
+ *
+ * OPTIMIZATION:
+ * - buildNotificationDoc() never reads — write only
+ * - sendNotification() = 1 batch commit (1 write)
+ * - sendNotificationToMany() = ceil(n/499) batch commits
+ * - notifyAdmins() = 1 read (cached) + ceil(n/499) writes
  */
 
 import {
@@ -19,7 +27,6 @@ import {
     where,
     getDocs,
     serverTimestamp,
-    Timestamp,
 } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
 
@@ -52,31 +59,70 @@ export interface NotificationPayload {
 }
 
 // ─────────────────────────────────────────────────────────
-// Admin UID Cache (module-level, persists across renders)
+// Admin UID Cache
 // ─────────────────────────────────────────────────────────
 
-let cachedAdminUids: string[] | null = null
-let adminCacheExpiry = 0
-const ADMIN_CACHE_TTL = 5 * 60 * 1000 // 5 minutes
-
-async function getAdminUids(): Promise<string[]> {
-    const now = Date.now()
-    if (cachedAdminUids && now < adminCacheExpiry) {
-        return cachedAdminUids
-    }
-    const snap = await getDocs(
-        query(collection(db, 'users'), where('role', '==', 'admin'))
-    )
-    cachedAdminUids = snap.docs.map(d => d.id)
-    adminCacheExpiry = now + ADMIN_CACHE_TTL
-    console.log('[NotifService] Admin UIDs cached:', cachedAdminUids.length)
-    return cachedAdminUids
+interface AdminCache {
+    uids: string[]
+    expiry: number
 }
 
-/** Invalidate admin cache (call when an admin is added/removed) */
+let adminCache: AdminCache | null = null
+const ADMIN_CACHE_TTL = 5 * 60 * 1000 // 5 minutes
+
+/**
+ * Fetch UIDs for ALL privileged roles.
+ * Cached for 5 minutes to minimize Firestore reads.
+ *
+ * OPTIMIZATION: 3 parallel queries (one per role) instead of
+ * a single query that Firestore can't do with OR on same field.
+ * Results merged and deduplicated.
+ */
+async function getAdminUids(): Promise<string[]> {
+    const now = Date.now()
+
+    // ✅ Return cached result if still valid
+    if (adminCache && now < adminCache.expiry) {
+        return adminCache.uids
+    }
+
+    // ✅ Query all privileged roles in parallel (3 reads total)
+    // Firestore doesn't support OR on the same field in one query
+    const privilegedRoles = ['admin', 'super-admin', 'moderator'] as const
+
+    const snaps = await Promise.all(
+        privilegedRoles.map((role) =>
+            getDocs(
+                query(
+                    collection(db, 'users'),
+                    where('role', '==', role)
+                )
+            )
+        )
+    )
+
+    // Merge all UIDs, deduplicate via Set
+    const uidSet = new Set<string>()
+    snaps.forEach((snap) =>
+        snap.docs.forEach((d) => uidSet.add(d.id))
+    )
+
+    adminCache = {
+        uids: [...uidSet],
+        expiry: now + ADMIN_CACHE_TTL,
+    }
+
+    console.log(
+        '[NotifService] Admin UIDs cached:',
+        adminCache.uids.length
+    )
+    return adminCache.uids
+}
+
+/** Invalidate admin cache — call when a user's role changes */
 export function invalidateAdminCache(): void {
-    cachedAdminUids = null
-    adminCacheExpiry = 0
+    adminCache = null
+    console.log('[NotifService] Admin cache invalidated')
 }
 
 // ─────────────────────────────────────────────────────────
@@ -84,12 +130,14 @@ export function invalidateAdminCache(): void {
 // ─────────────────────────────────────────────────────────
 
 /**
- * Write a notification to one user's sub-collection.
- * Returns the notification document ID.
- * 
- * The same notificationId is stored in `data` so the
- * Service Worker can use it as the push `tag` to prevent
+ * Add a notification write operation to an existing batch.
+ * PURE WRITE — no reads performed here.
+ *
+ * The notificationId is embedded in data so the Service Worker
+ * can use it as the push notification `tag` to prevent
  * browser-level duplicates.
+ *
+ * Returns the generated notification document ID.
  */
 export function buildNotificationDoc(
     batch: ReturnType<typeof writeBatch>,
@@ -111,7 +159,7 @@ export function buildNotificationDoc(
         projectId: payload.projectId ?? null,
         data: {
             ...payload.data,
-            // ✅ Embed notif ID so SW can use it as push tag
+            // ✅ Embed ID so SW uses it as push tag (dedup)
             notificationId: notifRef.id,
         },
     })
@@ -124,26 +172,29 @@ export function buildNotificationDoc(
 // ─────────────────────────────────────────────────────────
 
 /**
- * Send notification to ONE user.
+ * Send in-app notification to ONE user.
+ * Cost: 1 batch commit (1 Firestore write)
  */
 export async function sendNotification(
     userId: string,
     payload: NotificationPayload
-): Promise<void> {
+): Promise<string> {
     const batch = writeBatch(db)
-    buildNotificationDoc(batch, userId, payload)
+    const notifId = buildNotificationDoc(batch, userId, payload)
     await batch.commit()
+    return notifId // ✅ Return ID for use in push trigger
 }
 
 // ─────────────────────────────────────────────────────────
-// Multiple Recipients (batched)
+// Multiple Recipients
 // ─────────────────────────────────────────────────────────
 
-const BATCH_LIMIT = 499
+const BATCH_LIMIT = 499 // Firestore max is 500, keep 1 buffer
 
 /**
- * Send notifications to multiple users.
- * Auto-chunks to respect Firestore 500-doc batch limit.
+ * Send in-app notifications to MULTIPLE users.
+ * Auto-chunks to respect Firestore 500-op batch limit.
+ * Cost: ceil(n / 499) batch commits
  */
 export async function sendNotificationToMany(
     userIds: string[],
@@ -151,36 +202,55 @@ export async function sendNotificationToMany(
 ): Promise<void> {
     if (userIds.length === 0) return
 
-    // Remove duplicates
+    // ✅ Deduplicate recipients
     const uniqueIds = [...new Set(userIds)]
 
     for (let i = 0; i < uniqueIds.length; i += BATCH_LIMIT) {
         const chunk = uniqueIds.slice(i, i + BATCH_LIMIT)
         const batch = writeBatch(db)
-        chunk.forEach(uid => buildNotificationDoc(batch, uid, payload))
+        chunk.forEach((uid) => buildNotificationDoc(batch, uid, payload))
         await batch.commit()
     }
 }
 
 // ─────────────────────────────────────────────────────────
-// Notify All Admins (cached)
+// Notify All Admins
 // ─────────────────────────────────────────────────────────
 
 /**
- * Send notification to all admins.
- * Uses cached admin UIDs — max 1 Firestore read per 5 minutes.
+ * Send notification to ALL privileged users (admin, super-admin, moderator).
+ * Uses cached admin UIDs — at most 1 set of Firestore reads per 5 minutes.
  */
 export async function notifyAdmins(
     payload: NotificationPayload
 ): Promise<void> {
     const adminUids = await getAdminUids()
-    if (adminUids.length === 0) return
+    if (adminUids.length === 0) {
+        console.log('[NotifService] No admins found to notify')
+        return
+    }
     await sendNotificationToMany(adminUids, payload)
 }
 
 // ─────────────────────────────────────────────────────────
-// Pre-built notification helpers (connection events)
+// Pre-built Notification Helpers
 // ─────────────────────────────────────────────────────────
+
+export const buildConnectionRequestNotif = (
+    senderName: string,
+    senderUid: string,
+    senderPhotoURL?: string | null
+): NotificationPayload => ({
+    title: 'New Connection Request',
+    body: `${senderName} wants to connect with you!`,
+    type: 'connection_request',
+    url: `/profile/${senderUid}`,
+    icon: senderPhotoURL ?? null,
+    data: {
+        fromUserId: senderUid,
+        fromUserName: senderName,
+    },
+})
 
 export const buildConnectionAcceptedNotif = (
     acceptorName: string,
@@ -248,23 +318,7 @@ export const buildReportAdminNotif = (
     url: `/project/${projectId}`,
     projectId,
 })
-// Add this alongside the other buildConnection*Notif helpers
 
-export const buildConnectionRequestNotif = (
-    senderName: string,
-    senderUid: string,
-    senderPhotoURL?: string | null
-): NotificationPayload => ({
-    title: 'New Connection Request',
-    body: `${senderName} wants to connect with you!`,
-    type: 'connection_request',
-    url: `/profile/${senderUid}`,
-    icon: senderPhotoURL ?? null,
-    data: {
-        fromUserId: senderUid,
-        fromUserName: senderName,
-    },
-})
 export const buildWithdrawOwnerNotif = (
     projectTitle: string,
     projectId: string

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { DashboardLayout } from '@/components/layout/DashboardLayout'
 import { Card, CardContent } from '@/components/ui/card'
@@ -39,9 +39,9 @@ import {
     query,
     getDocs,
     doc,
-    getDoc,
 } from 'firebase/firestore'
 import { db, auth } from '@/lib/firebase'
+import { cachedGetDoc } from '@/lib/queryUtils'
 import {
     sendConnectionRequest,
 } from '@/services/connectionService'
@@ -149,11 +149,14 @@ export function Discover() {
             )
             const freshIncomingSet = new Set(incomingSnapshot.docs.map(d => d.id))
 
-            // Check which of these people I sent a request to
+            // ⚡ OPTIMIZATION: Use cachedGetDoc instead of raw getDoc.
+            // Each doc is cached for 5 min — repeated scroll pages skip the read
+            // entirely for users already checked. Reduces Firestore reads by ~N
+            // per page load (N = visible people count, typically 10).
             const others = people.filter(p => p.id !== currentUserId)
             const outgoingResults = await Promise.all(
                 others.map(async (p) => {
-                    const snap = await getDoc(
+                    const snap = await cachedGetDoc(
                         doc(db, 'users', p.id, 'connectionRequests', currentUserId)
                     )
                     return snap.exists() ? p.id : null
@@ -552,35 +555,39 @@ export function Discover() {
     }
 
     // ── Filtered lists ────────────────────────────────────────────────────────
-    // ── Filtered lists ────────────────────────────────────────────────────────────
-const filteredPeople = peopleState.items.filter(person => {
-    // Hide self
-    if (auth.currentUser && person.id === auth.currentUser.uid) return false
-    // Hide confirmed friends
-    if (friendIds.has(person.id)) return false
-    // ✅ Hide outgoing pending — already sent, no action needed in Discover
-    if (outgoingPendingIds.has(person.id)) return false
-    // ✅ Keep incoming pending visible — user needs to respond
-    // (they'll see "Respond" button that navigates to profile)
+    // ⚡ OPTIMIZATION: useMemo prevents recomputing these on every render.
+    // filteredPeople only recalculates when people data or search/filter values change.
+    // filteredProjects only recalculates when project data or its own filters change.
+    // Without this, typing in the people search box also recomputed filteredProjects.
+    const filteredPeople = useMemo(() => peopleState.items.filter(person => {
+        // Hide self
+        if (auth.currentUser && person.id === auth.currentUser.uid) return false
+        // Hide confirmed friends
+        if (friendIds.has(person.id)) return false
+        // ✅ Hide outgoing pending — already sent, no action needed in Discover
+        if (outgoingPendingIds.has(person.id)) return false
+        // ✅ Keep incoming pending visible — user needs to respond
+        // (they'll see "Respond" button that navigates to profile)
 
-    const matchesSearch =
-        debouncedPeopleSearch === '' ||
-        person.firstName?.toLowerCase().includes(debouncedPeopleSearch.toLowerCase()) ||
-        person.lastName?.toLowerCase().includes(debouncedPeopleSearch.toLowerCase()) ||
-        (person.skills || []).some(s =>
-            s?.toLowerCase().includes(debouncedPeopleSearch.toLowerCase())
-        )
+        const matchesSearch =
+            debouncedPeopleSearch === '' ||
+            person.firstName?.toLowerCase().includes(debouncedPeopleSearch.toLowerCase()) ||
+            person.lastName?.toLowerCase().includes(debouncedPeopleSearch.toLowerCase()) ||
+            (person.skills || []).some(s =>
+                s?.toLowerCase().includes(debouncedPeopleSearch.toLowerCase())
+            )
 
-    const matchesDiscipline =
-        disciplineFilter === 'all' ||
-        person.discipline
-            ?.toLowerCase()
-            .replace(/ & /g, '-')
-            .replace(/ /g, '-') === disciplineFilter
+        const matchesDiscipline =
+            disciplineFilter === 'all' ||
+            person.discipline
+                ?.toLowerCase()
+                .replace(/ & /g, '-')
+                .replace(/ /g, '-') === disciplineFilter
 
-    return matchesSearch && matchesDiscipline
-})
-    const filteredProjects = projectsState.items.filter(project => {
+        return matchesSearch && matchesDiscipline
+    }), [peopleState.items, friendIds, outgoingPendingIds, debouncedPeopleSearch, disciplineFilter])
+
+    const filteredProjects = useMemo(() => projectsState.items.filter(project => {
         const matchesSearch =
             debouncedProjectsSearch === '' ||
             project.title.toLowerCase().includes(debouncedProjectsSearch.toLowerCase()) ||
@@ -590,7 +597,7 @@ const filteredPeople = peopleState.items.filter(person => {
             )
         const matchesStatus = statusFilter === 'all' || project.status === statusFilter
         return matchesSearch && matchesStatus
-    })
+    }), [projectsState.items, debouncedProjectsSearch, statusFilter])
 
     // ── Render ────────────────────────────────────────────────────────────────
     return (

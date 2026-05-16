@@ -8,12 +8,15 @@ import {
 } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
 import {
-    buildNotificationDoc,
     buildConnectionAcceptedNotif,
     buildConnectionRejectedNotif,
     buildConnectionWithdrawnNotif,
-    buildConnectionRequestNotif,  // ← we add this below
+    buildConnectionRequestNotif,
+    buildNotificationDoc,
 } from '@/services/notificationService'
+import {
+    sendNotificationWithPush,
+} from '@/services/notificationTrigger'
 
 // ─── Status check ────────────────────────────────────────────────────────────
 
@@ -81,14 +84,13 @@ export async function sendConnectionRequest(
         }
     )
 
-    // Notify target using unified service
-    buildNotificationDoc(
-        batch,
+    await batch.commit()
+
+    // ✅ Send in-app + push notification
+    await sendNotificationWithPush(
         targetUid,
         buildConnectionRequestNotif(senderName, senderUid, senderData?.photoURL ?? null)
     )
-
-    await batch.commit()
 }
 
 // ─── Accept ───────────────────────────────────────────────────────────────────
@@ -132,9 +134,10 @@ export async function acceptConnectionRequest(
     // ✅ Delete the connectionRequest doc
     batch.delete(requestRef)
 
-    // ✅ Notify sender
-    buildNotificationDoc(
-        batch,
+    await batch.commit()
+
+    // ✅ Send in-app + push notification to sender
+    await sendNotificationWithPush(
         senderUid,
         buildConnectionAcceptedNotif(
             receiverName,
@@ -142,8 +145,6 @@ export async function acceptConnectionRequest(
             receiverData?.photoURL ?? null
         )
     )
-
-    await batch.commit()
 }
 
 // ─── Reject ───────────────────────────────────────────────────────────────────
@@ -167,14 +168,13 @@ export async function rejectConnectionRequest(
 
     const batch = writeBatch(db)
     batch.delete(requestRef)
+    await batch.commit()
 
-    buildNotificationDoc(
-        batch,
+    // ✅ Send in-app + push notification to sender
+    await sendNotificationWithPush(
         senderUid,
         buildConnectionRejectedNotif(receiverName, receiverUid)
     )
-
-    await batch.commit()
 }
 
 // ─── Withdraw ─────────────────────────────────────────────────────────────────
@@ -198,14 +198,13 @@ export async function withdrawConnectionRequest(
 
     const batch = writeBatch(db)
     batch.delete(ref)
+    await batch.commit()
 
-    buildNotificationDoc(
-        batch,
+    // ✅ Send in-app + push notification to target
+    await sendNotificationWithPush(
         targetUserId,
         buildConnectionWithdrawnNotif(senderName, senderUid)
     )
-
-    await batch.commit()
 }
 
 // ─── Remove connection (unfriend) ─────────────────────────────────────────────

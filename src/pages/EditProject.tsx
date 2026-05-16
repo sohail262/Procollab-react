@@ -117,7 +117,7 @@ export function EditProject() {
                     description: 'Project not found',
                     variant: 'destructive',
                 })
-                navigate('/my-projects')
+                navigate('/dashboard/projects')
             }
         } catch (error) {
             console.error('Error loading project:', error)
@@ -197,7 +197,7 @@ export function EditProject() {
                 description: 'Your project has been deleted successfully.',
                 variant: 'success',
             })
-            navigate('/my-projects')
+            navigate('/dashboard/projects')
         } catch (error) {
             console.error('Error deleting project:', error)
             toast({

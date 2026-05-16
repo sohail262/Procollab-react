@@ -24,6 +24,9 @@ export default defineConfig({
           'firebase-vendor': ['firebase/app', 'firebase/auth', 'firebase/firestore'],
           'ui-vendor': ['lucide-react', '@radix-ui/react-dialog', '@radix-ui/react-dropdown-menu'],
           'chart-vendor': ['recharts'],
+          // ⚡ OPTIMIZATION: three.js is ~600KB — isolate it so it never
+          // blocks the initial bundle. Only loads when HeroGlobe is rendered.
+          'three-vendor': ['three'],
           'utils': ['clsx', 'class-variance-authority']
         }
       }

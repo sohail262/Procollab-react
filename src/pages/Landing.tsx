@@ -3,7 +3,25 @@ import { Users, Lightbulb, ListTodo, Star, ArrowRight, CheckCircle2, Shield, Tre
 import { Button } from "@/components/ui/button"
 import { Navbar } from "@/components/layout/Navbar"
 import { Footer } from "@/components/layout/Footer"
-import { HeroGlobe } from "@/components/HeroGlobe"
+import { lazy, Suspense } from "react"
+
+// ⚡ OPTIMIZATION: Lazy-load HeroGlobe to defer Three.js (~600KB) from the
+// initial bundle. Three.js was blocking the main thread for ~6s before any
+// text rendered (LCP = 6070ms). Now the hero text paints immediately and
+// the globe loads in the background after the LCP element is visible.
+const HeroGlobe = lazy(() =>
+    import("@/components/HeroGlobe").then(m => ({ default: m.HeroGlobe }))
+)
+
+// Placeholder shown while Three.js loads — matches the globe container size
+// so layout doesn't shift when the globe appears
+const GlobePlaceholder = () => (
+    <div className="w-full h-full min-h-[400px] lg:min-h-[560px] flex items-center justify-center">
+        <div className="font-mono text-xs tracking-widest text-muted-foreground animate-pulse">
+            LOADING MAP DATA...
+        </div>
+    </div>
+)
 
 export function Landing() {
     return (
@@ -60,7 +78,9 @@ export function Landing() {
 
                             {/* Right column: Globe */}
                             <div className="relative h-[400px] lg:h-[560px] w-full flex items-center justify-center">
-                                <HeroGlobe />
+                                <Suspense fallback={<GlobePlaceholder />}>
+                                    <HeroGlobe />
+                                </Suspense>
                             </div>
 
                         </div>

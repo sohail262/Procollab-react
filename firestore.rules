@@ -171,6 +171,12 @@ service cloud.firestore {
         allow read, list: if isSignedIn() && isOwner(userId);
         allow write:      if isSignedIn() && isOwner(userId);
         allow create:     if isSignedIn();
+        // Allow project owners to remove members from their joinedProjects
+        allow delete:     if isSignedIn() && (
+          isOwner(userId) ||
+          isProjectOwner(projectId) ||
+          isProjectTeamLead(projectId)
+        );
       }
 
       match /connectionRequests/{fromUserId} {
@@ -385,10 +391,15 @@ service cloud.firestore {
           // they appear in teamMembers map (invite acceptance flow)
           request.auth.uid == memberId
         );
-        allow write: if isValidUser() && (
+        allow create, update: if isValidUser() && (
           isProjectOwner(projectId)    ||
           isProjectTeamLead(projectId) ||
           request.auth.uid == memberId
+        );
+        // Explicit delete permission for project owners/leads
+        allow delete: if isValidUser() && (
+          isProjectOwner(projectId)    ||
+          isProjectTeamLead(projectId)
         );
       }
 
@@ -620,12 +631,21 @@ service cloud.firestore {
 
     // ─── FCM Queue ──────────────────────────────────────────────────────────────
     match /fcmQueue/{docId} {
-      allow create: if isValidUser()
-        && request.resource.data.recipientUserId is string
-        && request.resource.data.tokens is list
-        && request.resource.data.tokens.size() > 0
-        && request.resource.data.tokens.size() <= 10;
-      allow read, update, delete: if false;
+      allow create: if isValidUser() && (
+        // Single recipient format
+        (request.resource.data.recipientUserId is string) ||
+        // Multi-recipient format
+        (request.resource.data.recipientUserIds is list && 
+         request.resource.data.recipientUserIds.size() > 0 && 
+         request.resource.data.recipientUserIds.size() <= 100)
+      ) && 
+      request.resource.data.notification is map &&
+      request.resource.data.notification.title is string &&
+      request.resource.data.notification.body is string &&
+      request.resource.data.status == 'pending';
+      
+      // Cloud Functions need read/write access to process the queue
+      allow read, update, delete: if false; // Only Cloud Functions can access
     }
 
     // ─── System ─────────────────────────────────────────────────────────────────

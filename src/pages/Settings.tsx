@@ -152,6 +152,7 @@ export function Settings() {
                 description: 'Your profile has been updated successfully!',
                 variant: 'success',
             })
+            navigate(`/profile/${user.uid}`)
         } catch (error) {
             console.error('Error updating profile:', error)
             toast({

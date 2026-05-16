@@ -17,7 +17,7 @@ const requiredEnvVars = [
 
 for (const envVar of requiredEnvVars) {
     if (!import.meta.env[envVar]) {
-        throw new Error(`Missing required environment variable: ${envVar}`)
+        console.warn(`Missing environment variable: ${envVar}`)
     }
 }
 

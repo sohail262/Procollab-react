@@ -1,82 +1,99 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { DashboardLayout } from '@/components/layout/DashboardLayout'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import {
+    Card, CardContent, CardHeader,
+    CardTitle, CardDescription,
+} from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import {
+    Select, SelectContent, SelectItem,
+    SelectTrigger, SelectValue,
+} from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
     AlertDialog, AlertDialogAction, AlertDialogCancel,
     AlertDialogContent, AlertDialogDescription,
-    AlertDialogFooter, AlertDialogHeader, AlertDialogTitle
+    AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import {
     Dialog, DialogContent, DialogHeader,
-    DialogTitle, DialogDescription
+    DialogTitle, DialogDescription,
 } from '@/components/ui/dialog'
 import {
     ArrowLeft, Mail, Trash2, Users, ClipboardList,
     Settings, Shield, Kanban, FileText, MessageSquare,
-    Calendar, LayoutDashboard, Pencil, ExternalLink, X
+    Calendar, LayoutDashboard, Pencil, ExternalLink, X,
 } from 'lucide-react'
 import {
     doc, getDoc, getDocs, collection, query, where,
     onSnapshot, addDoc, setDoc, updateDoc, deleteDoc,
     arrayUnion, arrayRemove, serverTimestamp, increment,
-    writeBatch
+    writeBatch, deleteField,
 } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
 import { useAuth } from '@/hooks/use-auth'
 import { useToast } from '@/hooks/use-toast'
 import { useProjectRole } from '@/hooks/use-project-role'
-import { EMPTY_MEMBER_PERMISSIONS, type MemberPermissions } from '@/hooks/use-permissions'
-import { buildInviteMailOptions, openMailClient, type MailClientOption } from '@/lib/SendInviteEmail'
+import {
+    type MemberPermissions,
+} from '@/hooks/use-permissions'
+import {
+    buildInviteMailOptions,
+    openMailClient,
+    type MailClientOption,
+} from '@/lib/sendInviteEmail'
+import { sendNotificationWithPush } from '@/services/notificationTrigger'
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────
+// Types
+// ─────────────────────────────────────────────────────────
 
 interface TeamMember {
-    id: string
-    uid: string
-    name: string
-    email: string
-    avatar?: string
-    role: 'owner' | 'admin' | 'member' | 'viewer'
-    joinedAt: Date
+    id:           string
+    uid:          string
+    name:         string
+    email:        string
+    avatar?:      string
+    role:         'owner' | 'admin' | 'member' | 'viewer'
+    joinedAt:     Date
     permissions?: MemberPermissions
 }
 
 interface Invitation {
-    id: string
-    email: string
-    role: 'member' | 'viewer'
-    invitedBy: string
-    invitedByName?: string
-    invitedAt: Date
-    status: 'pending'
-    token?: string
+    id:              string
+    email:           string
+    role:            'member' | 'viewer'
+    invitedBy:       string
+    invitedByName?:  string
+    invitedAt:       Date
+    status:          'pending'
+    token?:          string
     resolvedUserId?: string
 }
 
 interface JoinRequest {
-    id: string
-    userId: string
-    userEmail: string
-    position: string
-    skills: string
-    experience: string
-    motivation: string
+    id:             string
+    userId:         string
+    userEmail:      string
+    position:       string
+    skills:         string
+    experience:     string
+    motivation:     string
     timeCommitment: string
-    appliedAt: Date
-    status: 'pending' | 'accepted' | 'rejected'
-    userName?: string
-    userAvatar?: string
+    appliedAt:      Date
+    status:         'pending' | 'accepted' | 'rejected'
+    userName?:      string
+    userAvatar?:    string
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────
 
 const getDefaultPermissions = (role: string): MemberPermissions => {
     switch (role) {
@@ -118,73 +135,51 @@ const getDefaultPermissions = (role: string): MemberPermissions => {
 }
 
 const PERMISSION_TABS = [
-    { key: 'dashboard',  label: 'Dashboard',   icon: LayoutDashboard },
-    { key: 'tasks',      label: 'Tasks',        icon: Kanban          },
-    { key: 'whiteboard', label: 'Whiteboard',   icon: Pencil          },
-    { key: 'files',      label: 'Files',        icon: FileText        },
-    { key: 'chat',       label: 'Chat',         icon: MessageSquare   },
-    { key: 'calendar',   label: 'Calendar',     icon: Calendar        },
-    { key: 'gantt',      label: 'Gantt Chart',  icon: ClipboardList   },
-    { key: 'settings',   label: 'Settings',     icon: Settings        },
+    { key: 'dashboard',  label: 'Dashboard',  icon: LayoutDashboard },
+    { key: 'tasks',      label: 'Tasks',       icon: Kanban          },
+    { key: 'whiteboard', label: 'Whiteboard',  icon: Pencil          },
+    { key: 'files',      label: 'Files',       icon: FileText        },
+    { key: 'chat',       label: 'Chat',        icon: MessageSquare   },
+    { key: 'calendar',   label: 'Calendar',    icon: Calendar        },
+    { key: 'gantt',      label: 'Gantt Chart', icon: ClipboardList   },
+    { key: 'settings',   label: 'Settings',    icon: Settings        },
 ]
 
-// ── Unified notification writer (correct schema) ──────────────────────────────
-async function sendNotification(
-    userId: string,
-    payload: {
-        title: string
-        body: string
-        type: string
-        url?: string
-        projectId?: string
-        icon?: string | null
-    }
-) {
-    await addDoc(collection(db, 'users', userId, 'notifications'), {
-        title:     payload.title,
-        body:      payload.body,
-        type:      payload.type,
-        url:       payload.url    ?? null,
-        projectId: payload.projectId ?? null,
-        icon:      payload.icon   ?? null,
-        read:      false,
-        timestamp: serverTimestamp(),
-    })
-}
-
-// ── Component ─────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────
+// Component
+// ─────────────────────────────────────────────────────────
 
 export function ManageTeam() {
-    const { id }       = useParams()
-    const navigate     = useNavigate()
-    const { user }     = useAuth()
-    const { toast }    = useToast()
+    const { id }      = useParams()
+    const navigate    = useNavigate()
+    const { user }    = useAuth()
+    const { toast }   = useToast()
     const { canManageTeam, loading: roleLoading } = useProjectRole()
 
-    const [project,        setProject]        = useState<any>(null)
-    const [loading,        setLoading]         = useState(true)
-    const [inviteEmail,    setInviteEmail]     = useState('')
-    const [inviteRole,     setInviteRole]      = useState<'member' | 'viewer'>('member')
-    const [inviteLoading,  setInviteLoading]   = useState(false)
-    const [members,        setMembers]         = useState<TeamMember[]>([])
-    const [invitations,    setInvitations]     = useState<Invitation[]>([])
-    const [joinRequests,   setJoinRequests]    = useState<JoinRequest[]>([])
-    const [selectedMember, setSelectedMember]  = useState<TeamMember | null>(null)
-    const [activeTab,      setActiveTab]       = useState('members')
+    const [project,       setProject]       = useState<any>(null)
+    const [loading,       setLoading]       = useState(true)
+    const [inviteEmail,   setInviteEmail]   = useState('')
+    const [inviteRole,    setInviteRole]    = useState<'member' | 'viewer'>('member')
+    const [inviteLoading, setInviteLoading] = useState(false)
+    const [members,       setMembers]       = useState<TeamMember[]>([])
+    const [invitations,   setInvitations]   = useState<Invitation[]>([])
+    const [joinRequests,  setJoinRequests]  = useState<JoinRequest[]>([])
+    const [selectedMember,setSelectedMember]= useState<TeamMember | null>(null)
+    const [activeTab,     setActiveTab]     = useState('members')
 
     const [removeDialog, setRemoveDialog] = useState<{
-        open: boolean
-        memberId: string
-        memberUid: string
+        open:       boolean
+        memberId:   string
+        memberUid:  string
         memberName: string
     }>({ open: false, memberId: '', memberUid: '', memberName: '' })
 
     const [mailDialog, setMailDialog] = useState<{
-        open: boolean
+        open:    boolean
         options: MailClientOption[]
     }>({ open: false, options: [] })
 
-    // ── Real-time listeners ────────────────────────────────────────────────
+    // ── Real-time listeners ───────────────────────────────
     useEffect(() => {
         if (!id) return
         const unsubs: Array<() => void> = []
@@ -197,18 +192,24 @@ export function ManageTeam() {
             })
         )
 
-        // Members sub-collection
+        // Members subcollection
+        // ✅ Filter out owner from members list display
+        // Owner is managed separately via createdBy field
         unsubs.push(
-            onSnapshot(collection(db, 'projects', id, 'members'), snap => {
-                setMembers(
-                    snap.docs.map(d => ({
-                        id: d.id,
-                        ...d.data(),
-                        joinedAt:    d.data().joinedAt?.toDate() ?? new Date(),
-                        permissions: d.data().permissions ?? getDefaultPermissions(d.data().role),
-                    })) as TeamMember[]
-                )
-            })
+            onSnapshot(
+                collection(db, 'projects', id, 'members'),
+                snap => {
+                    setMembers(
+                        snap.docs.map(d => ({
+                            id:          d.id,
+                            ...d.data(),
+                            joinedAt:    d.data().joinedAt?.toDate() ?? new Date(),
+                            permissions: d.data().permissions ??
+                                         getDefaultPermissions(d.data().role),
+                        })) as TeamMember[]
+                    )
+                }
+            )
         )
 
         // Pending invitations
@@ -230,7 +231,8 @@ export function ManageTeam() {
             )
         )
 
-        // Pending applications / join requests
+        // Pending applications
+        // ✅ Fetch user profiles in parallel (not sequential loop)
         unsubs.push(
             onSnapshot(
                 query(
@@ -238,23 +240,47 @@ export function ManageTeam() {
                     where('status', '==', 'pending')
                 ),
                 async snap => {
-                    const requests: JoinRequest[] = []
-                    for (const docSnap of snap.docs) {
-                        const data = docSnap.data()
-                        let userName   = 'Unknown User'
-                        let userAvatar = ''
-                        try {
-                            const uSnap = await getDoc(doc(db, 'users', data.userId))
-                            if (uSnap.exists()) {
-                                const u = uSnap.data()
-                                userName = `${u.firstName ?? ''} ${u.lastName ?? ''}`.trim()
-                                    || u.displayName || u.email || 'Unknown'
-                                userAvatar = u.photoURL
-                                    || `https://api.dicebear.com/7.x/avataaars/svg?seed=${data.userId}`
-                            }
-                        } catch { /* non-fatal */ }
+                    if (snap.empty) {
+                        setJoinRequests([])
+                        return
+                    }
 
-                        requests.push({
+                    // ✅ Batch fetch all user profiles in parallel
+                    const userIds = [...new Set(
+                        snap.docs.map(d => d.data().userId).filter(Boolean)
+                    )]
+
+                    const userProfiles: Record<string, any> = {}
+                    await Promise.all(
+                        userIds.map(async uid => {
+                            try {
+                                const uSnap = await getDoc(
+                                    doc(db, 'users', uid)
+                                )
+                                if (uSnap.exists()) {
+                                    userProfiles[uid] = uSnap.data()
+                                }
+                            } catch {
+                                // non-fatal — user profile unavailable
+                            }
+                        })
+                    )
+
+                    const requests: JoinRequest[] = snap.docs.map(docSnap => {
+                        const data    = docSnap.data()
+                        const profile = userProfiles[data.userId]
+
+                        const userName = profile
+                            ? (`${profile.firstName ?? ''} ${profile.lastName ?? ''}`.trim()
+                               || profile.displayName
+                               || profile.email
+                               || 'Unknown')
+                            : 'Unknown User'
+
+                        const userAvatar = profile?.photoURL
+                            || `https://api.dicebear.com/7.x/avataaars/svg?seed=${data.userId}`
+
+                        return {
                             id:             docSnap.id,
                             userId:         data.userId,
                             userEmail:      data.userEmail || data.email || '',
@@ -267,8 +293,9 @@ export function ManageTeam() {
                             status:         data.status,
                             userName,
                             userAvatar,
-                        })
-                    }
+                        }
+                    })
+
                     setJoinRequests(requests)
                 }
             )
@@ -277,7 +304,7 @@ export function ManageTeam() {
         return () => unsubs.forEach(fn => fn())
     }, [id])
 
-    // ── Invite ────────────────────────────────────────────────────────────
+    // ── Invite ────────────────────────────────────────────
     const handleInvite = async () => {
         if (!id || !user || !inviteEmail.trim()) return
         setInviteLoading(true)
@@ -287,6 +314,41 @@ export function ManageTeam() {
             const projectTitle = project?.title || 'a project'
             const email        = inviteEmail.trim().toLowerCase()
 
+            // ✅ Check if user is already a member
+            const existingMemberSnap = await getDocs(
+                query(
+                    collection(db, 'projects', id, 'members'),
+                    where('email', '==', email)
+                )
+            )
+            if (!existingMemberSnap.empty) {
+                toast({
+                    title:       'Already a member',
+                    description: `${email} is already on this team.`,
+                    variant:     'destructive',
+                })
+                setInviteLoading(false)
+                return
+            }
+
+            // ✅ Check if invitation already pending
+            const existingInviteSnap = await getDocs(
+                query(
+                    collection(db, 'projects', id, 'invitations'),
+                    where('email', '==', email),
+                    where('status', '==', 'pending')
+                )
+            )
+            if (!existingInviteSnap.empty) {
+                toast({
+                    title:       'Already invited',
+                    description: `A pending invitation already exists for ${email}.`,
+                    variant:     'destructive',
+                })
+                setInviteLoading(false)
+                return
+            }
+
             // Generate secure random token
             const tokenArray = new Uint8Array(24)
             crypto.getRandomValues(tokenArray)
@@ -294,11 +356,14 @@ export function ManageTeam() {
                 .map(b => b.toString(16).padStart(2, '0'))
                 .join('')
 
-            // Look up the invited user by email
+            // Look up invited user by email
             let targetUserId: string | null = null
             try {
                 const usersSnap = await getDocs(
-                    query(collection(db, 'users'), where('email', '==', email))
+                    query(
+                        collection(db, 'users'),
+                        where('email', '==', email)
+                    )
                 )
                 if (!usersSnap.empty) targetUserId = usersSnap.docs[0].id
             } catch { /* user may not exist yet */ }
@@ -318,7 +383,7 @@ export function ManageTeam() {
                 }
             )
 
-            // Write global invite token doc for the accept flow
+            // Write global invite token doc
             await setDoc(doc(db, 'inviteTokens', token), {
                 token,
                 projectId:       id,
@@ -333,18 +398,20 @@ export function ManageTeam() {
                 ...(targetUserId ? { resolvedUserId: targetUserId } : {}),
             })
 
-            // ✅ Notify the invited user with correct schema
+            // Notify invited user if they have an account
             if (targetUserId) {
-                await sendNotification(targetUserId, {
+                await sendNotificationWithPush(targetUserId, {
                     title:     'Project Invitation',
-                    body:      `${senderName} invited you to join "${projectTitle}" as a ${inviteRole === 'viewer' ? 'Viewer' : 'Team Member'}.`,
+                    body:      `${senderName} invited you to join "${projectTitle}" as a ${
+                        inviteRole === 'viewer' ? 'Viewer' : 'Team Member'
+                    }.`,
                     type:      'info',
                     url:       `/invite?token=${token}`,
                     projectId: id,
                 })
             }
 
-            // Open mail client
+            // Open mail client dialog
             const mailOptions = buildInviteMailOptions({
                 toEmail:      email,
                 inviterName:  senderName,
@@ -357,14 +424,15 @@ export function ManageTeam() {
 
             toast({
                 title:       'Invitation ready',
-                description: `Invite prepared for ${email}. Your email client will open.`,
+                description: `Invite prepared for ${email}.`,
             })
             setInviteEmail('')
+
         } catch (error) {
             console.error('Error preparing invitation:', error)
             toast({
                 title:       'Error',
-                description: 'Failed to prepare the invitation. Please try again.',
+                description: 'Failed to prepare the invitation.',
                 variant:     'destructive',
             })
         } finally {
@@ -376,7 +444,9 @@ export function ManageTeam() {
         if (!id) return
         try {
             const invDoc = invitations.find(i => i.id === inviteId)
-            await deleteDoc(doc(db, 'projects', id, 'invitations', inviteId))
+            await deleteDoc(
+                doc(db, 'projects', id, 'invitations', inviteId)
+            )
             if (invDoc?.token) {
                 await updateDoc(doc(db, 'inviteTokens', invDoc.token), {
                     status: 'cancelled',
@@ -393,7 +463,7 @@ export function ManageTeam() {
         }
     }
 
-    // ── Remove member ─────────────────────────────────────────────────────
+    // ── Remove member ─────────────────────────────────────
     const confirmRemoveMember = (member: TeamMember) => {
         setRemoveDialog({
             open:       true,
@@ -410,27 +480,33 @@ export function ManageTeam() {
         try {
             const batch = writeBatch(db)
 
-            // ✅ Remove from members sub-collection
-            batch.delete(doc(db, 'projects', id, 'members', memberId))
+            // ✅ Remove from members subcollection
+            batch.delete(
+                doc(db, 'projects', id, 'members', memberId)
+            )
 
-            // ✅ Remove from project root — all three fields kept in sync
+            // ✅ Remove from project root doc — all three fields
             batch.update(doc(db, 'projects', id), {
                 [`teamMembers.${memberUid}`]: deleteField(),
-                members:        arrayRemove(memberUid),
-                currentMembers: increment(-1),
+                members:                      arrayRemove(memberUid),
+                currentMembers:               increment(-1),
             })
 
             // ✅ Remove from user's joinedProjects
-            batch.delete(doc(db, 'users', memberUid, 'joinedProjects', id))
+            batch.delete(
+                doc(db, 'users', memberUid, 'joinedProjects', id)
+            )
 
             await batch.commit()
 
-            // ✅ Correct notification schema
-            await sendNotification(memberUid, {
+            // ✅ Notify removed member
+            await sendNotificationWithPush(memberUid, {
                 title:     'Removed from Project',
-                body:      `You have been removed from "${project?.title ?? 'a project'}". Contact the project owner if you think this was a mistake.`,
+                body:      `You have been removed from "${
+                    project?.title ?? 'a project'
+                }". Contact the project owner if you think this was a mistake.`,
                 type:      'warning',
-                url:       `/discover`,
+                url:       '/discover',
                 projectId: id,
             })
 
@@ -440,6 +516,7 @@ export function ManageTeam() {
             })
 
             if (selectedMember?.uid === memberUid) setSelectedMember(null)
+
         } catch (error) {
             console.error('Error removing member:', error)
             toast({
@@ -448,32 +525,50 @@ export function ManageTeam() {
                 variant:     'destructive',
             })
         } finally {
-            setRemoveDialog({ open: false, memberId: '', memberUid: '', memberName: '' })
+            setRemoveDialog({
+                open: false, memberId: '', memberUid: '', memberName: '',
+            })
         }
     }
 
-    // ── Update role ───────────────────────────────────────────────────────
-    const handleUpdateRole = async (memberId: string, memberUid: string, newRole: string) => {
+    // ── Update role ───────────────────────────────────────
+    const handleUpdateRole = async (
+        memberId:  string,
+        memberUid: string,
+        newRole:   string
+    ) => {
         if (!id) return
         try {
             const newPerms = getDefaultPermissions(newRole)
             const batch    = writeBatch(db)
 
-            // Update members sub-collection
-            batch.update(doc(db, 'projects', id, 'members', memberId), {
-                role:        newRole,
-                permissions: newPerms,
-            })
+            // ✅ Update members subcollection
+            batch.update(
+                doc(db, 'projects', id, 'members', memberId),
+                { role: newRole, permissions: newPerms }
+            )
 
             // ✅ Keep teamMembers map on root doc in sync
+            // ✅ Always lowercase role
             batch.update(doc(db, 'projects', id), {
-                [`teamMembers.${memberUid}.role`]:        newRole,
+                [`teamMembers.${memberUid}.role`]:        newRole.toLowerCase(),
                 [`teamMembers.${memberUid}.permissions`]: newPerms,
             })
 
             await batch.commit()
 
-            toast({ title: 'Role updated', description: 'Member role and permissions updated.' })
+            // Update local selectedMember state if it's this member
+            if (selectedMember?.id === memberId) {
+                setSelectedMember(prev =>
+                    prev ? { ...prev, role: newRole as TeamMember['role'], permissions: newPerms }
+                         : null
+                )
+            }
+
+            toast({
+                title:       'Role updated',
+                description: 'Member role and permissions updated.',
+            })
         } catch (error) {
             console.error('Error updating role:', error)
             toast({
@@ -484,16 +579,18 @@ export function ManageTeam() {
         }
     }
 
-    // ── Update permission ─────────────────────────────────────────────────
+    // ── Update permission ─────────────────────────────────
     const handleUpdatePermission = async (
         memberId: string,
-        tabKey: string,
+        tabKey:   string,
         permType: 'read' | 'write',
-        value: boolean
+        value:    boolean
     ) => {
         if (!id || !selectedMember) return
         try {
-            const current = selectedMember.permissions ?? getDefaultPermissions(selectedMember.role)
+            const current = selectedMember.permissions ??
+                            getDefaultPermissions(selectedMember.role)
+
             const updated: MemberPermissions = {
                 ...current,
                 [tabKey]: {
@@ -501,14 +598,17 @@ export function ManageTeam() {
                     [permType]: value,
                 },
             }
+
             // Disabling read also disables write
             if (permType === 'read' && !value) {
                 updated[tabKey as keyof MemberPermissions].write = false
             }
 
-            await updateDoc(doc(db, 'projects', id, 'members', memberId), {
-                permissions: updated,
-            })
+            await updateDoc(
+                doc(db, 'projects', id, 'members', memberId),
+                { permissions: updated }
+            )
+
             setSelectedMember({ ...selectedMember, permissions: updated })
 
             toast({
@@ -525,31 +625,53 @@ export function ManageTeam() {
         }
     }
 
-    // ── Accept application ────────────────────────────────────────────────
+    // ── Accept application ────────────────────────────────
     const handleAcceptRequest = async (request: JoinRequest) => {
         if (!id) return
+
+        // ✅ Guard: check if already a member (race condition prevention)
+        const existingMemberSnap = await getDoc(
+            doc(db, 'projects', id, 'members', request.userId)
+        )
+        if (existingMemberSnap.exists()) {
+            toast({
+                title:       'Already a member',
+                description: `${request.userName || request.userEmail} is already on the team.`,
+            })
+            // Still mark application as accepted to clean up queue
+            await updateDoc(
+                doc(db, 'projects', id, 'applications', request.id),
+                { status: 'accepted' }
+            )
+            return
+        }
+
         try {
             const displayName  = request.userName || request.userEmail
-            const defaultPerms = getDefaultPermissions('member')  // ✅ not EMPTY
+            const defaultPerms = getDefaultPermissions('member')
 
             const batch = writeBatch(db)
 
-            // ✅ Write to members sub-collection
-            batch.set(doc(db, 'projects', id, 'members', request.userId), {
-                uid:       request.userId,
-                name:      displayName,
-                email:     request.userEmail,
-                avatar:    request.userAvatar ?? '',
-                role:      'member',
-                permissions: defaultPerms,
-                joinedAt:  serverTimestamp(),
-                joinedVia: 'application',
-            })
+            // ✅ Write to members subcollection
+            batch.set(
+                doc(db, 'projects', id, 'members', request.userId),
+                {
+                    uid:         request.userId,
+                    name:        displayName,
+                    email:       request.userEmail,
+                    avatar:      request.userAvatar ?? '',
+                    role:        'member',         // ✅ always lowercase
+                    permissions: defaultPerms,
+                    joinedAt:    serverTimestamp(),
+                    joinedVia:   'application',
+                }
+            )
 
             // ✅ Update root project doc — all three fields
+            // ✅ role lowercase in teamMembers map
             batch.update(doc(db, 'projects', id), {
                 [`teamMembers.${request.userId}`]: {
-                    role:        'Member',
+                    role:        'member',         // ✅ lowercase (was 'Member')
                     joinedAt:    serverTimestamp(),
                     permissions: defaultPerms,
                 },
@@ -558,38 +680,50 @@ export function ManageTeam() {
             })
 
             // ✅ Write to user's joinedProjects
-            batch.set(doc(db, 'users', request.userId, 'joinedProjects', id), {
-                projectId: id,
-                role:      'member',
-                joinedAt:  serverTimestamp(),
-                joinedVia: 'application',
-            })
+            batch.set(
+                doc(db, 'users', request.userId, 'joinedProjects', id),
+                {
+                    projectId: id,
+                    role:      'member',
+                    joinedAt:  serverTimestamp(),
+                    joinedVia: 'application',
+                }
+            )
 
-            // ✅ Mark application accepted in project sub-collection
-            batch.update(doc(db, 'projects', id, 'applications', request.id), {
-                status: 'accepted',
-            })
+            // ✅ Mark application accepted in project subcollection
+            batch.update(
+                doc(db, 'projects', id, 'applications', request.id),
+                { status: 'accepted' }
+            )
 
             await batch.commit()
 
-            // Update user's own application doc
+            // ✅ Update user's own application docs
+            // Do outside batch (different collection root)
             const userAppsSnap = await getDocs(
                 query(
                     collection(db, 'users', request.userId, 'applications'),
                     where('projectId', '==', id)
                 )
             )
-            for (const appDoc of userAppsSnap.docs) {
-                await updateDoc(
-                    doc(db, 'users', request.userId, 'applications', appDoc.id),
-                    { status: 'accepted' }
-                )
-            }
 
-            // ✅ Correct notification schema
-            await sendNotification(request.userId, {
-                title:     'Application Accepted!',
-                body:      `Your application to join "${project?.title ?? 'a project'}" has been accepted!`,
+            // ✅ Update ALL user application docs for this project
+            // (handles edge case of multiple application attempts)
+            await Promise.all(
+                userAppsSnap.docs.map(appDoc =>
+                    updateDoc(
+                        doc(db, 'users', request.userId, 'applications', appDoc.id),
+                        { status: 'accepted' }
+                    )
+                )
+            )
+
+            // ✅ Notify accepted member
+            await sendNotificationWithPush(request.userId, {
+                title:     'Application Accepted! 🎉',
+                body:      `Your application to join "${
+                    project?.title ?? 'a project'
+                }" has been accepted! Welcome to the team.`,
                 type:      'success',
                 url:       `/project/${id}/dashboard`,
                 projectId: id,
@@ -600,7 +734,7 @@ export function ManageTeam() {
                 description: `${displayName} added to the team.`,
             })
 
-            // Auto-select for permission editing
+            // Auto-navigate to permissions tab for new member
             setActiveTab('permissions')
             setSelectedMember({
                 id:          request.userId,
@@ -612,6 +746,7 @@ export function ManageTeam() {
                 joinedAt:    new Date(),
                 permissions: defaultPerms,
             })
+
         } catch (error) {
             console.error('Error accepting request:', error)
             toast({
@@ -622,38 +757,45 @@ export function ManageTeam() {
         }
     }
 
-    // ── Reject application ────────────────────────────────────────────────
+    // ── Reject application ────────────────────────────────
     const handleRejectRequest = async (request: JoinRequest) => {
         if (!id) return
         try {
             const batch = writeBatch(db)
 
-            batch.update(doc(db, 'projects', id, 'applications', request.id), {
-                status: 'rejected',
-            })
+            // ✅ Mark rejected in project subcollection
+            batch.update(
+                doc(db, 'projects', id, 'applications', request.id),
+                { status: 'rejected' }
+            )
 
             await batch.commit()
 
-            // Update user's own application docs
+            // ✅ Update user's own application docs in parallel
             const userAppsSnap = await getDocs(
                 query(
                     collection(db, 'users', request.userId, 'applications'),
                     where('projectId', '==', id)
                 )
             )
-            for (const appDoc of userAppsSnap.docs) {
-                await updateDoc(
-                    doc(db, 'users', request.userId, 'applications', appDoc.id),
-                    { status: 'rejected' }
-                )
-            }
 
-            // ✅ Correct notification schema
-            await sendNotification(request.userId, {
+            await Promise.all(
+                userAppsSnap.docs.map(appDoc =>
+                    updateDoc(
+                        doc(db, 'users', request.userId, 'applications', appDoc.id),
+                        { status: 'rejected' }
+                    )
+                )
+            )
+
+            // ✅ Notify rejected applicant
+            await sendNotificationWithPush(request.userId, {
                 title:     'Application Update',
-                body:      `Your application to join "${project?.title ?? 'a project'}" was not accepted this time.`,
+                body:      `Your application to join "${
+                    project?.title ?? 'a project'
+                }" was not accepted this time. Keep exploring other projects!`,
                 type:      'info',
-                url:       `/discover`,
+                url:       '/discover',
                 projectId: id,
             })
 
@@ -671,7 +813,7 @@ export function ManageTeam() {
         }
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────
+    // ── Helpers ───────────────────────────────────────────
     const getRoleBadgeColor = (role: string) => {
         switch (role) {
             case 'owner':  return 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
@@ -682,7 +824,7 @@ export function ManageTeam() {
         }
     }
 
-    // ── Guards ────────────────────────────────────────────────────────────
+    // ── Guards ────────────────────────────────────────────
     if (loading || roleLoading) {
         return (
             <div className="flex items-center justify-center h-screen">
@@ -707,21 +849,23 @@ export function ManageTeam() {
         )
     }
 
-    // ── Render ────────────────────────────────────────────────────────────
+    // ── Render ────────────────────────────────────────────
     return (
         <DashboardLayout>
 
             {/* Remove member confirmation */}
             <AlertDialog
                 open={removeDialog.open}
-                onOpenChange={open => !open && setRemoveDialog(d => ({ ...d, open: false }))}
+                onOpenChange={open =>
+                    !open && setRemoveDialog(d => ({ ...d, open: false }))
+                }
             >
                 <AlertDialogContent>
                     <AlertDialogHeader>
                         <AlertDialogTitle>Remove team member?</AlertDialogTitle>
                         <AlertDialogDescription>
-                            <strong>{removeDialog.memberName}</strong> will immediately lose
-                            access to this project and will be notified.
+                            <strong>{removeDialog.memberName}</strong> will immediately
+                            lose access to this project and will be notified.
                         </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
@@ -759,7 +903,10 @@ export function ManageTeam() {
                                 className="w-full justify-between"
                                 onClick={() => {
                                     openMailClient(option)
-                                    setTimeout(() => setMailDialog(d => ({ ...d, open: false })), 300)
+                                    setTimeout(
+                                        () => setMailDialog(d => ({ ...d, open: false })),
+                                        300
+                                    )
                                 }}
                             >
                                 <span>{option.label}</span>
@@ -791,11 +938,16 @@ export function ManageTeam() {
                         </p>
                     </div>
                     <Badge variant="outline" className="text-sm">
-                        {members.length} / {project?.maxMembers || project?.teamSize || '∞'} members
+                        {members.length} /{' '}
+                        {project?.maxMembers || project?.teamSize || '∞'} members
                     </Badge>
                 </div>
 
-                <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+                <Tabs
+                    value={activeTab}
+                    onValueChange={setActiveTab}
+                    className="w-full"
+                >
                     <TabsList className="grid w-full grid-cols-4 mb-6">
                         <TabsTrigger value="members" className="flex items-center gap-2">
                             <Users className="h-4 w-4" />
@@ -837,7 +989,9 @@ export function ManageTeam() {
                                     />
                                     <Select
                                         value={inviteRole}
-                                        onValueChange={(v: 'member' | 'viewer') => setInviteRole(v)}
+                                        onValueChange={(v: 'member' | 'viewer') =>
+                                            setInviteRole(v)
+                                        }
                                     >
                                         <SelectTrigger>
                                             <SelectValue placeholder="Select role" />
@@ -900,20 +1054,25 @@ export function ManageTeam() {
                                                             </AvatarFallback>
                                                         </Avatar>
                                                         <div>
-                                                            <p className="font-medium">{member.name}</p>
+                                                            <p className="font-medium">
+                                                                {member.name}
+                                                            </p>
                                                             <p className="text-xs text-muted-foreground">
                                                                 {member.email}
                                                             </p>
                                                         </div>
                                                     </div>
                                                     <div className="flex items-center gap-2">
-                                                        {/* Role selector — stop click propagation */}
                                                         {member.role !== 'owner' && (
                                                             <Select
                                                                 value={member.role}
-                                                                onValueChange={v => {
-                                                                    handleUpdateRole(member.id, member.uid, v)
-                                                                }}
+                                                                onValueChange={v =>
+                                                                    handleUpdateRole(
+                                                                        member.id,
+                                                                        member.uid,
+                                                                        v
+                                                                    )
+                                                                }
                                                             >
                                                                 <SelectTrigger
                                                                     className="w-28 h-7 text-xs"
@@ -922,13 +1081,21 @@ export function ManageTeam() {
                                                                     <SelectValue />
                                                                 </SelectTrigger>
                                                                 <SelectContent>
-                                                                    <SelectItem value="admin">Admin</SelectItem>
-                                                                    <SelectItem value="member">Member</SelectItem>
-                                                                    <SelectItem value="viewer">Viewer</SelectItem>
+                                                                    <SelectItem value="admin">
+                                                                        Admin
+                                                                    </SelectItem>
+                                                                    <SelectItem value="member">
+                                                                        Member
+                                                                    </SelectItem>
+                                                                    <SelectItem value="viewer">
+                                                                        Viewer
+                                                                    </SelectItem>
                                                                 </SelectContent>
                                                             </Select>
                                                         )}
-                                                        <Badge className={`${getRoleBadgeColor(member.role)} border-none`}>
+                                                        <Badge
+                                                            className={`${getRoleBadgeColor(member.role)} border-none`}
+                                                        >
                                                             {member.role}
                                                         </Badge>
                                                         {member.role !== 'owner' && (
@@ -959,7 +1126,7 @@ export function ManageTeam() {
                             <CardHeader>
                                 <CardTitle>Pending Invitations</CardTitle>
                                 <CardDescription>
-                                    Invitations that have been sent but not yet accepted.
+                                    Invitations sent but not yet accepted.
                                 </CardDescription>
                             </CardHeader>
                             <CardContent>
@@ -978,19 +1145,27 @@ export function ManageTeam() {
                                                 <div>
                                                     <p className="font-medium">{inv.email}</p>
                                                     <p className="text-xs text-muted-foreground">
-                                                        Invited as <span className="capitalize">{inv.role}</span>
+                                                        Invited as{' '}
+                                                        <span className="capitalize">
+                                                            {inv.role}
+                                                        </span>
                                                         {' · '}
                                                         {inv.invitedAt.toLocaleDateString()}
                                                     </p>
                                                 </div>
                                                 <div className="flex items-center gap-2">
-                                                    <Badge variant="outline" className="capitalize">
+                                                    <Badge
+                                                        variant="outline"
+                                                        className="capitalize"
+                                                    >
                                                         {inv.role}
                                                     </Badge>
                                                     <Button
                                                         variant="ghost"
                                                         size="icon"
-                                                        onClick={() => handleCancelInvite(inv.id)}
+                                                        onClick={() =>
+                                                            handleCancelInvite(inv.id)
+                                                        }
                                                         title="Cancel invitation"
                                                     >
                                                         <X className="h-4 w-4 text-destructive" />
@@ -1030,17 +1205,23 @@ export function ManageTeam() {
                                                     <div className="flex items-center gap-3">
                                                         <Avatar>
                                                             {request.userAvatar && (
-                                                                <AvatarImage src={request.userAvatar} />
+                                                                <AvatarImage
+                                                                    src={request.userAvatar}
+                                                                />
                                                             )}
                                                             <AvatarFallback>
-                                                                {(request.userName || request.userEmail)
+                                                                {(
+                                                                    request.userName ||
+                                                                    request.userEmail
+                                                                )
                                                                     .charAt(0)
                                                                     .toUpperCase()}
                                                             </AvatarFallback>
                                                         </Avatar>
                                                         <div>
                                                             <h4 className="font-semibold">
-                                                                {request.userName || request.userEmail}
+                                                                {request.userName ||
+                                                                    request.userEmail}
                                                             </h4>
                                                             <p className="text-sm text-muted-foreground">
                                                                 {request.userEmail}
@@ -1050,14 +1231,18 @@ export function ManageTeam() {
                                                     <div className="flex gap-2">
                                                         <Button
                                                             size="sm"
-                                                            onClick={() => handleAcceptRequest(request)}
+                                                            onClick={() =>
+                                                                handleAcceptRequest(request)
+                                                            }
                                                         >
                                                             Accept
                                                         </Button>
                                                         <Button
                                                             size="sm"
                                                             variant="outline"
-                                                            onClick={() => handleRejectRequest(request)}
+                                                            onClick={() =>
+                                                                handleRejectRequest(request)
+                                                            }
                                                         >
                                                             Reject
                                                         </Button>
@@ -1073,6 +1258,20 @@ export function ManageTeam() {
                                                         Position: {request.position}
                                                     </p>
                                                 )}
+                                                {request.skills && (
+                                                    <p className="text-xs text-muted-foreground">
+                                                        Skills: {request.skills}
+                                                    </p>
+                                                )}
+                                                {request.timeCommitment && (
+                                                    <p className="text-xs text-muted-foreground">
+                                                        Time commitment: {request.timeCommitment}
+                                                    </p>
+                                                )}
+                                                <p className="text-xs text-muted-foreground">
+                                                    Applied:{' '}
+                                                    {request.appliedAt.toLocaleDateString()}
+                                                </p>
                                             </div>
                                         ))}
                                     </div>
@@ -1095,34 +1294,40 @@ export function ManageTeam() {
                                 </CardHeader>
                                 <CardContent>
                                     <div className="space-y-1">
-                                        {members.map(member => (
-                                            <div
-                                                key={member.id}
-                                                className={`flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors ${
-                                                    selectedMember?.id === member.id
-                                                        ? 'bg-primary/10 text-primary'
-                                                        : 'hover:bg-accent/50'
-                                                }`}
-                                                onClick={() => setSelectedMember(member)}
-                                            >
-                                                <Avatar className="h-7 w-7">
-                                                    {member.avatar && (
-                                                        <AvatarImage src={member.avatar} />
-                                                    )}
-                                                    <AvatarFallback className="text-xs">
-                                                        {member.name.charAt(0).toUpperCase()}
-                                                    </AvatarFallback>
-                                                </Avatar>
-                                                <div className="min-w-0">
-                                                    <p className="text-sm font-medium truncate">
-                                                        {member.name}
-                                                    </p>
-                                                    <p className="text-xs text-muted-foreground capitalize">
-                                                        {member.role}
-                                                    </p>
+                                        {members.length === 0 ? (
+                                            <p className="text-sm text-muted-foreground text-center py-4">
+                                                No members yet.
+                                            </p>
+                                        ) : (
+                                            members.map(member => (
+                                                <div
+                                                    key={member.id}
+                                                    className={`flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors ${
+                                                        selectedMember?.id === member.id
+                                                            ? 'bg-primary/10 text-primary'
+                                                            : 'hover:bg-accent/50'
+                                                    }`}
+                                                    onClick={() => setSelectedMember(member)}
+                                                >
+                                                    <Avatar className="h-7 w-7">
+                                                        {member.avatar && (
+                                                            <AvatarImage src={member.avatar} />
+                                                        )}
+                                                        <AvatarFallback className="text-xs">
+                                                            {member.name.charAt(0).toUpperCase()}
+                                                        </AvatarFallback>
+                                                    </Avatar>
+                                                    <div className="min-w-0">
+                                                        <p className="text-sm font-medium truncate">
+                                                            {member.name}
+                                                        </p>
+                                                        <p className="text-xs text-muted-foreground capitalize">
+                                                            {member.role}
+                                                        </p>
+                                                    </div>
                                                 </div>
-                                            </div>
-                                        ))}
+                                            ))
+                                        )}
                                     </div>
                                 </CardContent>
                             </Card>
@@ -1157,13 +1362,15 @@ export function ManageTeam() {
                                                     <span>Write</span>
                                                 </div>
                                             </div>
+
                                             {PERMISSION_TABS.map(tab => {
                                                 const perms =
                                                     selectedMember.permissions?.[
                                                         tab.key as keyof MemberPermissions
                                                     ] ?? { read: false, write: false }
-                                                const Icon = tab.icon
+                                                const Icon    = tab.icon
                                                 const isOwner = selectedMember.role === 'owner'
+
                                                 return (
                                                     <div
                                                         key={tab.key}
@@ -1188,7 +1395,9 @@ export function ManageTeam() {
                                                             />
                                                             <Switch
                                                                 checked={perms.write}
-                                                                disabled={isOwner || !perms.read}
+                                                                disabled={
+                                                                    isOwner || !perms.read
+                                                                }
                                                                 onCheckedChange={v =>
                                                                     handleUpdatePermission(
                                                                         selectedMember.id,

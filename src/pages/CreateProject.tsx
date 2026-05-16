@@ -268,7 +268,7 @@ export function CreateProject() {
                             <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Create Project</h1>
                             <p className="text-gray-600 dark:text-gray-400 mt-1">Fill in the details to create your new project</p>
                         </div>
-                        <Button variant="ghost" onClick={() => navigate('/my-projects')}>
+                        <Button variant="ghost" onClick={() => navigate('/dashboard/projects')}>
                             <ArrowLeft className="h-4 w-4 mr-2" />
                             Back
                         </Button>
@@ -600,7 +600,7 @@ export function CreateProject() {
 
                         {/* Actions */}
                         <div className="flex justify-end gap-3">
-                            <Button type="button" variant="outline" onClick={() => navigate('/my-projects')}>
+                            <Button type="button" variant="outline" onClick={() => navigate('/dashboard/projects')}>
                                 Cancel
                             </Button>
                             <Button 

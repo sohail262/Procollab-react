@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import { DashboardLayout } from '@/components/layout/DashboardLayout'
@@ -20,9 +20,17 @@ import { Label } from '@/components/ui/label'
 import {
     doc, getDoc, collection, query, where, limit,
     getDocs, addDoc, deleteDoc, serverTimestamp,
-    updateDoc, increment, Timestamp, writeBatch
+    updateDoc, increment, Timestamp, writeBatch,
+    onSnapshot,
 } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
+import { sendNotificationWithPush } from '@/services/notificationTrigger'
+import {
+    buildReportOwnerNotif,
+    buildReportAdminNotif,
+    notifyAdmins,
+    buildWithdrawOwnerNotif,
+} from '@/services/notificationService'
 import { useToast } from '@/hooks/use-toast'
 
 // ─────────────────────────────────────────────────────────
@@ -30,15 +38,15 @@ import { useToast } from '@/hooks/use-toast'
 // ─────────────────────────────────────────────────────────
 
 const disciplineLabels: Record<string, string> = {
-    'computer-science':  'Computer Science',
-    'engineering':       'Engineering',
-    'medicine':          'Medicine & Health',
-    'business':          'Business & Economics',
-    'arts':              'Arts & Humanities',
-    'social-sciences':   'Social Sciences',
-    'natural-sciences':  'Natural Sciences',
-    'education':         'Education',
-    'other':             'Other',
+    'computer-science': 'Computer Science',
+    'engineering':      'Engineering',
+    'medicine':         'Medicine & Health',
+    'business':         'Business & Economics',
+    'arts':             'Arts & Humanities',
+    'social-sciences':  'Social Sciences',
+    'natural-sciences': 'Natural Sciences',
+    'education':        'Education',
+    'other':            'Other',
 }
 
 const locationLabels: Record<string, string> = {
@@ -52,32 +60,32 @@ const locationLabels: Record<string, string> = {
 // ─────────────────────────────────────────────────────────
 
 interface Project {
-    id:               string
-    title:            string
-    description:      string
-    summary?:         string
-    status:           string
-    primaryDiscipline:string
-    tags:             string[]
-    createdBy:        string
-    createdAt:        Timestamp | null
-    teamSize?:        number
-    maxMembers?:      number
-    currentMembers?:  number
-    members?:         string[]
-    teamMembers?:     Record<string, any>
-    duration?:        string
-    durationValue?:   string
-    durationUnit?:    string
-    timeCommitment?:  string
-    location?:        string
-    locationDetails?: string
-    additionalNotes?: string
-    requiredSkills?:  string[]
-    goals?:           string[]
-    timeline?:        string
-    openRoles?:       string[]
-    methodology?:     string
+    id:                string
+    title:             string
+    description:       string
+    summary?:          string
+    status:            string
+    primaryDiscipline: string
+    tags:              string[]
+    createdBy:         string
+    createdAt:         Timestamp | null
+    teamSize?:         number
+    maxMembers?:       number
+    currentMembers?:   number
+    members?:          string[]
+    teamMembers?:      Record<string, any>
+    duration?:         string
+    durationValue?:    string
+    durationUnit?:     string
+    timeCommitment?:   string
+    location?:         string
+    locationDetails?:  string
+    additionalNotes?:  string
+    requiredSkills?:   string[]
+    goals?:            string[]
+    timeline?:         string
+    openRoles?:        string[]
+    methodology?:      string
 }
 
 interface ApplicationStatus {
@@ -106,9 +114,9 @@ function formatProjectDate(timestamp: Timestamp | null): string {
 // ─────────────────────────────────────────────────────────
 
 export function ProjectDetails() {
-    const { id }           = useParams<{ id: string }>()
-    const navigate         = useNavigate()
-    const { toast }        = useToast()
+    const { id }                = useParams<{ id: string }>()
+    const navigate              = useNavigate()
+    const { toast }             = useToast()
     const { user: currentUser } = useAuth()
 
     const [project,           setProject]           = useState<Project | null>(null)
@@ -123,80 +131,95 @@ export function ProjectDetails() {
         userApplicationId: null,
     })
 
-    // ✅ NEW: explicit membership state
-    const [isMember,    setIsMember]    = useState(false)
-    const [memberRole,  setMemberRole]  = useState<string | null>(null)
+    // ✅ Membership state — driven by real-time listener
+    const [isMember,   setIsMember]   = useState(false)
+    const [memberRole, setMemberRole] = useState<string | null>(null)
 
-    const [withdrawing,       setWithdrawing]       = useState(false)
-    const [shareDialogOpen,   setShareDialogOpen]   = useState(false)
-    const [reportDialogOpen,  setReportDialogOpen]  = useState(false)
-    const [reportReason,      setReportReason]      = useState('')
-    const [reportDetails,     setReportDetails]     = useState('')
-    const [submittingReport,  setSubmittingReport]  = useState(false)
+    const [withdrawing,      setWithdrawing]      = useState(false)
+    const [shareDialogOpen,  setShareDialogOpen]  = useState(false)
+    const [reportDialogOpen, setReportDialogOpen] = useState(false)
+    const [reportReason,     setReportReason]     = useState('')
+    const [reportDetails,    setReportDetails]    = useState('')
+    const [submittingReport, setSubmittingReport] = useState(false)
 
-    // ── Load project ──────────────────────────────────────
+    // ── Load project + creator + similar ─────────────────
     useEffect(() => {
         if (id) loadProject(id)
     }, [id])
 
-    // ── Check membership + application status ─────────────
+    // ── Real-time membership listener ─────────────────────
+    // ✅ Uses onSnapshot so removal by B instantly updates A's UI
+    // ✅ Only checks authoritative sources (teamMembers map + members subcollection)
+    // ✅ Does NOT check joinedProjects (stale, not cleaned reliably)
+    // ✅ Does NOT use application status for membership (decoupled)
     useEffect(() => {
-        if (id && currentUser) {
-            checkMembershipStatus()
-            checkApplicationStatus()
-        }
+        if (!id || !currentUser) return
+
+        // Listen to project doc for teamMembers map changes
+        const unsubscribe = onSnapshot(
+            doc(db, 'projects', id),
+            async (snap) => {
+                if (!snap.exists()) {
+                    setIsMember(false)
+                    setMemberRole(null)
+                    return
+                }
+
+                const data = snap.data()
+
+                // ✅ Source 1: teamMembers map — updated by ManageTeam
+                // This is the single source of truth for active membership
+                const teamMembers: Record<string, any> = data.teamMembers || {}
+                const memberEntry = teamMembers[currentUser.uid]
+
+                if (memberEntry) {
+                    const role = memberEntry.role?.toLowerCase()
+                    // Guard against 'removed' role if ever used
+                    if (role && role !== 'removed') {
+                        setIsMember(true)
+                        setMemberRole(role)
+                        return
+                    }
+                }
+
+                // ✅ Source 2: members subcollection
+                // Fallback for cases where teamMembers map is not updated
+                try {
+                    const memberSnap = await getDoc(
+                        doc(db, 'projects', id, 'members', currentUser.uid)
+                    )
+                    if (memberSnap.exists()) {
+                        const mData = memberSnap.data()
+                        if (mData.status !== 'removed') {
+                            setIsMember(true)
+                            setMemberRole(mData.role || 'member')
+                            return
+                        }
+                    }
+                } catch (err) {
+                    console.error('[ProjectDetails] subcollection check failed:', err)
+                }
+
+                // ✅ Not found in any authoritative source → not a member
+                setIsMember(false)
+                setMemberRole(null)
+            },
+            (error) => {
+                console.error('[ProjectDetails] membership listener error:', error)
+                setIsMember(false)
+                setMemberRole(null)
+            }
+        )
+
+        return () => unsubscribe()
     }, [id, currentUser])
 
-    // ✅ NEW: Check membership across ALL three sources
-    const checkMembershipStatus = async () => {
-        if (!id || !currentUser) return
-        try {
-            // Source 1: teamMembers map on root doc (schema-defined)
-            const projectSnap = await getDoc(doc(db, 'projects', id))
-            if (projectSnap.exists()) {
-                const data = projectSnap.data()
-                const teamMembers = data.teamMembers || {}
-                if (teamMembers[currentUser.uid]) {
-                    setIsMember(true)
-                    setMemberRole(teamMembers[currentUser.uid].role?.toLowerCase() || 'member')
-                    return
-                }
-
-                // Source 2: members array on root doc
-                const membersArray: string[] = data.members || []
-                if (membersArray.includes(currentUser.uid)) {
-                    setIsMember(true)
-                    setMemberRole('member')
-                    return
-                }
-            }
-
-            // Source 3: members sub-collection doc
-            const memberDocSnap = await getDoc(
-                doc(db, 'projects', id, 'members', currentUser.uid)
-            )
-            if (memberDocSnap.exists()) {
-                setIsMember(true)
-                setMemberRole(memberDocSnap.data().role || 'member')
-                return
-            }
-
-            // Source 4: user's joinedProjects sub-collection
-            const joinedSnap = await getDoc(
-                doc(db, 'users', currentUser.uid, 'joinedProjects', id)
-            )
-            if (joinedSnap.exists()) {
-                setIsMember(true)
-                setMemberRole(joinedSnap.data().role || 'member')
-                return
-            }
-
-            setIsMember(false)
-            setMemberRole(null)
-        } catch (error) {
-            console.error('Error checking membership status:', error)
-        }
-    }
+    // ── Application status check ──────────────────────────
+    // ✅ Decoupled from membership — only shows pending/rejected states
+    // 'accepted' + !isMember = "removed after acceptance" state
+    useEffect(() => {
+        if (id && currentUser) checkApplicationStatus()
+    }, [id, currentUser])
 
     const checkApplicationStatus = async () => {
         if (!id || !currentUser) return
@@ -210,7 +233,7 @@ export function ProjectDetails() {
 
             if (userAppsSnap.empty) return
 
-            const appData      = userAppsSnap.docs[0].data()
+            const appData = userAppsSnap.docs[0].data()
             let projectAppId: string | null = null
 
             try {
@@ -248,7 +271,9 @@ export function ProjectDetails() {
             setProject(projectData)
 
             if (projectData.createdBy) {
-                const userSnap = await getDoc(doc(db, 'users', projectData.createdBy))
+                const userSnap = await getDoc(
+                    doc(db, 'users', projectData.createdBy)
+                )
                 if (userSnap.exists()) setCreator(userSnap.data())
             }
 
@@ -294,20 +319,12 @@ export function ProjectDetails() {
                 ))
             }
 
-            const notifRef = doc(
-                collection(db, 'users', project.createdBy, 'notifications')
-            )
-            batch.set(notifRef, {
-                title:     'Application Withdrawn',
-                body:      `An applicant withdrew their application from "${project.title}".`,
-                type:      'info',
-                read:      false,
-                timestamp: serverTimestamp(),
-                projectId: id,
-                url:       `/project/${id}`,
-            })
-
             await batch.commit()
+
+            await sendNotificationWithPush(
+                project.createdBy,
+                buildWithdrawOwnerNotif(project.title, id)
+            )
 
             setApplicationStatus({
                 hasApplied:        false,
@@ -341,16 +358,28 @@ export function ProjectDetails() {
     const handleCopyLink = async () => {
         try {
             await navigator.clipboard.writeText(window.location.href)
-            toast({ title: 'Link Copied!', description: 'Project link copied to clipboard.' })
+            toast({
+                title:       'Link Copied!',
+                description: 'Project link copied to clipboard.',
+            })
         } catch {
-            toast({ title: 'Copy Failed', description: 'Could not copy link.', variant: 'destructive' })
+            toast({
+                title:       'Copy Failed',
+                description: 'Could not copy link.',
+                variant:     'destructive',
+            })
         }
     }
 
     const handleShareTwitter = () => {
         const url  = encodeURIComponent(window.location.href)
-        const text = encodeURIComponent(`Check out this project: "${project?.title}" on ProCollab!`)
-        window.open(`https://twitter.com/intent/tweet?text=${text}&url=${url}`, '_blank')
+        const text = encodeURIComponent(
+            `Check out this project: "${project?.title}" on ProCollab!`
+        )
+        window.open(
+            `https://twitter.com/intent/tweet?text=${text}&url=${url}`,
+            '_blank'
+        )
     }
 
     const handleShareWhatsApp = () => {
@@ -364,12 +393,16 @@ export function ProjectDetails() {
     const handleSubmitReport = async () => {
         if (!project || !currentUser) return
         if (!reportReason) {
-            toast({ title: 'Reason Required', description: 'Please select a reason.', variant: 'destructive' })
+            toast({
+                title:       'Reason Required',
+                description: 'Please select a reason.',
+                variant:     'destructive',
+            })
             return
         }
 
         setSubmittingReport(true)
-                try {
+        try {
             const existingSnap = await getDocs(
                 query(
                     collection(db, 'reports'),
@@ -404,44 +437,18 @@ export function ProjectDetails() {
                 reportCount: increment(1),
             })
 
-            const batch = writeBatch(db)
-
-            const ownerNotifRef = doc(
-                collection(db, 'users', project.createdBy, 'notifications')
+            await sendNotificationWithPush(
+                project.createdBy,
+                buildReportOwnerNotif(project.title, project.id, reportReason)
             )
-            batch.set(ownerNotifRef, {
-                title:     'Your Project Was Reported',
-                body:      `Your project "${project.title}" was reported for: ${reportReason}`,
-                type:      'warning',
-                read:      false,
-                timestamp: serverTimestamp(),
-                projectId: project.id,
-                url:       `/project/${project.id}`,
-            })
 
-            const adminsSnap = await getDocs(
-                query(collection(db, 'users'), where('role', '==', 'admin'))
+            await notifyAdmins(
+                buildReportAdminNotif(project.title, project.id, reportReason)
             )
-            adminsSnap.docs.forEach(adminDoc => {
-                const adminNotifRef = doc(
-                    collection(db, 'users', adminDoc.id, 'notifications')
-                )
-                batch.set(adminNotifRef, {
-                    title:     'Project Report Received',
-                    body:      `Project "${project.title}" was reported. Reason: ${reportReason}`,
-                    type:      'error',
-                    read:      false,
-                    timestamp: serverTimestamp(),
-                    projectId: project.id,
-                    url:       `/project/${project.id}`,
-                })
-            })
-
-            await batch.commit()
 
             toast({
                 title:       'Report Submitted',
-                description: 'Your report has been submitted. Our team will review it shortly.',
+                description: 'Your report has been submitted for review.',
             })
 
             setReportReason('')
@@ -475,16 +482,17 @@ export function ProjectDetails() {
             <DashboardLayout>
                 <div className="text-center py-12">
                     <h2 className="text-2xl font-bold mb-4">Project not found</h2>
-                    <Button onClick={() => navigate('/projects')}>Back to Projects</Button>
+                    <Button onClick={() => navigate('/projects')}>
+                        Back to Projects
+                    </Button>
                 </div>
             </DashboardLayout>
         )
     }
 
-    // ── Derived state (safe — below null guard) ───────────
-    const isOwner   = !!currentUser && project.createdBy === currentUser.uid
+    // ── Derived state ─────────────────────────────────────
+    const isOwner = !!currentUser && project.createdBy === currentUser.uid
 
-    // ✅ Compute actual member count from all available sources
     const actualMemberCount =
         Object.keys(project.teamMembers || {}).length ||
         (project.members?.length ?? 0) ||
@@ -492,24 +500,23 @@ export function ProjectDetails() {
         1
 
     const maxMembers = project.maxMembers || project.teamSize || 999
-
     const isTeamFull = actualMemberCount >= maxMembers
 
     const canApply =
         (project.status === 'recruiting' || project.status === 'active') &&
         !isTeamFull &&
         !isOwner &&
-        !isMember   // ✅ prevents members from re-applying
+        !isMember
 
     const getApplyButtonLabel = (): string => {
-        if (isTeamFull)                         return 'Team is Full'
-        if (project.status === 'completed')     return 'Project Completed'
-        if (project.status === 'on-hold')       return 'Project On Hold'
-        if (project.status === 'pending_review')return 'Under Review'
+        if (isTeamFull)                          return 'Team is Full'
+        if (project.status === 'completed')      return 'Project Completed'
+        if (project.status === 'on-hold')        return 'Project On Hold'
+        if (project.status === 'pending_review') return 'Under Review'
         return 'Apply to Join'
     }
 
-    // ── Action card content ───────────────────────────────
+    // ── Action card ───────────────────────────────────────
     const renderActionCard = () => {
         // 1. Owner
         if (isOwner) {
@@ -538,7 +545,7 @@ export function ProjectDetails() {
             )
         }
 
-        // 2. ✅ Already a member (via invitation or accepted application)
+        // 2. ✅ Active member — real-time confirmed
         if (isMember) {
             return (
                 <div className="space-y-3">
@@ -559,67 +566,77 @@ export function ProjectDetails() {
             )
         }
 
-        // 3. Has applied (pending / accepted / rejected)
+        // 3. Has applied
         if (applicationStatus.hasApplied) {
-            return (
-                <div className="space-y-3">
-                    {applicationStatus.status === 'pending' && (
-                        <>
-                            <div className="flex items-center justify-center gap-2 py-3 px-4 bg-yellow-100 dark:bg-yellow-900/30 rounded-lg">
-                                <Clock className="h-5 w-5 text-yellow-600" />
-                                <p className="text-sm font-medium text-yellow-700 dark:text-yellow-400">
-                                    Application Pending
-                                </p>
-                            </div>
-                            <Button
-                                variant="outline"
-                                className="w-full text-red-600 hover:bg-red-50 hover:text-red-700 border-red-200"
-                                onClick={handleWithdraw}
-                                disabled={withdrawing}
-                            >
-                                {withdrawing ? (
-                                    <>
-                                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                                        Withdrawing...
-                                    </>
-                                ) : (
-                                    <>
-                                        <X className="h-4 w-4 mr-2" />
-                                        Withdraw Application
-                                    </>
-                                )}
-                            </Button>
-                        </>
-                    )}
-                    {applicationStatus.status === 'accepted' && (
-                        <>
-                            <div className="flex items-center justify-center gap-2 py-3 px-4 bg-green-100 dark:bg-green-900/30 rounded-lg">
-                                <Check className="h-5 w-5 text-green-600" />
-                                <p className="text-sm font-medium text-green-700 dark:text-green-400">
-                                    Application Accepted!
-                                </p>
-                            </div>
-                            <Button
-                                className="w-full"
-                                onClick={() => navigate(`/project/${id}/dashboard`)}
-                            >
-                                Go to Project Dashboard
-                            </Button>
-                        </>
-                    )}
-                    {applicationStatus.status === 'rejected' && (
-                        <div className="flex items-center justify-center gap-2 py-3 px-4 bg-red-100 dark:bg-red-900/30 rounded-lg">
-                            <X className="h-5 w-5 text-red-600" />
-                            <p className="text-sm font-medium text-red-700 dark:text-red-400">
-                                Application Not Accepted
+
+            // ✅ Accepted but NOT a member = removed after acceptance
+            if (applicationStatus.status === 'accepted' && !isMember) {
+                return (
+                    <div className="space-y-3">
+                        <div className="flex items-center justify-center gap-2 py-3 px-4 bg-gray-100 dark:bg-gray-800 rounded-lg">
+                            <X className="h-5 w-5 text-gray-500" />
+                            <p className="text-sm font-medium text-gray-600 dark:text-gray-400">
+                                You are no longer a member of this project
                             </p>
                         </div>
-                    )}
-                </div>
-            )
+                        {/* ✅ Allow re-apply if still recruiting */}
+                        {canApply && (
+                            <Button
+                                className="w-full"
+                                size="lg"
+                                onClick={() => setIsModalOpen(true)}
+                            >
+                                Apply Again
+                            </Button>
+                        )}
+                    </div>
+                )
+            }
+
+            if (applicationStatus.status === 'pending') {
+                return (
+                    <div className="space-y-3">
+                        <div className="flex items-center justify-center gap-2 py-3 px-4 bg-yellow-100 dark:bg-yellow-900/30 rounded-lg">
+                            <Clock className="h-5 w-5 text-yellow-600" />
+                            <p className="text-sm font-medium text-yellow-700 dark:text-yellow-400">
+                                Application Pending
+                            </p>
+                        </div>
+                        <Button
+                            variant="outline"
+                            className="w-full text-red-600 hover:bg-red-50 hover:text-red-700 border-red-200"
+                            onClick={handleWithdraw}
+                            disabled={withdrawing}
+                        >
+                            {withdrawing ? (
+                                <>
+                                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                                    Withdrawing...
+                                </>
+                            ) : (
+                                <>
+                                    <X className="h-4 w-4 mr-2" />
+                                    Withdraw Application
+                                </>
+                            )}
+                        </Button>
+                    </div>
+                )
+            }
+
+            if (applicationStatus.status === 'rejected') {
+                return (
+                    <div className="flex items-center justify-center gap-2 py-3 px-4 bg-red-100 dark:bg-red-900/30 rounded-lg">
+                        <X className="h-5 w-5 text-red-600" />
+                        <p className="text-sm font-medium text-red-700 dark:text-red-400">
+                            Application Not Accepted
+                        </p>
+                    </div>
+                )
+            }
         }
 
-        // 4. Default — apply button
+        // 4. Default apply button
         return (
             <Button
                 className="w-full"
@@ -645,10 +662,8 @@ export function ProjectDetails() {
             </Button>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-
                 {/* ── Main Content ── */}
                 <div className="lg:col-span-2 space-y-8">
-
                     {/* Header */}
                     <div>
                         <div className="flex justify-between items-start mb-4">
@@ -656,7 +671,8 @@ export function ProjectDetails() {
                                 className="mb-2"
                                 variant={
                                     project.status === 'recruiting' ? 'secondary' :
-                                    project.status === 'active'     ? 'default'   : 'outline'
+                                    project.status === 'active'     ? 'default'   :
+                                    'outline'
                                 }
                             >
                                 {project.status.toUpperCase()}
@@ -780,13 +796,11 @@ export function ProjectDetails() {
 
                 {/* ── Sidebar ── */}
                 <div className="space-y-6">
-
                     {/* Action Card */}
                     <Card className="border-blue-200 bg-blue-50/50 dark:bg-blue-900/10 dark:border-blue-800">
                         <CardContent className="p-6 space-y-4">
                             {renderActionCard()}
 
-                            {/* Share & Report */}
                             <div className="flex gap-2">
                                 <Button
                                     variant="outline"
@@ -835,9 +849,9 @@ export function ProjectDetails() {
                                 <span className="text-gray-500 flex items-center gap-2">
                                     <Users className="h-4 w-4" /> Team Size
                                 </span>
-                                {/* ✅ Computed from actual data */}
                                 <span className="font-medium">
-                                    {actualMemberCount}/{maxMembers === 999 ? '∞' : maxMembers}
+                                    {actualMemberCount}/
+                                    {maxMembers === 999 ? '∞' : maxMembers}
                                 </span>
                             </div>
                             <div className="flex items-center justify-between">
@@ -972,7 +986,7 @@ export function ProjectDetails() {
                 </div>
             </div>
 
-            {/* ── Share Dialog ── */}
+            {/* Share Dialog */}
             <Dialog open={shareDialogOpen} onOpenChange={setShareDialogOpen}>
                 <DialogContent className="max-w-md">
                     <DialogHeader>
@@ -1015,7 +1029,7 @@ export function ProjectDetails() {
                 </DialogContent>
             </Dialog>
 
-            {/* ── Report Dialog ── */}
+            {/* Report Dialog */}
             <Dialog open={reportDialogOpen} onOpenChange={setReportDialogOpen}>
                 <DialogContent className="max-w-md">
                     <DialogHeader>

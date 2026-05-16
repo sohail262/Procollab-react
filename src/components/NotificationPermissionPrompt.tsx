@@ -1,4 +1,19 @@
-import { useState } from 'react'
+/**
+ * Notification Permission Prompt
+ *
+ * Shown to users to request browser notification permission.
+ * Handles all permission states:
+ * ✅ Default — show prompt normally
+ * ✅ Denied — show "blocked" state with browser instructions
+ * ✅ Granted — auto-dismiss (already enabled)
+ * ✅ Error — show specific error message
+ * ✅ Success — show confirmation then dismiss
+ *
+ * onAccept returns boolean so component knows
+ * if permission was actually granted.
+ */
+
+import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
     Bell,
@@ -8,13 +23,24 @@ import {
     MessageSquare,
     ShieldCheck,
     BellRing,
+    AlertCircle,
+    LockKeyhole,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
+// ─────────────────────────────────────────────────────────
+// Types
+// ─────────────────────────────────────────────────────────
+
 interface NotificationPermissionPromptProps {
-    onAccept: () => Promise<void>
+    /** Should return true if permission granted + token saved */
+    onAccept: () => Promise<boolean>
     onDismiss: () => void
 }
+
+// ─────────────────────────────────────────────────────────
+// Component
+// ─────────────────────────────────────────────────────────
 
 export function NotificationPermissionPrompt({
     onAccept,
@@ -22,20 +48,71 @@ export function NotificationPermissionPrompt({
 }: NotificationPermissionPromptProps) {
     const [loading, setLoading] = useState(false)
     const [accepted, setAccepted] = useState(false)
+    const [error, setError] = useState<string | null>(null)
+    const [isBlocked, setIsBlocked] = useState(false)
+
+    // ✅ Store timer ref to cancel on unmount (memory leak fix)
+    const dismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+    // ✅ Check current permission state on mount
+    useEffect(() => {
+        if (typeof Notification === 'undefined') return
+
+        if (Notification.permission === 'granted') {
+            // Already enabled — no need to show prompt
+            onDismiss()
+            return
+        }
+
+        if (Notification.permission === 'denied') {
+            // Browser blocked — show different UI
+            setIsBlocked(true)
+        }
+    }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+    // ✅ Cleanup timer on unmount — prevents state update on
+    // unmounted component
+    useEffect(() => {
+        return () => {
+            if (dismissTimer.current) {
+                clearTimeout(dismissTimer.current)
+            }
+        }
+    }, [])
 
     const handleAccept = async () => {
         setLoading(true)
+        setError(null)
+
         try {
-            await onAccept()
-            setAccepted(true)
-            setTimeout(() => onDismiss(), 2000)
+            // ✅ onAccept returns boolean — we know if it worked
+            const granted = await onAccept()
+
+            if (granted) {
+                setAccepted(true)
+                // ✅ Store ref so we can cancel if unmounted
+                dismissTimer.current = setTimeout(() => onDismiss(), 2000)
+            } else {
+                // Permission dialog was dismissed or denied
+                if (Notification.permission === 'denied') {
+                    setIsBlocked(true)
+                    setError(
+                        'Notifications blocked. Click the 🔒 icon in your browser address bar to enable.'
+                    )
+                } else {
+                    setError('Permission not granted. Please try again.')
+                }
+                setLoading(false)
+            }
         } catch {
             setLoading(false)
+            setError('Something went wrong. Please try again.')
         }
     }
 
     return (
         <AnimatePresence mode="wait">
+            {/* ── Success State ── */}
             {accepted ? (
                 <motion.div
                     key="success"
@@ -61,7 +138,9 @@ export function NotificationPermissionPrompt({
                         </div>
                     </div>
                 </motion.div>
+
             ) : (
+                /* ── Main Prompt ── */
                 <motion.div
                     key="prompt"
                     initial={{ opacity: 0, y: 40, scale: 0.95 }}
@@ -81,10 +160,10 @@ export function NotificationPermissionPrompt({
 
                         <div className="p-5">
 
-                            {/* Header row */}
+                            {/* ── Header ── */}
                             <div className="flex items-start justify-between mb-4">
                                 <div className="flex items-center gap-3">
-                                    {/* Animated bell icon */}
+                                    {/* Animated bell */}
                                     <div className="relative flex-shrink-0">
                                         <div className="w-10 h-10 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl flex items-center justify-center shadow-md shadow-blue-500/20">
                                             <motion.div
@@ -104,7 +183,7 @@ export function NotificationPermissionPrompt({
                                                 <Bell className="h-5 w-5 text-white" />
                                             </motion.div>
                                         </div>
-                                        {/* Live indicator dot */}
+                                        {/* Live indicator */}
                                         <span className="absolute -top-1 -right-1 flex h-3 w-3">
                                             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-60" />
                                             <span className="relative inline-flex h-3 w-3 rounded-full bg-blue-500" />
@@ -113,10 +192,14 @@ export function NotificationPermissionPrompt({
 
                                     <div>
                                         <p className="text-sm font-bold text-gray-900 dark:text-white leading-tight">
-                                            Stay connected
+                                            {isBlocked
+                                                ? 'Notifications blocked'
+                                                : 'Stay connected'}
                                         </p>
                                         <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                                            Enable push notifications
+                                            {isBlocked
+                                                ? 'Enable in browser settings'
+                                                : 'Enable push notifications'}
                                         </p>
                                     </div>
                                 </div>
@@ -124,66 +207,115 @@ export function NotificationPermissionPrompt({
                                 <button
                                     onClick={onDismiss}
                                     className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 flex-shrink-0"
-                                    aria-label="Dismiss"
+                                    aria-label="Dismiss notification prompt"
                                 >
                                     <X className="h-3.5 w-3.5" />
                                 </button>
                             </div>
 
-                            {/* Description */}
-                            <p className="text-xs text-gray-600 dark:text-gray-400 mb-3 leading-relaxed">
-                                Get real-time alerts so you're always first to know when
-                                something needs your attention.
-                            </p>
+                            {/* ── Blocked State ── */}
+                            {isBlocked ? (
+                                <motion.div
+                                    initial={{ opacity: 0, y: -4 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    className="flex items-start gap-2.5 p-3 bg-amber-50 dark:bg-amber-900/20 rounded-xl mb-4 border border-amber-100 dark:border-amber-800/30"
+                                >
+                                    <LockKeyhole className="h-4 w-4 text-amber-500 flex-shrink-0 mt-0.5" />
+                                    <div>
+                                        <p className="text-xs font-medium text-amber-700 dark:text-amber-400 mb-0.5">
+                                            Notifications are blocked
+                                        </p>
+                                        <p className="text-xs text-amber-600 dark:text-amber-500 leading-relaxed">
+                                            Click the{' '}
+                                            <span className="font-medium">
+                                                lock icon 🔒
+                                            </span>{' '}
+                                            in your browser's address bar,
+                                            then set Notifications to{' '}
+                                            <span className="font-medium">
+                                                Allow
+                                            </span>
+                                            .
+                                        </p>
+                                    </div>
+                                </motion.div>
+                            ) : (
+                                <>
+                                    {/* ── Description ── */}
+                                    <p className="text-xs text-gray-600 dark:text-gray-400 mb-3 leading-relaxed">
+                                        Get real-time alerts so you're always
+                                        first to know when something needs your
+                                        attention.
+                                    </p>
 
-                            {/* Feature list */}
-                            <div className="space-y-2 mb-4">
-                                {[
-                                    {
-                                        Icon: Users,
-                                        color: 'text-blue-500',
-                                        bg: 'bg-blue-50 dark:bg-blue-500/10',
-                                        label: 'Connection requests & acceptances',
-                                    },
-                                    {
-                                        Icon: Zap,
-                                        color: 'text-indigo-500',
-                                        bg: 'bg-indigo-50 dark:bg-indigo-500/10',
-                                        label: 'Project application updates',
-                                    },
-                                    {
-                                        Icon: MessageSquare,
-                                        color: 'text-violet-500',
-                                        bg: 'bg-violet-50 dark:bg-violet-500/10',
-                                        label: 'Team messages & project activity',
-                                    },
-                                ].map(({ Icon, color, bg, label }, i) => (
-                                    <motion.div
-                                        key={i}
-                                        initial={{ opacity: 0, x: -8 }}
-                                        animate={{ opacity: 1, x: 0 }}
-                                        transition={{ delay: 0.15 + i * 0.08 }}
-                                        className={`flex items-center gap-2.5 px-3 py-2 rounded-lg ${bg}`}
-                                    >
-                                        <Icon
-                                            className={`h-3.5 w-3.5 ${color} flex-shrink-0`}
-                                        />
-                                        <span className="text-xs text-gray-700 dark:text-gray-300">
-                                            {label}
-                                        </span>
-                                    </motion.div>
-                                ))}
-                            </div>
+                                    {/* ── Feature List ── */}
+                                    <div className="space-y-2 mb-4">
+                                                                        {[
+                                            {
+                                                Icon: Users,
+                                                color: 'text-blue-500',
+                                                bg: 'bg-blue-50 dark:bg-blue-500/10',
+                                                label: 'Connection requests & acceptances',
+                                            },
+                                            {
+                                                Icon: Zap,
+                                                color: 'text-indigo-500',
+                                                bg: 'bg-indigo-50 dark:bg-indigo-500/10',
+                                                label: 'Project application updates',
+                                            },
+                                            {
+                                                Icon: MessageSquare,
+                                                color: 'text-violet-500',
+                                                bg: 'bg-violet-50 dark:bg-violet-500/10',
+                                                label: 'Team messages & project activity',
+                                            },
+                                        ].map(({ Icon, color, bg, label }, i) => (
+                                            <motion.div
+                                                key={i}
+                                                initial={{ opacity: 0, x: -8 }}
+                                                animate={{ opacity: 1, x: 0 }}
+                                                transition={{
+                                                    delay: 0.15 + i * 0.08,
+                                                }}
+                                                className={`flex items-center gap-2.5 px-3 py-2 rounded-lg ${bg}`}
+                                            >
+                                                <Icon
+                                                    className={`h-3.5 w-3.5 ${color} flex-shrink-0`}
+                                                />
+                                                <span className="text-xs text-gray-700 dark:text-gray-300">
+                                                    {label}
+                                                </span>
+                                            </motion.div>
+                                        ))}
+                                    </div>
+                                </>
+                            )}
 
-                            {/* Privacy note */}
-                            <div className="flex items-center gap-1.5 mb-4">
-                                <ShieldCheck className="h-3 w-3 text-gray-400 flex-shrink-0" />
-                                <p className="text-xs text-gray-400 dark:text-gray-500">
-                                    Disable anytime in your browser settings
-                                </p>
-                            </div>
+                            {/* ── Error Message ── */}
+                            {error && !isBlocked && (
+                                <motion.div
+                                    initial={{ opacity: 0, y: -4 }}
+                                    animate={{ opacity: 1, y: 0 }}
+                                    className="flex items-center gap-1.5 mb-3 p-2.5 bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-100 dark:border-red-800/30"
+                                >
+                                    <AlertCircle className="h-3.5 w-3.5 text-red-500 flex-shrink-0" />
+                                    <p className="text-xs text-red-600 dark:text-red-400 leading-relaxed">
+                                        {error}
+                                    </p>
+                                </motion.div>
+                            )}
 
-                            {/* Action buttons */}
+                            {/* ── Privacy Note ── */}
+                            {!isBlocked && (
+                                <div className="flex items-center gap-1.5 mb-4">
+                                    <ShieldCheck className="h-3 w-3 text-gray-400 flex-shrink-0" />
+                                    <p className="text-xs text-gray-400 dark:text-gray-500">
+                                        Disable anytime in your browser settings
+                                    </p>
+                                </div>
+                            )}
+
+                            {/* ── Action Buttons ── */}
                             <div className="flex gap-2">
                                 <Button
                                     variant="outline"
@@ -191,35 +323,41 @@ export function NotificationPermissionPrompt({
                                     onClick={onDismiss}
                                     className="flex-1 text-xs text-gray-500 border-gray-200 dark:border-gray-700 h-8"
                                 >
-                                    Maybe later
+                                    {isBlocked ? 'Close' : 'Maybe later'}
                                 </Button>
-                                <Button
-                                    size="sm"
-                                    onClick={handleAccept}
-                                    disabled={loading}
-                                    className="flex-[1.6] text-xs h-8 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white border-0 shadow-md shadow-blue-500/20 gap-1.5"
-                                >
-                                    {loading ? (
-                                        <>
-                                            <motion.div
-                                                animate={{ rotate: 360 }}
-                                                transition={{
-                                                    duration: 0.8,
-                                                    repeat: Infinity,
-                                                    ease: 'linear',
-                                                }}
-                                                className="w-3 h-3 border-[1.5px] border-white border-t-transparent rounded-full"
-                                            />
-                                            Enabling...
-                                        </>
-                                    ) : (
-                                        <>
-                                            <BellRing className="h-3.5 w-3.5" />
-                                            Enable Notifications
-                                        </>
-                                    )}
-                                </Button>
+
+                                {/* Hide enable button if blocked —
+                                    browser won't allow re-prompt */}
+                                {!isBlocked && (
+                                    <Button
+                                        size="sm"
+                                        onClick={handleAccept}
+                                        disabled={loading}
+                                        className="flex-[1.6] text-xs h-8 bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-600 hover:to-indigo-700 text-white border-0 shadow-md shadow-blue-500/20 gap-1.5"
+                                    >
+                                        {loading ? (
+                                            <>
+                                                <motion.div
+                                                    animate={{ rotate: 360 }}
+                                                    transition={{
+                                                        duration: 0.8,
+                                                        repeat: Infinity,
+                                                        ease: 'linear',
+                                                    }}
+                                                    className="w-3 h-3 border-[1.5px] border-white border-t-transparent rounded-full"
+                                                />
+                                                Enabling...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <BellRing className="h-3.5 w-3.5" />
+                                                Enable Notifications
+                                            </>
+                                        )}
+                                    </Button>
+                                )}
                             </div>
+
                         </div>
                     </div>
                 </motion.div>

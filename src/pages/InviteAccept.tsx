@@ -73,23 +73,7 @@ function getDefaultPermissions(role: 'member' | 'viewer'): MemberPermissions {
     return EMPTY_MEMBER_PERMISSIONS
 }
 
-// ─── Notification helper ──────────────────────────────────────────────────────
-
-async function sendNotification(
-    userId:  string,
-    payload: {
-        type:      string
-        message:   string
-        projectId: string
-        link:      string
-    }
-) {
-    await addDoc(collection(db, 'users', userId, 'notifications'), {
-        ...payload,
-        read:      false,
-        timestamp: serverTimestamp(),
-    })
-}
+import { sendNotificationWithPush } from '@/services/notificationTrigger'
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
@@ -227,11 +211,12 @@ export default function InviteAccept() {
 
             // 6. Notify the project owner
             if (projectData.createdBy && projectData.createdBy !== user.uid) {
-                await sendNotification(projectData.createdBy, {
-                    type:      'invitation_accepted',
-                    message:   `${displayName} accepted your invitation to join "${projectData.title}".`,
+                await sendNotificationWithPush(projectData.createdBy, {
+                    type:      'success',
+                    title:     'Invitation Accepted',
+                    body:      `${displayName} accepted your invitation to join "${projectData.title}".`,
+                    url:       `/project/${projectId}/manage-team`,
                     projectId,
-                    link:      `/project/${projectId}/manage-team`,
                 })
             }
 
@@ -368,7 +353,7 @@ export default function InviteAccept() {
                     <Button
                         variant="outline"
                         className="w-full"
-                        onClick={() => navigate('/my-projects')}
+                        onClick={() => navigate('/dashboard/projects')}
                     >
                         My Projects
                     </Button>

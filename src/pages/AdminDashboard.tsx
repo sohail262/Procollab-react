@@ -35,6 +35,7 @@ import {
 } from '@/services/adminService'
 import { useToast } from '@/hooks/use-toast'
 import { getFlagMessage } from '@/services/contentModerationService'
+import { FCMTestPanel } from '@/components/FCMTestPanel'
 import {
     collection, query, where, getDocs, orderBy,
     doc, updateDoc, serverTimestamp
@@ -180,8 +181,7 @@ export function AdminDashboard() {
         try {
             await updateUserRole(userId, role)
             await logAdminAction(
-                'change_role', user!.uid,
-                user!.displayName || user!.email || '',
+                'change_role', user!.uid, user!.displayName || user!.email || '',
                 'user', userId, userName,
                 `Changed role to ${role}`
             )

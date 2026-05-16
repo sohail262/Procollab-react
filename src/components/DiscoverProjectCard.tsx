@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { FolderKanban, Users, Calendar } from 'lucide-react'
@@ -17,7 +18,9 @@ interface DiscoverProjectCardProps {
     }
 }
 
-export function DiscoverProjectCard({ project }: DiscoverProjectCardProps) {
+// ⚡ OPTIMIZATION: memo prevents re-renders when parent state changes
+// (e.g. typing in people search) don't affect project card props.
+export const DiscoverProjectCard = memo(function DiscoverProjectCard({ project }: DiscoverProjectCardProps) {
     const navigate = useNavigate()
 
     const getStatusBadge = (status: string) => {
@@ -79,4 +82,4 @@ export function DiscoverProjectCard({ project }: DiscoverProjectCardProps) {
             </CardContent>
         </Card>
     )
-}
+})
