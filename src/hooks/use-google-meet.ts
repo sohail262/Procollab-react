@@ -1,6 +1,19 @@
 // src/hooks/use-google-meet.ts
 import { useState, useCallback, useEffect } from 'react'
 
+declare global {
+    interface Window {
+        google?: {
+            accounts: {
+                oauth2: {
+                    initTokenClient: (config: any) => any
+                    revoke: (token: string, callback: () => void) => void
+                }
+            }
+        }
+    }
+}
+
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string
 const SCOPES = [
     'https://www.googleapis.com/auth/calendar.events',

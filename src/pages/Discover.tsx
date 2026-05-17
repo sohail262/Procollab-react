@@ -347,26 +347,28 @@ export function Discover() {
         count = 10
     ) => {
         try {
-            const apiKey = import.meta.env.VITE_NEWS_API_KEY
-            const url = `https://newsapi.org/v2/top-headlines?country=us&category=${category}&pageSize=${count}&apiKey=${apiKey}`
+            const apiKey = import.meta.env.VITE_CURRENTS_API_KEY
+            // Currents API /v1/search — uses keywords param for category-based search
+            // Docs: https://currentsapi.services/en/docs/search
+            const url = `https://api.currentsapi.services/v1/search?keywords=${category}&language=en&page_size=${count}&apiKey=${apiKey}`
             const response = await fetch(url)
             const data = await response.json()
             if (data.status !== 'ok') return []
-            return (data.articles || [])
+            return (data.news || [])
                 .filter((a: any) => a.title && a.url && a.title !== '[Removed]')
                 .map((a: any, i: number) => ({
-                    id: `newsapi_${category}_${i}_${Date.now()}`,
+                    id: a.id || `currents_${category}_${i}_${Date.now()}`,
                     title: a.title,
                     url: a.url,
-                    time: new Date(a.publishedAt || Date.now()).getTime() / 1000,
-                    tags: [],
-                    description: a.description || a.content || '',
-                    source: 'newsapi',
+                    time: new Date(a.published || Date.now()).getTime() / 1000,
+                    tags: Array.isArray(a.category) ? a.category.slice(0, 3) : [],
+                    description: a.description || '',
+                    source: 'currents',
                     sourceLabel: label,
                     _newsCategory: category
                 }))
         } catch (error) {
-            console.error(`[NewsAPI] Error fetching ${label}:`, error)
+            console.error(`[CurrentsAPI] Error fetching ${label}:`, error)
             return []
         }
     }
@@ -401,7 +403,7 @@ export function Discover() {
         }
 
         return stories.map(story => {
-            if (story.source === 'newsapi' && story._newsCategory) {
+            if ((story.source === 'newsapi' || story.source === 'currents') && story._newsCategory) {
                 const isHealth = story._newsCategory === 'health'
                 let tags: string[] = []
                 if (story.tags && Array.isArray(story.tags)) {
