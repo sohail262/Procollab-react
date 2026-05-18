@@ -264,7 +264,7 @@ $$
     if (loading) {
         return (
             <div className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-6">
                     {[1, 2, 3].map(i => <Skeleton key={i} className="h-32" />)}
                 </div>
                 <Skeleton className="h-64" />
@@ -273,10 +273,10 @@ $$
     }
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-4 sm:space-y-6">
 
             {/* ── Summary Cards ── */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-6">
 
                 {/* Total Budget */}
                 <Card>
@@ -379,10 +379,10 @@ $$
             </div>
 
             {/* ── Expense Log + Category Chart ── */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
 
                 {/* Expense Log */}
-                <Card className="col-span-2">
+                <Card className="lg:col-span-2">
                     <CardHeader className="flex flex-row items-center justify-between">
                         <div>
                             <CardTitle>Expense Log</CardTitle>
@@ -488,6 +488,7 @@ $$
                         )}
                     </CardHeader>
                     <CardContent>
+                        <div className="overflow-x-auto">
                         <Table>
                             <TableHeader>
                                 <TableRow>
@@ -576,6 +577,7 @@ $$
                                 )}
                             </TableBody>
                         </Table>
+                        </div>
                     </CardContent>
                 </Card>
 

@@ -473,10 +473,10 @@ export function AdminDashboard() {
     return (
         <DashboardLayout>
             <div className="mb-6">
-                <div className="flex justify-between items-center">
+                <div className="flex flex-wrap justify-between items-start gap-3">
                     <div>
-                        <h1 className="text-3xl font-bold flex items-center gap-3">
-                            <Shield className="h-8 w-8 text-red-600" />
+                        <h1 className="text-2xl sm:text-3xl font-bold flex items-center gap-2 sm:gap-3">
+                            <Shield className="h-6 w-6 sm:h-8 sm:w-8 text-red-600" />
                             Admin Dashboard
                         </h1>
                         <p className="text-muted-foreground mt-1">
@@ -487,6 +487,7 @@ export function AdminDashboard() {
                         onClick={handleRefresh}
                         variant="outline"
                         disabled={refreshing}
+                        className="shrink-0"
                     >
                         <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
                         Refresh
@@ -559,16 +560,16 @@ export function AdminDashboard() {
                     OVERVIEW TAB
                 ══════════════════════════════════════════ */}
                 <TabsContent value="overview">
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+                    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6 sm:mb-8">
                         {statCards.map((stat, i) => (
                             <Card key={i}>
-                                <CardContent className="p-6">
+                                <CardContent className="p-4 sm:p-6">
                                     <div className="flex justify-between items-start">
                                         <div>
-                                            <p className="text-sm text-muted-foreground">
+                                            <p className="text-xs sm:text-sm text-muted-foreground">
                                                 {stat.title}
                                             </p>
-                                            <h3 className="text-3xl font-bold mt-2">
+                                            <h3 className="text-2xl sm:text-3xl font-bold mt-1 sm:mt-2">
                                                 {loading ? '...' : stat.value}
                                             </h3>
                                             {stat.change && (
@@ -577,8 +578,8 @@ export function AdminDashboard() {
                                                 </p>
                                             )}
                                         </div>
-                                        <div className={`p-3 rounded-lg bg-${stat.color}-100 dark:bg-${stat.color}-900/30`}>
-                                            <stat.icon className={`h-6 w-6 text-${stat.color}-600`} />
+                                        <div className={`p-2 sm:p-3 rounded-lg bg-${stat.color}-100 dark:bg-${stat.color}-900/30 shrink-0`}>
+                                            <stat.icon className={`h-5 w-5 sm:h-6 sm:w-6 text-${stat.color}-600`} />
                                         </div>
                                     </div>
                                 </CardContent>

@@ -207,12 +207,12 @@ export function GanttChart({ readOnly: _readOnly = false }: GanttChartProps) {
         <Card className="h-full flex flex-col">
             <CardHeader className="flex-shrink-0">
                 {/* ── Header row ── */}
-                <div className="flex flex-row items-center justify-between pb-2">
-                    <CardTitle className="text-lg font-medium">Project Timeline</CardTitle>
-                    <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center justify-between gap-2 pb-2">
+                    <CardTitle className="text-base sm:text-lg font-medium">Project Timeline</CardTitle>
+                    <div className="flex flex-wrap items-center gap-2">
                         {/* Status filter */}
                         <Select value={filterStatus} onValueChange={setFilterStatus}>
-                            <SelectTrigger className="w-[140px]">
+                            <SelectTrigger className="w-[120px] sm:w-[140px] h-8 text-xs sm:text-sm">
                                 <SelectValue placeholder="Filter status" />
                             </SelectTrigger>
                             <SelectContent>
@@ -228,12 +228,12 @@ export function GanttChart({ readOnly: _readOnly = false }: GanttChartProps) {
                             value={viewMode}
                             onValueChange={(v) => setViewMode(v as 'day' | 'week')}
                         >
-                            <SelectTrigger className="w-[130px]">
+                            <SelectTrigger className="w-[100px] sm:w-[130px] h-8 text-xs sm:text-sm">
                                 <SelectValue placeholder="View" />
                             </SelectTrigger>
                             <SelectContent>
-                                <SelectItem value="day">Daily View</SelectItem>
-                                <SelectItem value="week">Weekly View</SelectItem>
+                                <SelectItem value="day">Daily</SelectItem>
+                                <SelectItem value="week">Weekly</SelectItem>
                             </SelectContent>
                         </Select>
                     </div>
@@ -302,7 +302,7 @@ export function GanttChart({ readOnly: _readOnly = false }: GanttChartProps) {
                 </div>
             </CardHeader>
 
-            <CardContent className="flex-1 min-h-0 w-full">
+            <CardContent className="flex-1 min-h-0 w-full overflow-x-auto">
                 {data.length === 0 ? (
                     <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-3">
                         <div className="text-5xl">📅</div>
@@ -318,12 +318,13 @@ export function GanttChart({ readOnly: _readOnly = false }: GanttChartProps) {
                         )}
                     </div>
                 ) : (
+                    <div className="min-w-[500px]">
                     <ResponsiveContainer width="100%" height={Math.max(data.length * 50 + 60, 300)}>
                         <BarChart
                             data={data}
                             layout="vertical"
                             barSize={22}
-                            margin={{ top: 10, right: 40, left: 160, bottom: 10 }}
+                            margin={{ top: 10, right: 40, left: 120, bottom: 10 }}
                         >
                             <CartesianGrid strokeDasharray="3 3" horizontal={false} />
                             <XAxis
@@ -336,12 +337,12 @@ export function GanttChart({ readOnly: _readOnly = false }: GanttChartProps) {
                                     )
                                 }
                                 scale="time"
-                                tick={{ fontSize: 11 }}
+                                tick={{ fontSize: 10 }}
                             />
                             <YAxis
                                 type="category"
                                 dataKey="name"
-                                width={155}
+                                width={115}
                                 tick={<CustomYAxisTick />}
                             />
                             <Tooltip content={<CustomTooltip />} />
@@ -351,7 +352,7 @@ export function GanttChart({ readOnly: _readOnly = false }: GanttChartProps) {
                                 radius={[4, 4, 4, 4]}
                                 label={{
                                     position: 'right',
-                                    fontSize: 11,
+                                    fontSize: 10,
                                     fill: '#64748b',
                                     formatter: (v: any) =>
                                         `${v}${viewMode === 'week' ? 'w' : 'd'}`,
@@ -362,7 +363,7 @@ export function GanttChart({ readOnly: _readOnly = false }: GanttChartProps) {
                                         key={`cell-${index}`}
                                         fill={
                                             entry.overdue
-                                                ? '#fca5a5'   // light red for overdue
+                                                ? '#fca5a5'
                                                 : STATUS_COLORS[entry.status] ?? '#cbd5e1'
                                         }
                                         stroke={entry.overdue ? '#ef4444' : 'transparent'}
@@ -372,6 +373,7 @@ export function GanttChart({ readOnly: _readOnly = false }: GanttChartProps) {
                             </Bar>
                         </BarChart>
                     </ResponsiveContainer>
+                    </div>
                 )}
             </CardContent>
         </Card>

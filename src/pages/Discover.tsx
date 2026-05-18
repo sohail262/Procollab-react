@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { DashboardLayout } from '@/components/layout/DashboardLayout'
 import { Card, CardContent } from '@/components/ui/card'
-import { DiscoverProjectCard } from '@/components/DiscoverProjectCard'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -10,13 +9,11 @@ import { useInfiniteScroll, usePagination } from '@/hooks/useInfiniteScroll'
 import { useDebounce } from '@/hooks/useDebounce'
 import {
     loadPaginatedUsers,
-    loadPaginatedProjects
 } from '@/services/paginationService'
 import {
     Search,
     RefreshCw,
     Users,
-    FolderKanban,
     TrendingUp,
     UserPlus,
     ExternalLink,
@@ -61,19 +58,6 @@ interface Person {
     avatarSeed?: string
 }
 
-interface Project {
-    id: string
-    title: string
-    description: string
-    primaryDiscipline: string
-    status: string
-    tags?: string[]
-    createdBy: string
-    createdAt: Date
-    teamSize?: number
-    summary?: string
-}
-
 interface TrendingTopic {
     id: string
     title: string
@@ -107,15 +91,11 @@ export function Discover() {
     // ── Search / filter state ──────────────────────────────────────────────────
     const [peopleSearch, setPeopleSearch] = useState('')
     const [disciplineFilter, setDisciplineFilter] = useState('all')
-    const [projectsSearch, setProjectsSearch] = useState('')
-    const [statusFilter, setStatusFilter] = useState('all')
 
     const debouncedPeopleSearch = useDebounce(peopleSearch, 300)
-    const debouncedProjectsSearch = useDebounce(projectsSearch, 300)
 
     // ── Pagination ─────────────────────────────────────────────────────────────
     const [peopleState, peopleActions] = usePagination<Person>()
-    const [projectsState, projectsActions] = usePagination<Project>()
     const [topicsState, topicsActions] = usePagination<TrendingTopic>()
 
     const disciplines = [
@@ -190,21 +170,6 @@ export function Discover() {
         }
     }, [peopleState.lastDoc, peopleActions, checkConnectionStatuses])
 
-    const loadMoreProjects = useCallback(async (): Promise<boolean> => {
-        try {
-            const filters = {
-                status: statusFilter !== 'all' ? statusFilter : undefined,
-                searchTerm: debouncedProjectsSearch || undefined
-            }
-            const result = await loadPaginatedProjects(projectsState.lastDoc, 10, filters)
-            projectsActions.addItems(result.items, result.lastDoc as any)
-            return result.hasMore
-        } catch (error) {
-            console.error('Error loading more projects:', error)
-            return false
-        }
-    }, [projectsState.lastDoc, projectsActions, statusFilter, debouncedProjectsSearch])
-
     const loadMoreTopics = useCallback(async (): Promise<boolean> => {
         try {
             const topics = await loadTrendingTopics()
@@ -227,7 +192,6 @@ export function Discover() {
 
     // ── Infinite scroll sentinels ─────────────────────────────────────────────
     const peopleScroll = useInfiniteScroll(loadMorePeople, { enabled: !peopleState.loading })
-    const projectsScroll = useInfiniteScroll(loadMoreProjects, { enabled: !projectsState.loading })
     const topicsScroll = useInfiniteScroll(loadMoreTopics, { enabled: !topicsState.loading })
 
     // ── Initial load ──────────────────────────────────────────────────────────
@@ -238,10 +202,7 @@ export function Discover() {
     const loadInitialData = async () => {
         setLoading(true)
         try {
-            const [peopleResult, projectsResult] = await Promise.all([
-                loadPaginatedUsers(),
-                loadPaginatedProjects()
-            ])
+            const peopleResult = await loadPaginatedUsers()
 
             const topics = await loadTrendingTopics()
             const initialTopics = topics.slice(0, 9)
@@ -250,12 +211,6 @@ export function Discover() {
             peopleActions.setHasMore(peopleResult.hasMore)
             if (peopleResult.lastDoc) {
                 peopleActions.addItems([], peopleResult.lastDoc as any)
-            }
-
-            projectsActions.setItems(projectsResult.items)
-            projectsActions.setHasMore(projectsResult.hasMore)
-            if (projectsResult.lastDoc) {
-                projectsActions.addItems([], projectsResult.lastDoc as any)
             }
 
             topicsActions.setItems(initialTopics)
@@ -273,13 +228,6 @@ export function Discover() {
             setLoading(false)
         }
     }
-
-    // Reset projects on filter change
-    useEffect(() => {
-        if (debouncedProjectsSearch !== projectsSearch) return
-        projectsActions.reset()
-        loadMoreProjects()
-    }, [statusFilter, debouncedProjectsSearch])
 
     // ── Trending topics ───────────────────────────────────────────────────────
     const fetchTopHackerNewsStories = async (count = 20) => {
@@ -557,10 +505,6 @@ export function Discover() {
     }
 
     // ── Filtered lists ────────────────────────────────────────────────────────
-    // ⚡ OPTIMIZATION: useMemo prevents recomputing these on every render.
-    // filteredPeople only recalculates when people data or search/filter values change.
-    // filteredProjects only recalculates when project data or its own filters change.
-    // Without this, typing in the people search box also recomputed filteredProjects.
     const filteredPeople = useMemo(() => peopleState.items.filter(person => {
         // Hide self
         if (auth.currentUser && person.id === auth.currentUser.uid) return false
@@ -568,8 +512,6 @@ export function Discover() {
         if (friendIds.has(person.id)) return false
         // ✅ Hide outgoing pending — already sent, no action needed in Discover
         if (outgoingPendingIds.has(person.id)) return false
-        // ✅ Keep incoming pending visible — user needs to respond
-        // (they'll see "Respond" button that navigates to profile)
 
         const matchesSearch =
             debouncedPeopleSearch === '' ||
@@ -589,73 +531,60 @@ export function Discover() {
         return matchesSearch && matchesDiscipline
     }), [peopleState.items, friendIds, outgoingPendingIds, debouncedPeopleSearch, disciplineFilter])
 
-    const filteredProjects = useMemo(() => projectsState.items.filter(project => {
-        const matchesSearch =
-            debouncedProjectsSearch === '' ||
-            project.title.toLowerCase().includes(debouncedProjectsSearch.toLowerCase()) ||
-            project.description.toLowerCase().includes(debouncedProjectsSearch.toLowerCase()) ||
-            (project.tags || []).some(t =>
-                t.toLowerCase().includes(debouncedProjectsSearch.toLowerCase())
-            )
-        const matchesStatus = statusFilter === 'all' || project.status === statusFilter
-        return matchesSearch && matchesStatus
-    }), [projectsState.items, debouncedProjectsSearch, statusFilter])
-
     // ── Render ────────────────────────────────────────────────────────────────
     return (
         <DashboardLayout>
-            <div className="mb-8">
-                <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
+            <div className="mb-6 sm:mb-8">
+                <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white mb-2">
                     Discover
                 </h1>
-                <p className="text-gray-600 dark:text-gray-400">
-                    Find collaborators, explore projects, and stay updated with trending tech
+                <p className="text-sm sm:text-base text-gray-600 dark:text-gray-400">
+                    Find collaborators and stay updated with trending tech
                 </p>
             </div>
 
             {/* ── Find Collaborators ── */}
             <section id="discover-people" className="mb-12">
-                <div className="flex flex-col lg:flex-row lg:justify-between lg:items-center mb-6 gap-4">
-                    <div>
-                        <h2 className="text-2xl font-bold">Find Collaborators</h2>
-                        <p className="text-sm text-muted-foreground mt-1 max-w-xl">
-                            Invites you send or receive are in the connections menu (header).
-                            Withdraw sent requests from the Sent tab there.
-                        </p>
+                <div className="mb-5">
+                    <h2 className="text-xl sm:text-2xl font-bold">Find Collaborators</h2>
+                    <p className="text-sm text-muted-foreground mt-1 max-w-xl">
+                        Invites you send or receive are in the connections menu (header).
+                        Withdraw sent requests from the Sent tab there.
+                    </p>
+                </div>
+                {/* Filters: always side-by-side in a 2-col grid */}
+                <div className="grid grid-cols-2 gap-3 mb-6">
+                    <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
+                        <Input
+                            type="text"
+                            placeholder="Search by name or skill"
+                            className="pl-10 w-full"
+                            value={peopleSearch}
+                            onChange={e => setPeopleSearch(e.target.value)}
+                        />
                     </div>
-                    <div className="flex flex-col sm:flex-row gap-3">
-                        <div className="relative flex-1 sm:flex-none">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
-                            <Input
-                                type="text"
-                                placeholder="Search by name or skill"
-                                className="pl-10 w-full sm:w-64"
-                                value={peopleSearch}
-                                onChange={e => setPeopleSearch(e.target.value)}
-                            />
-                        </div>
-                        <select
-                            className="px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-sm"
-                            value={disciplineFilter}
-                            onChange={e => setDisciplineFilter(e.target.value)}
-                        >
-                            {disciplines.map((d, i) => (
-                                <option
-                                    key={i}
-                                    value={
-                                        i === 0
-                                            ? 'all'
-                                            : d.toLowerCase().replace(/ & /g, '-').replace(/ /g, '-')
-                                    }
-                                >
-                                    {d}
-                                </option>
-                            ))}
-                        </select>
-                    </div>
+                    <select
+                        className="px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-sm w-full"
+                        value={disciplineFilter}
+                        onChange={e => setDisciplineFilter(e.target.value)}
+                    >
+                        {disciplines.map((d, i) => (
+                            <option
+                                key={i}
+                                value={
+                                    i === 0
+                                        ? 'all'
+                                        : d.toLowerCase().replace(/ & /g, '-').replace(/ /g, '-')
+                                }
+                            >
+                                {d}
+                            </option>
+                        ))}
+                    </select>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
                     {loading ? (
                         <div className="col-span-full text-center py-12">
                             <div className="animate-spin inline-block w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full mb-4" />
@@ -677,90 +606,90 @@ export function Discover() {
                                     key={person.id}
                                     className="hover:shadow-lg transition-all duration-300 group"
                                 >
-                                    <CardContent className="p-5">
-                                        <div className="flex items-start justify-between mb-4 gap-2">
-                                            <div className="flex items-center gap-3 min-w-0">
+                                    <CardContent className="p-3 sm:p-5">
+                                        <div className="flex items-start justify-between mb-3 gap-2">
+                                            <div className="flex items-center gap-2 sm:gap-3 min-w-0">
                                                 <img
                                                     src={
                                                         person.photoURL ||
                                                         `https://api.dicebear.com/7.x/${person.avatarStyle || 'avataaars'}/svg?seed=${encodeURIComponent(person.avatarSeed || person.email || person.id)}`
                                                     }
                                                     alt={`${person.firstName} ${person.lastName}`}
-                                                    className="w-12 h-12 rounded-full border border-gray-200 dark:border-gray-700 cursor-pointer hover:border-blue-500 transition-colors shrink-0"
+                                                    className="w-10 h-10 sm:w-12 sm:h-12 rounded-full border border-gray-200 dark:border-gray-700 cursor-pointer hover:border-blue-500 transition-colors shrink-0"
                                                     onClick={() => navigate(`/profile/${person.id}`)}
                                                 />
                                                 <div className="min-w-0">
                                                     <h3
-                                                        className="font-semibold text-gray-900 dark:text-white cursor-pointer hover:text-blue-600 transition-colors truncate"
+                                                        className="font-semibold text-sm sm:text-base text-gray-900 dark:text-white cursor-pointer hover:text-blue-600 transition-colors truncate"
                                                         onClick={() => navigate(`/profile/${person.id}`)}
                                                     >
                                                         {person.firstName} {person.lastName}
                                                     </h3>
-                                                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                                                    <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
                                                         {person.role}
                                                     </p>
                                                 </div>
                                             </div>
 
-                                            {/* ✅ Connection button — correct state for all cases */}
+                                            {/* Connection button */}
                                             <div className="shrink-0">
                                                 {isOutgoing || isFading ? (
                                                     <Button
                                                         size="sm"
                                                         variant="outline"
-                                                        className="h-8 px-3 text-xs text-amber-600 border-amber-200 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-800 dark:text-amber-400"
+                                                        className="h-7 px-2 text-xs text-amber-600 border-amber-200 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-800 dark:text-amber-400"
                                                         disabled
                                                     >
-                                                        <Check className="h-3 w-3 mr-1" />
-                                                        Request Sent
+                                                        <Check className="h-3 w-3 sm:mr-1" />
+                                                        <span className="hidden sm:inline">Sent</span>
                                                     </Button>
                                                 ) : isIncoming ? (
                                                     <Button
                                                         size="sm"
-                                                        className="h-8 px-3 text-xs bg-green-600 hover:bg-green-700"
+                                                        className="h-7 px-2 text-xs bg-green-600 hover:bg-green-700"
                                                         onClick={() => navigate(`/profile/${person.id}`)}
                                                     >
-                                                        <Check className="h-3 w-3 mr-1" />
-                                                        Respond
+                                                        <Check className="h-3 w-3 sm:mr-1" />
+                                                        <span className="hidden sm:inline">Respond</span>
                                                     </Button>
                                                 ) : (
                                                     <Button
                                                         size="sm"
                                                         variant="secondary"
-                                                        className="h-8 px-3 text-xs"
+                                                        className="h-7 px-2 text-xs"
                                                         onClick={() => handleConnect(person.id)}
                                                     >
-                                                        <UserPlus className="h-3 w-3 mr-1" />
-                                                        Connect
+                                                        <UserPlus className="h-3 w-3 sm:mr-1" />
+                                                        <span className="hidden sm:inline">Connect</span>
                                                     </Button>
                                                 )}
                                             </div>
                                         </div>
 
-                                        <div className="space-y-3">
+                                        <div className="space-y-2">
                                             <div className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400">
-                                                <BookOpen className="h-3 w-3" />
-                                                {person.discipline || (
+                                                <BookOpen className="h-3 w-3 shrink-0" />
+                                                <span className="truncate">{person.discipline || (
                                                     <span className="italic text-gray-400">
                                                         No discipline listed
                                                     </span>
-                                                )}
+                                                )}</span>
                                             </div>
-                                            <p className="text-sm text-gray-600 dark:text-gray-300 line-clamp-2 min-h-[2.5rem]">
+                                            <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-300 line-clamp-2">
                                                 {person.bio || (
                                                     <span className="italic text-gray-400">
                                                         No bio available
                                                     </span>
                                                 )}
                                             </p>
-                                            <div className="flex flex-wrap gap-1.5 pt-1">
+                                            <div className="flex flex-wrap gap-1 pt-0.5">
                                                 {(person.skills || []).length > 0 ? (
                                                     <>
                                                         {person.skills.slice(0, 3).map((skill, i) => (
                                                             <Badge
                                                                 key={i}
                                                                 variant="outline"
-                                                                className="text-[10px] px-2 py-0.5 h-5 bg-gray-50 dark:bg-gray-800/50"
+                                                                className="text-[10px] px-1.5 py-0.5 h-5 bg-gray-50 dark:bg-gray-800/50"
                                                             >
                                                                 {skill}
                                                             </Badge>
@@ -768,7 +697,7 @@ export function Discover() {
                                                         {person.skills.length > 3 && (
                                                             <Badge
                                                                 variant="outline"
-                                                                className="text-[10px] px-2 py-0.5 h-5"
+                                                                className="text-[10px] px-1.5 py-0.5 h-5"
                                                             >
                                                                 +{person.skills.length - 3}
                                                             </Badge>
@@ -811,80 +740,10 @@ export function Discover() {
                 </div>
             </section>
 
-            {/* ── Explore Projects ── */}
-            <section id="discover-projects" className="mb-12">
-                <div className="flex flex-col lg:flex-row lg:justify-between lg:items-center mb-6 gap-4">
-                    <h2 className="text-2xl font-bold">Explore Projects</h2>
-                    <div className="flex flex-col sm:flex-row gap-3">
-                        <div className="relative flex-1 sm:flex-none">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
-                            <Input
-                                type="text"
-                                placeholder="Search projects"
-                                className="pl-10 w-full sm:w-64"
-                                value={projectsSearch}
-                                onChange={e => setProjectsSearch(e.target.value)}
-                            />
-                        </div>
-                        <select
-                            className="px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-sm"
-                            value={statusFilter}
-                            onChange={e => setStatusFilter(e.target.value)}
-                        >
-                            <option value="all">All Statuses</option>
-                            <option value="recruiting">Recruiting</option>
-                            <option value="active">Active</option>
-                            <option value="completed">Completed</option>
-                            <option value="on-hold">On Hold</option>
-                        </select>
-                    </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {loading ? (
-                        <div className="col-span-full text-center py-12">
-                            <div className="animate-spin inline-block w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full mb-4" />
-                            <p className="text-gray-500">Loading projects...</p>
-                        </div>
-                    ) : filteredProjects.length === 0 ? (
-                        <div className="col-span-full text-center py-12">
-                            <FolderKanban className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                            <p className="text-gray-500">No projects found</p>
-                        </div>
-                    ) : (
-                        filteredProjects.map(project => (
-                            <DiscoverProjectCard key={project.id} project={project} />
-                        ))
-                    )}
-
-                    {!loading && projectsState.hasMore && (
-                        <div
-                            ref={projectsScroll.sentinelRef}
-                            className="col-span-full flex justify-center py-8"
-                        >
-                            {projectsScroll.isLoading ? (
-                                <div className="flex items-center gap-2 text-gray-500">
-                                    <Loader2 className="h-4 w-4 animate-spin" />
-                                    <span>Loading more projects...</span>
-                                </div>
-                            ) : (
-                                <Button
-                                    variant="outline"
-                                    onClick={projectsScroll.loadMore}
-                                    className="px-6 py-2"
-                                >
-                                    Load More Projects
-                                </Button>
-                            )}
-                        </div>
-                    )}
-                </div>
-            </section>
-
             {/* ── Trending Topics ── */}
             <section className="mb-8">
-                <div className="flex justify-between items-center mb-6">
-                    <h2 className="text-2xl font-bold">Trending Topics</h2>
+                <div className="flex flex-wrap justify-between items-center gap-2 mb-6">
+                    <h2 className="text-xl sm:text-2xl font-bold">Trending Topics</h2>
                     <Button
                         onClick={handleRefreshTopics}
                         disabled={refreshingTopics}
@@ -897,7 +756,7 @@ export function Discover() {
                     </Button>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
                     {topicsState.items.length === 0 ? (
                         <div className="col-span-full text-center py-8">
                             <TrendingUp className="h-12 w-12 text-gray-400 mx-auto mb-4" />
@@ -922,54 +781,40 @@ export function Discover() {
                                     key={topic.id}
                                     className="hover:shadow-lg transition-all hover:border-blue-500"
                                 >
-                                    <CardContent className="p-6">
-                                        <div className="flex items-center justify-between mb-4">
-                                            <TopicIcon className="h-6 w-6 text-gray-600 dark:text-gray-300" />
-                                            <Badge variant="secondary" className="text-xs">
+                                    <CardContent className="p-3 sm:p-5">
+                                        <div className="flex items-center justify-between mb-2 sm:mb-3">
+                                            <TopicIcon className="h-4 w-4 sm:h-5 sm:w-5 text-gray-600 dark:text-gray-300" />
+                                            <Badge variant="secondary" className="text-[10px] sm:text-xs">
                                                 {topic.sourceLabel || topic.source}
                                             </Badge>
                                         </div>
                                         <h3
-                                            className="text-lg font-bold mb-3 line-clamp-2"
+                                            className="text-xs sm:text-sm font-bold mb-1 sm:mb-2 line-clamp-2"
                                             title={topic.title}
                                         >
                                             {topic.title}
                                         </h3>
                                         {topic.description && topic.description !== topic.title && (
-                                            <p className="text-sm text-gray-600 dark:text-gray-300 mb-4 line-clamp-3">
+                                            <p className="text-[10px] sm:text-xs text-gray-600 dark:text-gray-300 mb-2 line-clamp-2 hidden sm:block">
                                                 {topic.description}
                                             </p>
                                         )}
-                                        <div className="flex flex-wrap gap-2 mb-4">
+                                        <div className="flex flex-wrap gap-1 mb-2">
                                             <Badge
                                                 variant="outline"
-                                                className="text-xs bg-gray-50 dark:bg-gray-800"
+                                                className="text-[10px] bg-gray-50 dark:bg-gray-800 px-1"
                                             >
                                                 {topic.category}
                                             </Badge>
-                                            {topic.tags.slice(0, 2).map((tag, i) => (
-                                                <Badge
-                                                    key={i}
-                                                    variant="outline"
-                                                    className="text-xs bg-gray-50 dark:bg-gray-800"
-                                                >
-                                                    {tag}
-                                                </Badge>
-                                            ))}
                                         </div>
-                                        <div className="flex justify-between items-center mt-auto">
-                                            <span className="text-xs text-gray-500">
-                                                Trending in tech
-                                            </span>
-                                            <Button
-                                                variant="ghost"
-                                                size="sm"
-                                                onClick={() => window.open(topic.url, '_blank')}
-                                                className="text-blue-600 hover:text-blue-800 text-sm font-medium flex items-center gap-1"
-                                            >
-                                                Read <ExternalLink className="h-3 w-3" />
-                                            </Button>
-                                        </div>
+                                        <Button
+                                            variant="ghost"
+                                            size="sm"
+                                            onClick={() => window.open(topic.url, '_blank')}
+                                            className="text-blue-600 hover:text-blue-800 text-xs font-medium flex items-center gap-1 h-7 px-1 w-full justify-end"
+                                        >
+                                            Read <ExternalLink className="h-3 w-3" />
+                                        </Button>
                                     </CardContent>
                                 </Card>
                             )

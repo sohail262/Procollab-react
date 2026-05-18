@@ -225,12 +225,12 @@ export function EditProject() {
         <DashboardLayout>
             <div className="max-w-4xl mx-auto space-y-6">
                 {/* Header */}
-                <div className="flex items-center justify-between">
+                <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                        <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Edit Project</h1>
-                        <p className="text-gray-600 dark:text-gray-400 mt-1">Update your project details</p>
+                        <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white">Edit Project</h1>
+                        <p className="text-sm sm:text-base text-gray-600 dark:text-gray-400 mt-1">Update your project details</p>
                     </div>
-                    <Button variant="ghost" onClick={() => navigate(`/project/${id}`)}>
+                    <Button variant="ghost" onClick={() => navigate(`/project/${id}`)} className="shrink-0">
                         <ArrowLeft className="h-4 w-4 mr-2" />
                         Back
                     </Button>

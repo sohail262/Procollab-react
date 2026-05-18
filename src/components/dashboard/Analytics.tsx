@@ -119,7 +119,7 @@ export function Analytics() {
     if (loading) {
         return (
             <div className="space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
                     {[1, 2, 3].map(i => (
                         <Card key={i}>
                             <CardContent className="pt-6">
@@ -129,62 +129,61 @@ export function Analytics() {
                         </Card>
                     ))}
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <Skeleton className="h-[340px]" />
-                    <Skeleton className="h-[340px]" />
-                </div>
-                <Skeleton className="h-[340px]" />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <Skeleton className="h-[280px]" />
+                    <Skeleton className="h-[280px]" />
+                </div>                <Skeleton className="h-[280px]" />
             </div>
         )
     }
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-4 sm:space-y-6">
 
             {/* ── Summary Cards ── */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
                 <Card>
-                    <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium text-muted-foreground">
+                    <CardHeader className="pb-2 p-4 sm:p-6">
+                        <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">
                             Total Tasks
                         </CardTitle>
                     </CardHeader>
-                    <CardContent>
-                        <div className="text-3xl font-bold">{totalTasks}</div>
+                    <CardContent className="p-4 pt-0 sm:p-6 sm:pt-0">
+                        <div className="text-2xl sm:text-3xl font-bold">{totalTasks}</div>
                     </CardContent>
                 </Card>
                 <Card>
-                    <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium text-muted-foreground">
+                    <CardHeader className="pb-2 p-4 sm:p-6">
+                        <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">
                             Completed
                         </CardTitle>
                     </CardHeader>
-                    <CardContent>
-                        <div className="text-3xl font-bold text-green-600">{completedTasks}</div>
+                    <CardContent className="p-4 pt-0 sm:p-6 sm:pt-0">
+                        <div className="text-2xl sm:text-3xl font-bold text-green-600">{completedTasks}</div>
                     </CardContent>
                 </Card>
-                <Card>
-                    <CardHeader className="pb-2">
-                        <CardTitle className="text-sm font-medium text-muted-foreground">
+                <Card className="col-span-2 lg:col-span-1">
+                    <CardHeader className="pb-2 p-4 sm:p-6">
+                        <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">
                             Completion Rate
                         </CardTitle>
                     </CardHeader>
-                    <CardContent>
-                        <div className="text-3xl font-bold">{completionRate}%</div>
+                    <CardContent className="p-4 pt-0 sm:p-6 sm:pt-0">
+                        <div className="text-2xl sm:text-3xl font-bold">{completionRate}%</div>
                     </CardContent>
                 </Card>
             </div>
 
             {/* ── Charts Row ── */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
 
                 {/* Status Distribution */}
                 <Card>
-                    <CardHeader>
-                        <CardTitle>Task Status Distribution</CardTitle>
-                        <CardDescription>Overview of task progress</CardDescription>
+                    <CardHeader className="p-4 sm:p-6">
+                        <CardTitle className="text-sm sm:text-base">Task Status Distribution</CardTitle>
+                        <CardDescription className="text-xs sm:text-sm">Overview of task progress</CardDescription>
                     </CardHeader>
-                    <CardContent className="h-[300px] w-full min-w-0">
+                    <CardContent className="h-[240px] sm:h-[300px] w-full min-w-0 p-2 sm:p-6">
                         {statusData.length === 0 ? (
                             <EmptyChart message="No tasks found" />
                         ) : (
@@ -198,7 +197,7 @@ export function Analytics() {
                                         label={({ name, percent }: any) =>
                                             `${name} ${((percent ?? 0) * 100).toFixed(0)}%`
                                         }
-                                        outerRadius={80}
+                                        outerRadius={70}
                                         dataKey="value"
                                     >
                                         {statusData.map((_, index) => (
@@ -217,19 +216,19 @@ export function Analytics() {
 
                 {/* Priority Distribution */}
                 <Card>
-                    <CardHeader>
-                        <CardTitle>Task Priority Breakdown</CardTitle>
-                        <CardDescription>Tasks by priority level</CardDescription>
+                    <CardHeader className="p-4 sm:p-6">
+                        <CardTitle className="text-sm sm:text-base">Task Priority Breakdown</CardTitle>
+                        <CardDescription className="text-xs sm:text-sm">Tasks by priority level</CardDescription>
                     </CardHeader>
-                    <CardContent className="h-[300px] w-full min-w-0">
+                    <CardContent className="h-[240px] sm:h-[300px] w-full min-w-0 p-2 sm:p-6">
                         {priorityData.length === 0 ? (
                             <EmptyChart message="No tasks found" />
                         ) : (
                             <ResponsiveContainer width="100%" height="100%">
                                 <BarChart data={priorityData}>
                                     <CartesianGrid strokeDasharray="3 3" />
-                                    <XAxis dataKey="name" />
-                                    <YAxis allowDecimals={false} />
+                                    <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                                    <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
                                     <Tooltip />
                                     <Bar dataKey="value" fill="#82ca9d">
                                         {priorityData.map((_, index) => (
@@ -248,19 +247,19 @@ export function Analytics() {
 
             {/* ── Velocity Chart ── */}
             <Card>
-                <CardHeader>
-                    <CardTitle>Team Velocity</CardTitle>
-                    <CardDescription>Story points completed per sprint</CardDescription>
+                <CardHeader className="p-4 sm:p-6">
+                    <CardTitle className="text-sm sm:text-base">Team Velocity</CardTitle>
+                    <CardDescription className="text-xs sm:text-sm">Story points completed per sprint</CardDescription>
                 </CardHeader>
-                <CardContent className="h-[300px] w-full min-w-0">
+                <CardContent className="h-[240px] sm:h-[300px] w-full min-w-0 p-2 sm:p-6">
                     {velocityData.length === 0 ? (
                         <EmptyChart message="No sprint data yet. Complete sprints to see velocity." />
                     ) : (
                         <ResponsiveContainer width="100%" height="100%">
                             <LineChart data={velocityData}>
                                 <CartesianGrid strokeDasharray="3 3" />
-                                <XAxis dataKey="name" />
-                                <YAxis allowDecimals={false} />
+                                <XAxis dataKey="name" tick={{ fontSize: 11 }} />
+                                <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
                                 <Tooltip />
                                 <Legend />
                                 <Line

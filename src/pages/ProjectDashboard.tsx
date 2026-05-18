@@ -335,42 +335,43 @@ const [teamMembers, setTeamMembers] = useState<
             <div className="h-full flex flex-col space-y-6">
 
                 {/* ── Header ── */}
-                <div className="flex flex-col md:flex-row justify-between
-                                items-start md:items-center gap-4">
-                    <div>
-                        <div className="flex items-center gap-2 mb-1">
-                            <Button
-                                variant="ghost" size="sm"
-                                className="h-6 w-6 p-0"
-                                onClick={() => navigate('/dashboard/projects')}
-                            >
-                                <ArrowLeft className="h-4 w-4" />
-                            </Button>
-                            <h1 className="text-2xl font-bold tracking-tight">
-                                {project?.title}
-                            </h1>
-                            <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${
-                                project?.status === 'active'
-                                    ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100'
-                                    : project?.status === 'completed'
-                                        ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100'
-                                        : 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-100'
-                            }`}>
-                                {project?.status}
-                            </span>
+                <div className="flex flex-col gap-3">
+                    <div className="flex items-start gap-2">
+                        <Button
+                            variant="ghost" size="sm"
+                            className="h-6 w-6 p-0 mt-1 shrink-0"
+                            onClick={() => navigate('/dashboard/projects')}
+                        >
+                            <ArrowLeft className="h-4 w-4" />
+                        </Button>
+                        <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                                <h1 className="text-xl sm:text-2xl font-bold tracking-tight truncate">
+                                    {project?.title}
+                                </h1>
+                                <span className={`px-2 py-0.5 rounded-full text-xs font-medium shrink-0 ${
+                                    project?.status === 'active'
+                                        ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100'
+                                        : project?.status === 'completed'
+                                            ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100'
+                                            : 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-100'
+                                }`}>
+                                    {project?.status}
+                                </span>
+                            </div>
+                            <p className="text-muted-foreground text-sm mt-0.5">
+                                {project?.summary || 'Manage your project tasks, team, and timeline.'}
+                            </p>
                         </div>
-                        <p className="text-muted-foreground text-sm ml-8">
-                            {project?.summary || 'Manage your project tasks, team, and timeline.'}
-                        </p>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                         {(isOwner || isAdmin) && (
                             <Select
                                 value={methodology}
                                 onValueChange={(v: any) => handleMethodologyChange(v)}
                             >
-                                <SelectTrigger className="w-[180px]">
+                                <SelectTrigger className="w-[150px] sm:w-[180px]">
                                     <SelectValue placeholder="Select Methodology" />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -384,18 +385,20 @@ const [teamMembers, setTeamMembers] = useState<
                         )}
 
                         {(isOwner || isAdmin) && (
-                            <Button onClick={openNewTaskDialog}>
-                                <Plus className="h-4 w-4 mr-2" />
-                                New Task
+                            <Button onClick={openNewTaskDialog} size="sm">
+                                <Plus className="h-4 w-4 mr-1 sm:mr-2" />
+                                <span className="hidden xs:inline">New Task</span>
+                                <span className="xs:hidden">Task</span>
                             </Button>
                         )}
 
                         {(isOwner || isAdmin) && (
                             <Button
                                 variant="outline"
+                                size="sm"
                                 onClick={() => setShowTemplates(true)}
                             >
-                                📦 Templates
+                                📦 <span className="hidden sm:inline ml-1">Templates</span>
                             </Button>
                         )}
 
@@ -418,7 +421,7 @@ const [teamMembers, setTeamMembers] = useState<
                     className="flex-1 flex flex-col"
                 >
                     <div className="border-b overflow-x-auto">
-                        <TabsList className="w-full justify-start h-12 bg-transparent p-0">
+                        <TabsList className="w-full justify-start h-12 bg-transparent p-0 min-w-max">
 
                             {canViewTab('overview') && (
                                 <TabsTrigger value="overview"
@@ -426,9 +429,9 @@ const [teamMembers, setTeamMembers] = useState<
                                                data-[state=active]:border-b-2
                                                data-[state=active]:border-primary
                                                data-[state=active]:shadow-none
-                                               rounded-none h-full px-4">
-                                    <LayoutDashboard className="h-4 w-4 mr-2" />
-                                    Overview
+                                               rounded-none h-full px-3 sm:px-4">
+                                    <LayoutDashboard className="h-4 w-4 sm:mr-2" />
+                                    <span className="hidden sm:inline">Overview</span>
                                 </TabsTrigger>
                             )}
 
@@ -438,9 +441,9 @@ const [teamMembers, setTeamMembers] = useState<
                                                data-[state=active]:border-b-2
                                                data-[state=active]:border-primary
                                                data-[state=active]:shadow-none
-                                               rounded-none h-full px-4">
-                                    <KanbanSquare className="h-4 w-4 mr-2" />
-                                    Kanban
+                                               rounded-none h-full px-3 sm:px-4">
+                                    <KanbanSquare className="h-4 w-4 sm:mr-2" />
+                                    <span className="hidden sm:inline">Kanban</span>
                                 </TabsTrigger>
                             )}
 
@@ -450,9 +453,9 @@ const [teamMembers, setTeamMembers] = useState<
                                                data-[state=active]:border-b-2
                                                data-[state=active]:border-primary
                                                data-[state=active]:shadow-none
-                                               rounded-none h-full px-4">
-                                    <GanttChartSquare className="h-4 w-4 mr-2" />
-                                    Gantt
+                                               rounded-none h-full px-3 sm:px-4">
+                                    <GanttChartSquare className="h-4 w-4 sm:mr-2" />
+                                    <span className="hidden sm:inline">Gantt</span>
                                 </TabsTrigger>
                             )}
 
@@ -462,9 +465,9 @@ const [teamMembers, setTeamMembers] = useState<
                                                data-[state=active]:border-b-2
                                                data-[state=active]:border-primary
                                                data-[state=active]:shadow-none
-                                               rounded-none h-full px-4">
-                                    <CalendarDays className="h-4 w-4 mr-2" />
-                                    Calendar
+                                               rounded-none h-full px-3 sm:px-4">
+                                    <CalendarDays className="h-4 w-4 sm:mr-2" />
+                                    <span className="hidden sm:inline">Calendar</span>
                                 </TabsTrigger>
                             )}
 
@@ -474,9 +477,9 @@ const [teamMembers, setTeamMembers] = useState<
                                                data-[state=active]:border-b-2
                                                data-[state=active]:border-primary
                                                data-[state=active]:shadow-none
-                                               rounded-none h-full px-4">
-                                    <Video className="h-4 w-4 mr-2" />
-                                    Meetings
+                                               rounded-none h-full px-3 sm:px-4">
+                                    <Video className="h-4 w-4 sm:mr-2" />
+                                    <span className="hidden sm:inline">Meetings</span>
                                 </TabsTrigger>
                             )}
 
@@ -486,9 +489,9 @@ const [teamMembers, setTeamMembers] = useState<
                                                data-[state=active]:border-b-2
                                                data-[state=active]:border-primary
                                                data-[state=active]:shadow-none
-                                               rounded-none h-full px-4">
-                                    <Users className="h-4 w-4 mr-2" />
-                                    Team
+                                               rounded-none h-full px-3 sm:px-4">
+                                    <Users className="h-4 w-4 sm:mr-2" />
+                                    <span className="hidden sm:inline">Team</span>
                                 </TabsTrigger>
                             )}
 
@@ -498,9 +501,9 @@ const [teamMembers, setTeamMembers] = useState<
                                                data-[state=active]:border-b-2
                                                data-[state=active]:border-primary
                                                data-[state=active]:shadow-none
-                                               rounded-none h-full px-4">
-                                    <BarChart3 className="h-4 w-4 mr-2" />
-                                    Analytics
+                                               rounded-none h-full px-3 sm:px-4">
+                                    <BarChart3 className="h-4 w-4 sm:mr-2" />
+                                    <span className="hidden sm:inline">Analytics</span>
                                 </TabsTrigger>
                             )}
 
@@ -510,9 +513,9 @@ const [teamMembers, setTeamMembers] = useState<
                                                data-[state=active]:border-b-2
                                                data-[state=active]:border-primary
                                                data-[state=active]:shadow-none
-                                               rounded-none h-full px-4">
-                                    <Pencil className="h-4 w-4 mr-2" />
-                                    Whiteboard
+                                               rounded-none h-full px-3 sm:px-4">
+                                    <Pencil className="h-4 w-4 sm:mr-2" />
+                                    <span className="hidden sm:inline">Whiteboard</span>
                                 </TabsTrigger>
                             )}
 
@@ -522,9 +525,9 @@ const [teamMembers, setTeamMembers] = useState<
                                                data-[state=active]:border-b-2
                                                data-[state=active]:border-primary
                                                data-[state=active]:shadow-none
-                                               rounded-none h-full px-4">
-                                    <FileText className="h-4 w-4 mr-2" />
-                                    Documents
+                                               rounded-none h-full px-3 sm:px-4">
+                                    <FileText className="h-4 w-4 sm:mr-2" />
+                                    <span className="hidden sm:inline">Documents</span>
                                 </TabsTrigger>
                             )}
 
@@ -534,9 +537,9 @@ const [teamMembers, setTeamMembers] = useState<
                                                data-[state=active]:border-b-2
                                                data-[state=active]:border-primary
                                                data-[state=active]:shadow-none
-                                               rounded-none h-full px-4">
-                                    <DollarSign className="h-4 w-4 mr-2" />
-                                    Budget
+                                               rounded-none h-full px-3 sm:px-4">
+                                    <DollarSign className="h-4 w-4 sm:mr-2" />
+                                    <span className="hidden sm:inline">Budget</span>
                                 </TabsTrigger>
                             )}
 
@@ -546,9 +549,9 @@ const [teamMembers, setTeamMembers] = useState<
                                                data-[state=active]:border-b-2
                                                data-[state=active]:border-primary
                                                data-[state=active]:shadow-none
-                                               rounded-none h-full px-4">
-                                    <Image className="h-4 w-4 mr-2" />
-                                    Gallery
+                                               rounded-none h-full px-3 sm:px-4">
+                                    <Image className="h-4 w-4 sm:mr-2" />
+                                    <span className="hidden sm:inline">Gallery</span>
                                 </TabsTrigger>
                             )}
 
@@ -559,9 +562,9 @@ const [teamMembers, setTeamMembers] = useState<
                                                data-[state=active]:border-b-2
                                                data-[state=active]:border-primary
                                                data-[state=active]:shadow-none
-                                               rounded-none h-full px-4">
-                                    <ClipboardList className="h-4 w-4 mr-2" />
-                                    My Tasks
+                                               rounded-none h-full px-3 sm:px-4">
+                                    <ClipboardList className="h-4 w-4 sm:mr-2" />
+                                    <span className="hidden sm:inline">My Tasks</span>
                                 </TabsTrigger>
                             )}
 
@@ -572,9 +575,9 @@ const [teamMembers, setTeamMembers] = useState<
                                                data-[state=active]:border-b-2
                                                data-[state=active]:border-primary
                                                data-[state=active]:shadow-none
-                                               rounded-none h-full px-4 relative">
-                                    <Star className="h-4 w-4 mr-2" />
-                                    Reviews
+                                               rounded-none h-full px-3 sm:px-4 relative">
+                                    <Star className="h-4 w-4 sm:mr-2" />
+                                    <span className="hidden sm:inline">Reviews</span>
                                     {pendingReviewCount > 0 && (
                                         <span className="ml-1.5 bg-destructive text-destructive-foreground
                                                          text-xs rounded-full h-4 w-4 flex items-center
@@ -599,7 +602,7 @@ const [teamMembers, setTeamMembers] = useState<
                             ) : (
                                 <>
                                     {!canWriteTab('overview') && <ReadOnlyNotice />}
-                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                    <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
 
                                         <Card>
                                             <CardHeader className="flex flex-row items-center

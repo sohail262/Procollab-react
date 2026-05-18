@@ -76,11 +76,11 @@ export function SavedProjects() {
 
     return (
         <DashboardLayout>
-            <div className="mb-8">
-                <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
+            <div className="mb-6 sm:mb-8">
+                <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white mb-2">
                     Saved Projects
                 </h1>
-                <p className="text-gray-600 dark:text-gray-400">
+                <p className="text-sm sm:text-base text-gray-600 dark:text-gray-400">
                     Projects you have bookmarked for later
                 </p>
             </div>
@@ -88,19 +88,19 @@ export function SavedProjects() {
             {loading ? (
                 <div className="text-center py-12">
                     <div className="animate-spin inline-block w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full mb-4"></div>
-                    <p className="text-gray-500">Loading saved projects...</p>
+                    <p className="text-gray-500 text-sm">Loading saved projects...</p>
                 </div>
             ) : projects.length === 0 ? (
                 <div className="text-center py-12">
-                    <FolderKanban className="h-16 w-16 text-gray-400 mx-auto mb-4" />
-                    <h3 className="text-xl font-semibold mb-2">No saved projects</h3>
-                    <p className="text-gray-500 mb-6">Browse projects to find ones you're interested in</p>
-                    <Button onClick={() => navigate('/projects')}>
+                    <FolderKanban className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                    <h3 className="text-lg font-semibold mb-2">No saved projects</h3>
+                    <p className="text-gray-500 text-sm mb-4">Browse projects to find ones you're interested in</p>
+                    <Button size="sm" onClick={() => navigate('/projects')}>
                         Browse Projects
                     </Button>
                 </div>
             ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-6">
                     {projects.map((project) => (
                         <ProjectCard
                             key={project.id}

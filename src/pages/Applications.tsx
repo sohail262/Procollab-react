@@ -159,49 +159,50 @@ export function Applications() {
 
     return (
         <DashboardLayout>
-            <div className="max-w-4xl mx-auto space-y-6 p-6">
-                <div className="flex items-center gap-4">
-                    <Button variant="ghost" size="icon" onClick={() => navigate('/dashboard')}>
+            <div className="max-w-4xl mx-auto space-y-4 sm:space-y-6">
+                {/* Header */}
+                <div className="flex items-center gap-3">
+                    <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => navigate('/dashboard')}>
                         <ArrowLeft className="h-4 w-4" />
                     </Button>
                     <div>
-                        <h1 className="text-2xl font-bold">My Applications</h1>
-                        <p className="text-muted-foreground">Track and manage your project applications</p>
+                        <h1 className="text-xl sm:text-2xl font-bold">My Applications</h1>
+                        <p className="text-xs sm:text-sm text-muted-foreground">Track and manage your project applications</p>
                     </div>
                 </div>
 
                 {/* Stats cards */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-3 gap-2 sm:gap-4">
                     <Card>
-                        <CardContent className="pt-6">
+                        <CardContent className="p-3 sm:pt-6 sm:p-6">
                             <div className="flex items-center justify-between">
                                 <div>
-                                    <p className="text-sm text-muted-foreground">Pending</p>
-                                    <p className="text-3xl font-bold text-yellow-600">{pendingApps.length}</p>
+                                    <p className="text-xs text-muted-foreground">Pending</p>
+                                    <p className="text-xl sm:text-3xl font-bold text-yellow-600">{pendingApps.length}</p>
                                 </div>
-                                <Clock className="h-8 w-8 text-yellow-500 opacity-50" />
+                                <Clock className="h-5 w-5 sm:h-8 sm:w-8 text-yellow-500 opacity-50 shrink-0" />
                             </div>
                         </CardContent>
                     </Card>
                     <Card>
-                        <CardContent className="pt-6">
+                        <CardContent className="p-3 sm:pt-6 sm:p-6">
                             <div className="flex items-center justify-between">
                                 <div>
-                                    <p className="text-sm text-muted-foreground">Accepted</p>
-                                    <p className="text-3xl font-bold text-green-600">{acceptedApps.length}</p>
+                                    <p className="text-xs text-muted-foreground">Accepted</p>
+                                    <p className="text-xl sm:text-3xl font-bold text-green-600">{acceptedApps.length}</p>
                                 </div>
-                                <Check className="h-8 w-8 text-green-500 opacity-50" />
+                                <Check className="h-5 w-5 sm:h-8 sm:w-8 text-green-500 opacity-50 shrink-0" />
                             </div>
                         </CardContent>
                     </Card>
                     <Card>
-                        <CardContent className="pt-6">
+                        <CardContent className="p-3 sm:pt-6 sm:p-6">
                             <div className="flex items-center justify-between">
                                 <div>
-                                    <p className="text-sm text-muted-foreground">Rejected</p>
-                                    <p className="text-3xl font-bold text-red-600">{rejectedApps.length}</p>
+                                    <p className="text-xs text-muted-foreground">Rejected</p>
+                                    <p className="text-xl sm:text-3xl font-bold text-red-600">{rejectedApps.length}</p>
                                 </div>
-                                <X className="h-8 w-8 text-red-500 opacity-50" />
+                                <X className="h-5 w-5 sm:h-8 sm:w-8 text-red-500 opacity-50 shrink-0" />
                             </div>
                         </CardContent>
                     </Card>
@@ -209,55 +210,60 @@ export function Applications() {
 
                 {/* Applications list */}
                 <Card>
-                    <CardHeader>
-                        <CardTitle>All Applications</CardTitle>
-                        <CardDescription>Your project applications and their current status</CardDescription>
+                    <CardHeader className="pb-3">
+                        <CardTitle className="text-base sm:text-lg">All Applications</CardTitle>
+                        <CardDescription className="text-xs sm:text-sm">Your project applications and their current status</CardDescription>
                     </CardHeader>
                     <CardContent>
                         {loading ? (
                             <div className="text-center py-12">
                                 <div className="animate-spin inline-block w-8 h-8 border-4 border-primary border-t-transparent rounded-full mb-4"></div>
-                                <p className="text-muted-foreground">Loading applications...</p>
+                                <p className="text-muted-foreground text-sm">Loading applications...</p>
                             </div>
                         ) : applications.length === 0 ? (
                             <div className="text-center py-12 text-muted-foreground">
                                 <ClipboardList className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                                <p className="text-lg font-medium">No applications yet</p>
+                                <p className="text-base font-medium">No applications yet</p>
                                 <p className="text-sm mb-4">You haven't applied to any projects yet</p>
-                                <Button onClick={() => navigate('/projects')}>
+                                <Button size="sm" onClick={() => navigate('/projects')}>
                                     Browse Projects
                                 </Button>
                             </div>
                         ) : (
-                            <div className="space-y-4">
+                            <div className="space-y-3">
                                 {applications.map((application) => (
                                     <div
                                         key={application.id}
-                                        className="flex items-center justify-between p-4 border rounded-lg hover:bg-accent/30 transition-colors"
+                                        className="p-3 sm:p-4 border rounded-lg hover:bg-accent/30 transition-colors"
                                     >
-                                        <div className="flex-1">
-                                            <div className="flex items-center gap-3">
-                                                <h4 className="font-semibold">{application.projectTitle}</h4>
-                                                {getStatusBadge(application.status)}
-                                            </div>
+                                        {/* Top row: title + status badge */}
+                                        <div className="flex flex-wrap items-center gap-2 mb-1">
+                                            <h4 className="font-semibold text-sm truncate flex-1 min-w-0">{application.projectTitle}</h4>
+                                            {getStatusBadge(application.status)}
+                                        </div>
+
+                                        {/* Position + date */}
+                                        <div className="flex flex-wrap gap-x-3 mb-3">
                                             {application.position && (
-                                                <p className="text-sm text-muted-foreground mt-1">
-                                                    Applied for: {application.position}
+                                                <p className="text-xs text-muted-foreground">
+                                                    {application.position}
                                                 </p>
                                             )}
-                                            <p className="text-xs text-muted-foreground mt-1">
-                                                Applied {application.appliedAt.toLocaleDateString()}
+                                            <p className="text-xs text-muted-foreground">
+                                                {application.appliedAt.toLocaleDateString()}
                                             </p>
                                         </div>
 
+                                        {/* Actions row */}
                                         <div className="flex items-center gap-2">
                                             <Button
                                                 variant="outline"
                                                 size="sm"
+                                                className="h-7 text-xs px-2"
                                                 onClick={() => navigate(`/project/${application.projectId}`)}
                                             >
-                                                <Eye className="h-4 w-4 mr-1" />
-                                                View Project
+                                                <Eye className="h-3 w-3 mr-1" />
+                                                View
                                             </Button>
 
                                             {application.status === 'pending' && (
@@ -266,13 +272,13 @@ export function Applications() {
                                                         <Button
                                                             variant="outline"
                                                             size="sm"
-                                                            className="text-red-600 hover:bg-red-50 hover:text-red-700 border-red-200"
+                                                            className="h-7 text-xs px-2 text-red-600 hover:bg-red-50 hover:text-red-700 border-red-200"
                                                         >
-                                                            <Trash2 className="h-4 w-4 mr-1" />
+                                                            <Trash2 className="h-3 w-3 mr-1" />
                                                             Withdraw
                                                         </Button>
                                                     </AlertDialogTrigger>
-                                                    <AlertDialogContent>
+                                                    <AlertDialogContent className="max-w-[90vw] sm:max-w-md">
                                                         <AlertDialogHeader>
                                                             <AlertDialogTitle>Withdraw Application?</AlertDialogTitle>
                                                             <AlertDialogDescription>
@@ -296,10 +302,11 @@ export function Applications() {
                                             {application.status === 'accepted' && (
                                                 <Button
                                                     size="sm"
+                                                    className="h-7 text-xs px-2"
                                                     onClick={() => navigate(`/project/${application.projectId}/dashboard`)}
                                                 >
-                                                    <ExternalLink className="h-4 w-4 mr-1" />
-                                                    Go to Dashboard
+                                                    <ExternalLink className="h-3 w-3 mr-1" />
+                                                    Dashboard
                                                 </Button>
                                             )}
                                         </div>
@@ -313,16 +320,16 @@ export function Applications() {
                 {/* Tips section */}
                 {pendingApps.length > 0 && (
                     <Card className="bg-blue-50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-900">
-                        <CardContent className="pt-6">
+                        <CardContent className="p-3 sm:p-6 sm:pt-6">
                             <div className="flex items-start gap-3">
-                                <AlertTriangle className="h-5 w-5 text-blue-600 flex-shrink-0 mt-0.5" />
+                                <AlertTriangle className="h-4 w-4 sm:h-5 sm:w-5 text-blue-600 shrink-0 mt-0.5" />
                                 <div>
-                                    <h4 className="font-medium text-blue-900 dark:text-blue-400">
+                                    <h4 className="font-medium text-sm text-blue-900 dark:text-blue-400">
                                         Pending Applications
                                     </h4>
-                                    <p className="text-sm text-blue-700 dark:text-blue-300 mt-1">
+                                    <p className="text-xs sm:text-sm text-blue-700 dark:text-blue-300 mt-1">
                                         You have {pendingApps.length} pending application{pendingApps.length > 1 ? 's' : ''}.
-                                        Project owners will review your application and you'll be notified of their decision.
+                                        Project owners will review and notify you of their decision.
                                     </p>
                                 </div>
                             </div>

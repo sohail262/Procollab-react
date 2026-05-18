@@ -185,7 +185,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                                 </span>
                             </Link>
                         </div>
-                        <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-1 sm:gap-3">
                             <div ref={searchRef} className="relative hidden md:block">
                                 <div className="relative">
                                     <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
@@ -241,7 +241,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                             <ConnectionRequestsDropdown />
                             <NotificationsDropdown />
                             <ModeToggle />
-                            <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-1 sm:gap-3">
                                 <button
                                     onClick={() => navigate('/profile')}
                                     className="focus:outline-none focus:ring-2 focus:ring-blue-500 rounded-full"
@@ -251,13 +251,13 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                                         key={getUserAvatarUrl()}
                                         src={getUserAvatarUrl()}
                                         alt="User avatar"
-                                        className="w-10 h-10 rounded-full border-2 border-gray-300 dark:border-gray-600 hover:border-blue-500 dark:hover:border-blue-400 transition-colors cursor-pointer"
+                                        className="w-8 h-8 sm:w-10 sm:h-10 rounded-full border-2 border-gray-300 dark:border-gray-600 hover:border-blue-500 dark:hover:border-blue-400 transition-colors cursor-pointer"
                                     />
                                 </button>
                                 <span className="text-sm text-gray-700 dark:text-gray-300 hidden md:block">
                                     {user?.displayName || user?.email?.split('@')[0]}
                                 </span>
-                                <Button variant="ghost" size="sm" onClick={handleLogout}>
+                                <Button variant="ghost" size="sm" onClick={handleLogout} className="hidden sm:flex">
                                     <LogOut className="h-4 w-4" />
                                 </Button>
                             </div>
@@ -296,7 +296,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
             </aside>
 
             {/* Main Content */}
-            <div className="p-4 lg:ml-64 pt-20">
+            <div className="pt-20 px-3 pb-3 sm:px-4 sm:pb-4 lg:ml-64">
                 <div className="rounded-lg">
                     {children}
                 </div>

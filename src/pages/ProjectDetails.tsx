@@ -682,7 +682,7 @@ export function ProjectDetails() {
                             </span>
                         </div>
 
-                        <h1 className="text-4xl font-bold mb-4">{project.title}</h1>
+                        <h1 className="text-2xl sm:text-4xl font-bold mb-4">{project.title}</h1>
 
                         <div className="flex flex-wrap gap-2 mb-6">
                             <Badge

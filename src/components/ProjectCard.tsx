@@ -185,13 +185,13 @@ export function ProjectCard({ project, onApply, isAlreadyMember = false }: Proje
 
     return (
         <Card className="bg-white dark:bg-[#0B1120] border-gray-200 dark:border-gray-800 hover:border-gray-300 dark:hover:border-gray-700 transition-colors shadow-sm">
-            <CardContent className="p-6">
+            <CardContent className="p-4 sm:p-6">
                 {/* Header row */}
-                <div className="flex justify-between items-start mb-4">
-                    <div className="flex items-center gap-2">
+                <div className="flex justify-between items-start mb-3">
+                    <div className="flex items-center gap-1.5 flex-wrap">
                         <Badge
                             variant="secondary"
-                            className={`border-none font-medium ${
+                            className={`border-none font-medium text-xs ${
                                 project.status === 'recruiting'
                                     ? 'bg-yellow-100 text-yellow-800 hover:bg-yellow-200'
                                     : project.status === 'active'
@@ -202,7 +202,6 @@ export function ProjectCard({ project, onApply, isAlreadyMember = false }: Proje
                             {project.status.charAt(0).toUpperCase() + project.status.slice(1)}
                         </Badge>
 
-                        {/* Member badge inline with status */}
                         {isAlreadyMember && (
                             <Badge
                                 variant="outline"
@@ -214,28 +213,28 @@ export function ProjectCard({ project, onApply, isAlreadyMember = false }: Proje
                         )}
                     </div>
 
-                    <span className="text-xs text-gray-500 dark:text-gray-400">
-                        Posted {formatTimeAgo(project.createdAt)}
+                    <span className="text-xs text-gray-500 dark:text-gray-400 shrink-0 ml-2">
+                        {formatTimeAgo(project.createdAt)}
                     </span>
                 </div>
 
                 {/* Title */}
-                <h3 className="text-xl font-bold mb-2 text-gray-900 dark:text-white line-clamp-1">
+                <h3 className="text-base sm:text-lg font-bold mb-1.5 text-gray-900 dark:text-white line-clamp-1">
                     {project.title}
                 </h3>
 
                 {/* Description */}
-                <p className="text-gray-600 dark:text-gray-400 text-sm mb-4 line-clamp-2 min-h-[2.5rem]">
+                <p className="text-gray-600 dark:text-gray-400 text-xs sm:text-sm mb-3 line-clamp-2">
                     {project.summary || project.description}
                 </p>
 
                 {/* Tags */}
-                <div className="flex flex-wrap gap-2 mb-6">
+                <div className="flex flex-wrap gap-1.5 mb-3">
                     {project.tags?.slice(0, 3).map((tag, i) => (
                         <Badge
                             key={i}
                             variant="secondary"
-                            className="bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/50 border-none"
+                            className="bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/50 border-none text-xs px-1.5 py-0"
                         >
                             {tag}
                         </Badge>
@@ -243,26 +242,29 @@ export function ProjectCard({ project, onApply, isAlreadyMember = false }: Proje
                 </div>
 
                 {/* Members + duration row */}
-                <div className="flex justify-between items-center text-sm text-gray-400 mb-6">
-                    <div className="flex items-center gap-2">
-                        <Users className="h-4 w-4" />
+                <div className="flex justify-between items-center text-xs text-gray-400 mb-3">
+                    <div className="flex items-center gap-1.5">
+                        <Users className="h-3.5 w-3.5" />
                         <span>
                             {project.currentMembers || 1}/
-                            {project.maxMembers || project.teamSize || 4} members
+                            {project.maxMembers || project.teamSize || 4}
                         </span>
                     </div>
                     {project.duration && (
-                        <span className="text-gray-600 dark:text-gray-400">
-                            Duration: {project.duration}
+                        <span className="text-gray-500 dark:text-gray-400 truncate ml-2">
+                            {/* Handle legacy "2" (no unit) vs proper "2 months" */}
+                            {/^\d+$/.test(project.duration.trim())
+                                ? `${project.duration} months`
+                                : project.duration}
                         </span>
                     )}
                 </div>
 
                 {/* Footer row */}
-                <div className="flex justify-between items-center pt-4 border-t border-gray-200 dark:border-gray-800">
+                <div className="flex justify-between items-center pt-3 border-t border-gray-200 dark:border-gray-800">
                     {/* Member avatars */}
-                    <div className="flex -space-x-2">
-                        {avatars.map((member, i) => {
+                    <div className="flex -space-x-1.5 shrink-0">
+                        {avatars.slice(0, 3).map((member, i) => {
                             const userId =
                                 member?.id ||
                                 member?.userId ||
@@ -283,39 +285,37 @@ export function ProjectCard({ project, onApply, isAlreadyMember = false }: Proje
                                     key={i}
                                     src={avatarUrl}
                                     alt={displayName}
-                                    className="w-8 h-8 rounded-full border-2 border-white dark:border-[#0B1120] bg-gray-200 dark:bg-gray-700"
+                                    className="w-6 h-6 sm:w-7 sm:h-7 rounded-full border-2 border-white dark:border-[#0B1120] bg-gray-200 dark:bg-gray-700"
                                 />
                             )
                         })}
                     </div>
 
                     {/* Action buttons */}
-                    <div className="flex items-center gap-3">
+                    <div className="flex items-center gap-1.5">
                         {/* Save bookmark */}
                         <button
                             onClick={toggleSave}
                             disabled={loading}
-                            className={`hover:text-gray-900 dark:hover:text-white transition-colors flex items-center gap-1 ${
+                            className={`hover:text-gray-900 dark:hover:text-white transition-colors flex items-center gap-1 text-xs ${
                                 isSaved
                                     ? 'text-blue-500 dark:text-blue-400'
                                     : 'text-gray-500 dark:text-gray-400'
                             }`}
                         >
-                            <Bookmark
-                                className={`h-4 w-4 ${isSaved ? 'fill-current' : ''}`}
-                            />
-                            <span className="text-sm">{isSaved ? 'Saved' : 'Save'}</span>
+                            <Bookmark className={`h-3.5 w-3.5 ${isSaved ? 'fill-current' : ''}`} />
+                            <span className="hidden sm:inline">{isSaved ? 'Saved' : 'Save'}</span>
                         </button>
 
                         {/* Dynamic action button */}
                         {renderActionButton()}
 
-                        {/* View Details always visible */}
+                        {/* View Details */}
                         <button
                             onClick={() => navigate(`/project/${project.id}`)}
-                            className="text-blue-400 hover:text-blue-300 text-sm font-medium"
+                            className="text-blue-400 hover:text-blue-300 text-xs font-medium"
                         >
-                            View Details
+                            View
                         </button>
                     </div>
                 </div>

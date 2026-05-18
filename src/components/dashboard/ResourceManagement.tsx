@@ -234,11 +234,11 @@ function MemberCard({
                     <TooltipProvider>
                         <Tooltip>
                             <TooltipTrigger asChild>
-                                <div className={`flex items-center gap-1 px-2 py-1
+                                <div className={`flex items-center gap-1 px-1.5 sm:px-2 py-1
                                     rounded-full text-xs font-medium ${healthConf.bg}
                                     ${healthConf.color}`}>
                                     <HealthIcon className="h-3 w-3" />
-                                    {healthConf.label}
+                                    <span className="hidden sm:inline">{healthConf.label}</span>
                                 </div>
                             </TooltipTrigger>
                             <TooltipContent>
@@ -1606,7 +1606,7 @@ export function ResourceManagement({ readOnly = false }: ResourceManagementProps
 
             {/* ════ VIEW: Cards Grid ════ */}
             {activeView === 'grid' && filteredMembers.length > 0 && (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
                     {filteredMembers.map(member => (
                         <MemberCard
                             key={member.uid}

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { DashboardLayout } from '@/components/layout/DashboardLayout'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { ProjectCard } from '@/components/ProjectCard'
 import { ApplicationModal } from '@/components/ApplicationModal'
 import { Button } from '@/components/ui/button'
@@ -224,18 +224,15 @@ export function Projects() {
     return (
         <DashboardLayout>
             {/* Filter Section */}
-            <Card className="mb-8">
-                <CardHeader>
-                    <CardTitle>Filter Projects</CardTitle>
-                </CardHeader>
-                <CardContent>
-                    <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <Card className="mb-5 sm:mb-8">
+                <CardContent className="p-3 sm:p-6">
+                    <div className="grid grid-cols-2 gap-2 sm:gap-3">
                         <div>
-                            <label className="block text-sm font-medium mb-2">
+                            <label className="block text-xs sm:text-sm font-medium mb-1 sm:mb-2">
                                 Status
                             </label>
                             <select
-                                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800"
+                                className="w-full px-2 py-1.5 sm:px-3 sm:py-2 text-xs sm:text-sm border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800"
                                 value={statusFilter}
                                 onChange={e => {
                                     setStatusFilter(e.target.value)
@@ -251,11 +248,11 @@ export function Projects() {
                         </div>
 
                         <div>
-                            <label className="block text-sm font-medium mb-2">
+                            <label className="block text-xs sm:text-sm font-medium mb-1 sm:mb-2">
                                 Discipline
                             </label>
                             <select
-                                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800"
+                                className="w-full px-2 py-1.5 sm:px-3 sm:py-2 text-xs sm:text-sm border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800"
                                 value={disciplineFilter}
                                 onChange={e => {
                                     setDisciplineFilter(e.target.value)
@@ -275,11 +272,11 @@ export function Projects() {
                         </div>
 
                         <div>
-                            <label className="block text-sm font-medium mb-2">
+                            <label className="block text-xs sm:text-sm font-medium mb-1 sm:mb-2">
                                 Sort By
                             </label>
                             <select
-                                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800"
+                                className="w-full px-2 py-1.5 sm:px-3 sm:py-2 text-xs sm:text-sm border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800"
                                 value={sortBy}
                                 onChange={e => setSortBy(e.target.value)}
                             >
@@ -291,15 +288,15 @@ export function Projects() {
                         </div>
 
                         <div>
-                            <label className="block text-sm font-medium mb-2">
+                            <label className="block text-xs sm:text-sm font-medium mb-1 sm:mb-2">
                                 Search
                             </label>
                             <div className="relative">
-                                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
+                                <Search className="absolute left-2 sm:left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 sm:h-4 sm:w-4 text-gray-500" />
                                 <Input
                                     type="text"
-                                    placeholder="Search projects..."
-                                    className="pl-10"
+                                    placeholder="Search..."
+                                    className="pl-7 sm:pl-10 text-xs sm:text-sm h-8 sm:h-10"
                                     value={searchQuery}
                                     onChange={e => {
                                         setSearchQuery(e.target.value)
@@ -313,15 +310,15 @@ export function Projects() {
             </Card>
 
             {/* Projects Grid */}
-            <div className="mb-8">
-                <div className="flex justify-between items-center mb-6">
-                    <h2 className="text-2xl font-bold">
+            <div className="mb-6 sm:mb-8">
+                <div className="flex flex-wrap justify-between items-center gap-2 mb-3 sm:mb-5">
+                    <h2 className="text-base sm:text-xl font-bold text-gray-900 dark:text-white">
                         {filteredProjects.length}{' '}
                         {filteredProjects.length === 1 ? 'Project' : 'Projects'} Found
                     </h2>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-6">
                     {loading ? (
                         <div className="col-span-full text-center py-12">
                             <div className="animate-spin inline-block w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full mb-4" />
@@ -329,14 +326,14 @@ export function Projects() {
                         </div>
                     ) : currentProjects.length === 0 ? (
                         <div className="col-span-full text-center py-12">
-                            <FolderKanban className="h-16 w-16 text-gray-400 mx-auto mb-4" />
-                            <h3 className="text-xl font-semibold mb-2">
+                            <FolderKanban className="h-12 w-12 sm:h-16 sm:w-16 text-gray-400 mx-auto mb-4" />
+                            <h3 className="text-lg sm:text-xl font-semibold mb-2">
                                 No projects found
                             </h3>
-                            <p className="text-gray-500 mb-6">
+                            <p className="text-gray-500 text-sm mb-4 sm:mb-6">
                                 Try adjusting your filters or search query
                             </p>
-                            <Button onClick={clearFilters}>
+                            <Button size="sm" onClick={clearFilters}>
                                 Clear Filters
                             </Button>
                         </div>
@@ -345,9 +342,6 @@ export function Projects() {
                             <ProjectCard
                                 key={project.id}
                                 project={project}
-                                // Pass whether the user already joined this project.
-                                // ProjectCard should use this to hide "Apply to Join"
-                                // and show "View Project" or "Already a Member" instead.
                                 isAlreadyMember={joinedProjectIds.has(project.id)}
                                 onApply={() => handleApply(project)}
                             />
@@ -358,16 +352,17 @@ export function Projects() {
 
             {/* Pagination */}
             {totalPages > 1 && (
-                <div className="flex justify-center">
-                    <nav className="inline-flex rounded-md shadow">
+                <div className="flex justify-center mb-4">
+                    <nav className="flex items-center gap-1">
                         <Button
                             variant="outline"
-                            className="rounded-r-none"
+                            size="sm"
+                            className="h-8 px-2 sm:px-3"
                             onClick={() => goToPage(currentPage - 1)}
                             disabled={currentPage === 1}
                         >
-                            <ChevronLeft className="h-4 w-4 mr-1" />
-                            Previous
+                            <ChevronLeft className="h-4 w-4" />
+                            <span className="hidden sm:inline ml-1">Prev</span>
                         </Button>
 
                         {[...Array(totalPages)].map((_, index) => {
@@ -381,7 +376,8 @@ export function Projects() {
                                     <Button
                                         key={page}
                                         variant={currentPage === page ? 'default' : 'outline'}
-                                        className="rounded-none border-l-0"
+                                        size="sm"
+                                        className="h-8 w-8 p-0"
                                         onClick={() => goToPage(page)}
                                     >
                                         {page}
@@ -392,11 +388,8 @@ export function Projects() {
                                 page === currentPage + 2
                             ) {
                                 return (
-                                    <span
-                                        key={page}
-                                        className="px-3 py-2 border border-l-0 border-gray-300 dark:border-gray-700"
-                                    >
-                                        ...
+                                    <span key={page} className="px-1 text-gray-400 text-sm">
+                                        …
                                     </span>
                                 )
                             }
@@ -405,12 +398,13 @@ export function Projects() {
 
                         <Button
                             variant="outline"
-                            className="rounded-l-none border-l-0"
+                            size="sm"
+                            className="h-8 px-2 sm:px-3"
                             onClick={() => goToPage(currentPage + 1)}
                             disabled={currentPage === totalPages}
                         >
-                            Next
-                            <ChevronRight className="h-4 w-4 ml-1" />
+                            <span className="hidden sm:inline mr-1">Next</span>
+                            <ChevronRight className="h-4 w-4" />
                         </Button>
                     </nav>
                 </div>

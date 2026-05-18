@@ -202,6 +202,12 @@ export function CreateProject() {
                 tags: validation.sanitizedData.tags?.split(',').map((t: string) => t.trim()).filter(Boolean) || [],
                 openRoles: validation.sanitizedData.openRoles?.split('\n').map((r: string) => r.trim()).filter(Boolean) || [],
                 goals: validation.sanitizedData.goals?.split('\n').map((g: string) => g.trim()).filter(Boolean) || [],
+                // ✅ Combine duration value + unit into a readable string (e.g. "2 months")
+                duration: validation.sanitizedData.duration && validation.sanitizedData.durationUnit
+                    ? `${validation.sanitizedData.duration} ${validation.sanitizedData.durationUnit}`
+                    : validation.sanitizedData.duration || '',
+                durationValue: validation.sanitizedData.duration || '',
+                durationUnit: validation.sanitizedData.durationUnit || 'months',
                 createdBy: auth.currentUser.uid,
                 createdAt: serverTimestamp(),
                 updatedAt: serverTimestamp(),
@@ -263,12 +269,12 @@ export function CreateProject() {
             <DashboardLayout>
                 <div className="max-w-4xl mx-auto space-y-6">
                     {/* Header */}
-                    <div className="flex items-center justify-between">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
                         <div>
-                            <h1 className="text-3xl font-bold text-gray-900 dark:text-white">Create Project</h1>
-                            <p className="text-gray-600 dark:text-gray-400 mt-1">Fill in the details to create your new project</p>
+                            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white">Create Project</h1>
+                            <p className="text-sm sm:text-base text-gray-600 dark:text-gray-400 mt-1">Fill in the details to create your new project</p>
                         </div>
-                        <Button variant="ghost" onClick={() => navigate('/dashboard/projects')}>
+                        <Button variant="ghost" onClick={() => navigate('/dashboard/projects')} className="shrink-0">
                             <ArrowLeft className="h-4 w-4 mr-2" />
                             Back
                         </Button>

@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import { DashboardLayout } from '@/components/layout/DashboardLayout'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { Plus, Loader2, FolderKanban, Eye, Edit, Users, LayoutDashboard } from 'lucide-react'
 import { collection, query, where, getDocs, orderBy } from 'firebase/firestore'
@@ -90,96 +89,106 @@ export default function MyProjects() {
         return `${Math.floor(diffDays / 365)} years ago`
     }
 
-    const getStatusBadge = (status: string) => {
-        const styles = {
-            recruiting: 'bg-yellow-500 text-gray-900',
-            active: 'bg-green-600 text-white',
-            completed: 'bg-blue-600 text-white',
-            'on-hold': 'bg-red-600 text-white',
-            'needs-revision': 'bg-gray-700 text-white'
-        }
-        return styles[status as keyof typeof styles] || 'bg-gray-600 text-white'
-    }
-
     const ProjectCard = ({ project, type }: { project: Project; type: 'created' | 'joined' }) => {
         const currentMembers = project.currentMembers || 1
         const maxMembers = project.maxMembers || project.teamSize || 5
 
+        const statusConfig: Record<string, { dot: string; text: string; bg: string }> = {
+            recruiting: { dot: 'bg-amber-400', text: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-50 dark:bg-amber-900/20' },
+            active:     { dot: 'bg-emerald-400', text: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-50 dark:bg-emerald-900/20' },
+            completed:  { dot: 'bg-blue-400', text: 'text-blue-600 dark:text-blue-400', bg: 'bg-blue-50 dark:bg-blue-900/20' },
+            'on-hold':  { dot: 'bg-red-400', text: 'text-red-500 dark:text-red-400', bg: 'bg-red-50 dark:bg-red-900/20' },
+        }
+        const sc = statusConfig[project.status] || { dot: 'bg-gray-400', text: 'text-gray-500', bg: 'bg-gray-50 dark:bg-gray-800' }
+
         return (
-            <Card className="bg-white dark:bg-[#0B1120] border-gray-200 dark:border-gray-800 hover:border-gray-300 dark:hover:border-gray-700 transition-all shadow-sm">
-                <CardContent className="p-6">
-                    <div className="flex justify-between items-start mb-4">
-                        <Badge className={`${getStatusBadge(project.status)} font-medium px-3 py-1`}>
-                            {project.status.charAt(0).toUpperCase() + project.status.slice(1)}
-                        </Badge>
-                        <span className="text-sm text-gray-500 dark:text-gray-400">
-                            Created {formatDate(project.createdAt)}
+            <Card className="group bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-800 hover:border-gray-300 dark:hover:border-gray-700 hover:shadow-md transition-all duration-200">
+                <CardContent className="p-3">
+                    {/* Top row: status pill + date */}
+                    <div className="flex items-center justify-between mb-2">
+                        <span className={`inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full ${sc.bg} ${sc.text}`}>
+                            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${sc.dot}`} />
+                            <span className="truncate max-w-[60px]">{project.status.charAt(0).toUpperCase() + project.status.slice(1)}</span>
+                        </span>
+                        <span className="text-[10px] text-gray-400 dark:text-gray-500 shrink-0 ml-1">
+                            {formatDate(project.createdAt)}
                         </span>
                     </div>
 
-                    <h3 className="text-xl font-bold mb-2 text-gray-900 dark:text-white line-clamp-1">
+                    {/* Title */}
+                    <h3 className="font-semibold text-xs sm:text-sm text-gray-900 dark:text-white line-clamp-1 mb-1">
                         {project.title}
                     </h3>
 
-                    <p className="text-gray-600 dark:text-gray-400 text-sm mb-4 line-clamp-2 min-h-[2.5rem]">
+                    {/* Description */}
+                    <p className="text-[10px] sm:text-xs text-gray-500 dark:text-gray-400 line-clamp-2 mb-2">
                         {project.summary || project.description}
                     </p>
 
-                    <div className="flex flex-wrap gap-2 mb-4">
-                        {project.primaryDiscipline && (
-                            <Badge variant="outline" className="text-xs bg-indigo-50 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-300 border-indigo-200 dark:border-indigo-500">
-                                {project.primaryDiscipline}
-                            </Badge>
-                        )}
-                        {project.tags?.slice(0, 2).map((tag, i) => (
-                            <Badge key={i} variant="outline" className="text-xs bg-gray-50 dark:bg-gray-800 text-gray-700 dark:text-gray-300 border-gray-200 dark:border-gray-700">
-                                {tag}
-                            </Badge>
-                        ))}
+                    {/* Tags */}
+                    {(project.primaryDiscipline || (project.tags?.length ?? 0) > 0) && (
+                        <div className="flex flex-wrap gap-1 mb-2">
+                            {project.primaryDiscipline && (
+                                <span className="text-[9px] sm:text-[10px] px-1 py-0.5 rounded bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-300 border border-indigo-100 dark:border-indigo-800 truncate max-w-full">
+                                    {project.primaryDiscipline}
+                                </span>
+                            )}
+                            {project.tags?.slice(0, 1).map((tag, i) => (
+                                <span key={i} className="text-[9px] sm:text-[10px] px-1 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-700 truncate max-w-full">
+                                    {tag}
+                                </span>
+                            ))}
+                        </div>
+                    )}
+
+                    {/* Members row */}
+                    <div className="flex items-center gap-1 text-[10px] text-gray-400 dark:text-gray-500 mb-3">
+                        <Users className="h-2.5 w-2.5 shrink-0" />
+                        <span>{currentMembers}/{maxMembers}</span>
                     </div>
 
-                    <div className="flex justify-between items-center mb-4 text-sm text-gray-600 dark:text-gray-400">
-                        <span>{currentMembers}/{maxMembers} members</span>
-                    </div>
-
-                    <div className="flex flex-wrap gap-2 pt-4 border-t border-gray-200 dark:border-gray-800">
+                    {/* Actions */}
+                    <div className="flex items-center gap-1.5 pt-2.5 border-t border-gray-100 dark:border-gray-800">
+                        {/* Primary: Dashboard */}
                         <Button
                             size="sm"
-                            variant="outline"
-                            className="bg-indigo-600 hover:bg-indigo-700 text-white border-none"
-                            onClick={() => navigate(`/project/${project.id}`)}
-                        >
-                            <Eye className="h-3 w-3 mr-1" />
-                            View
-                        </Button>
-                        <Button
-                            size="sm"
-                            variant="outline"
-                            className="bg-purple-600 hover:bg-purple-700 text-white border-none"
+                            className="h-7 text-[10px] sm:text-xs flex-1 px-1"
                             onClick={() => navigate(`/dashboard/projects/${project.id}`)}
                         >
-                            <LayoutDashboard className="h-3 w-3 mr-1" />
-                            Dashboard
+                            <LayoutDashboard className="h-3 w-3 mr-1 shrink-0" />
+                            <span className="truncate">Dashboard</span>
                         </Button>
+
+                        {/* Ghost icon actions */}
+                        <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 w-7 p-0 shrink-0 text-gray-400 hover:text-gray-900 dark:hover:text-white"
+                            title="View project"
+                            onClick={() => navigate(`/project/${project.id}`)}
+                        >
+                            <Eye className="h-3 w-3" />
+                        </Button>
+
                         {type === 'created' && (
                             <>
                                 <Button
                                     size="sm"
-                                    variant="outline"
-                                    className="bg-blue-600 hover:bg-blue-700 text-white border-none"
+                                    variant="ghost"
+                                    className="h-7 w-7 p-0 shrink-0 text-gray-400 hover:text-gray-900 dark:hover:text-white"
+                                    title="Edit project"
                                     onClick={() => navigate(`/edit-project/${project.id}`)}
                                 >
-                                    <Edit className="h-3 w-3 mr-1" />
-                                    Edit
+                                    <Edit className="h-3 w-3" />
                                 </Button>
                                 <Button
                                     size="sm"
-                                    variant="outline"
-                                    className="bg-green-600 hover:bg-green-700 text-white border-none"
+                                    variant="ghost"
+                                    className="h-7 w-7 p-0 shrink-0 text-gray-400 hover:text-gray-900 dark:hover:text-white"
+                                    title="Manage team"
                                     onClick={() => navigate(`/manage-team/${project.id}`)}
                                 >
-                                    <Users className="h-3 w-3 mr-1" />
-                                    Team
+                                    <Users className="h-3 w-3" />
                                 </Button>
                             </>
                         )}
@@ -191,25 +200,26 @@ export default function MyProjects() {
 
     return (
         <DashboardLayout>
-            <div className="mb-8 flex justify-between items-center">
+            <div className="mb-6 sm:mb-8 flex flex-wrap justify-between items-start gap-3">
                 <div>
-                    <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">
+                    <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white mb-1 sm:mb-2">
                         My Projects
                     </h1>
-                    <p className="text-gray-600 dark:text-gray-400">
+                    <p className="text-sm sm:text-base text-gray-600 dark:text-gray-400">
                         Manage your projects and track their progress
                     </p>
                 </div>
-                <Button onClick={() => navigate('/create-project')}>
-                    <Plus className="h-4 w-4 mr-2" />
-                    Create New Project
+                <Button onClick={() => navigate('/create-project')} className="shrink-0" size="sm">
+                    <Plus className="h-4 w-4 mr-1 sm:mr-2" />
+                    <span className="hidden sm:inline">Create New Project</span>
+                    <span className="sm:hidden">New Project</span>
                 </Button>
             </div>
 
             {/* Tabs */}
-            <div className="flex gap-2 mb-6 border-b border-gray-200 dark:border-gray-800">
+            <div className="flex gap-1 sm:gap-2 mb-6 border-b border-gray-200 dark:border-gray-800 overflow-x-auto">
                 <button
-                    className={`px-4 py-2 font-medium transition-colors border-b-2 ${activeTab === 'created'
+                    className={`px-3 sm:px-4 py-2 font-medium transition-colors border-b-2 whitespace-nowrap text-sm sm:text-base ${activeTab === 'created'
                         ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
                         : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
                         }`}
@@ -218,7 +228,7 @@ export default function MyProjects() {
                     Created Projects
                 </button>
                 <button
-                    className={`px-4 py-2 font-medium transition-colors border-b-2 ${activeTab === 'joined'
+                    className={`px-3 sm:px-4 py-2 font-medium transition-colors border-b-2 whitespace-nowrap text-sm sm:text-base ${activeTab === 'joined'
                         ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
                         : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
                         }`}
@@ -227,7 +237,7 @@ export default function MyProjects() {
                     Joined Projects
                 </button>
                 <button
-                    className={`px-4 py-2 font-medium transition-colors border-b-2 ${activeTab === 'applications'
+                    className={`px-3 sm:px-4 py-2 font-medium transition-colors border-b-2 whitespace-nowrap text-sm sm:text-base ${activeTab === 'applications'
                         ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
                         : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
                         }`}
@@ -260,7 +270,7 @@ export default function MyProjects() {
                                     </Button>
                                 </div>
                             ) : (
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
                                     {createdProjects.map((project) => (
                                         <ProjectCard key={project.id} project={project} type="created" />
                                     ))}
@@ -286,7 +296,7 @@ export default function MyProjects() {
                                     </Button>
                                 </div>
                             ) : (
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                                <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
                                     {joinedProjects.map((project) => (
                                         <ProjectCard key={project.id} project={project} type="joined" />
                                     ))}
