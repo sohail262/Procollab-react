@@ -41,7 +41,7 @@ export function Landing() {
                             <div className="flex flex-col items-start text-left z-10">
                                 <div className="mb-6 inline-flex items-center gap-2 border border-primary/40 px-3 py-1.5 text-xs font-mono tracking-widest uppercase text-primary">
                                     <span className="w-1.5 h-1.5 bg-primary rounded-full animate-pulse" />
-                                    SYS:01 — TRUSTED BY 10,000+ COLLABORATORS
+                                    SYS:01 — TRUSTED BY COLLABORATORS
                                 </div>
 
                                 <h1 className="mb-6 text-5xl font-bold tracking-tight md:text-6xl lg:text-7xl text-foreground leading-none">

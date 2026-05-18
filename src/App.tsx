@@ -26,12 +26,13 @@ const Applications = lazy(() => import('@/pages/Applications').then(module => ({
 const AdminDashboard = lazy(() => import('@/pages/AdminDashboard').then(module => ({ default: module.AdminDashboard })))
 const Notifications = lazy(() => import('@/pages/Notifications').then(module => ({ default: module.Notifications })))
 const ProfileRedesignTest = lazy(() => import('@/pages/ProfileRedesignTest'))
+const LoadingScreen = lazy(() => import('@/components/LoadingScreen').then(m => ({ default: m.LoadingScreen })))
 
-// Loading component
+// Loading component — quote-driven splash with animated progress bar
 const PageLoader = () => (
-  <div className="flex items-center justify-center min-h-screen">
-    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-  </div>
+  <Suspense fallback={null}>
+    <LoadingScreen />
+  </Suspense>
 )
 
 function App() {

@@ -161,6 +161,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
     const handleLogout = async () => {
         try {
             await logout()
+            navigate('/')
         } catch (error) {
             console.error('Logout error:', error)
         }
@@ -271,14 +272,15 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                 className={`fixed top-0 left-0 z-40 w-64 h-screen pt-20 transition-transform ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'
                     } bg-white border-r border-gray-200 lg:translate-x-0 dark:bg-gray-900 dark:border-gray-800`}
             >
-                <div className="h-full px-3 pb-4 overflow-y-auto">
-                    <ul className="space-y-2 font-medium">
+                <div className="h-full px-3 pb-4 overflow-y-auto flex flex-col">
+                    <ul className="space-y-2 font-medium flex-1">
                         {navigation.map((item) => {
                             const isActive = location.pathname === item.href
                             return (
                                 <li key={item.name}>
                                     <Link
                                         to={item.href}
+                                        onClick={() => setSidebarOpen(false)}
                                         className={`flex items-center p-2 rounded-lg group ${isActive
                                             ? 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300'
                                             : 'text-gray-900 hover:bg-gray-100 dark:text-white dark:hover:bg-gray-700'
@@ -292,6 +294,17 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                             )
                         })}
                     </ul>
+
+                    {/* Logout — mobile sidebar only */}
+                    <div className="pt-3 mt-3 border-t border-gray-200 dark:border-gray-800 lg:hidden">
+                        <button
+                            onClick={handleLogout}
+                            className="w-full flex items-center p-2 rounded-lg text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                        >
+                            <LogOut className="w-5 h-5" />
+                            <span className="ml-3 font-medium">Log out</span>
+                        </button>
+                    </div>
                 </div>
             </aside>
 
