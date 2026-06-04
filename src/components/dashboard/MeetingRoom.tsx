@@ -829,6 +829,7 @@ export function MeetingRoom({ readOnly = false }: MeetingRoomProps) {
                                                     }
                                                     placeholder="Select meeting date and time"
                                                     showTime={true}
+                                                    disablePast={true}
                                                 />
                                             </div>
                                             <div className="space-y-1.5">

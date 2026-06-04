@@ -1,6 +1,6 @@
 import { useState } from "react"
 import type { FormEvent } from "react"
-import { Link, useNavigate, useSearchParams } from "react-router-dom"
+import { Link, useNavigate, useSearchParams, Navigate } from "react-router-dom"
 import { useAuth } from "@/contexts/AuthContext"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -15,9 +15,15 @@ export function Login() {
     const [error, setError] = useState("")
     const [loading, setLoading] = useState(false)
 
-    const { login, loginWithGoogle, loginWithGithub } = useAuth()
+    const { login, loginWithGoogle, loginWithGithub, user, loading: authLoading } = useAuth()
     const navigate = useNavigate()
     const [searchParams] = useSearchParams()
+
+    // Already logged in — send to dashboard
+    if (!authLoading && user) {
+        const redirect = searchParams.get('redirect') || '/dashboard'
+        return <Navigate to={redirect} replace />
+    }
 
     const handleSubmit = async (e: FormEvent) => {
         e.preventDefault()

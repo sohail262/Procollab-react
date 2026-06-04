@@ -1,5 +1,5 @@
 // components/dashboard/MyTasksPanel.tsx
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -116,20 +116,24 @@ function TaskUpdateDialog({
     const [statusNote, setStatusNote] = useState('')
     const [saving,     setSaving]     = useState(false)
 
-    // Sync when task changes
-    useState(() => {
+    // Sync when task changes or dialog opens
+    useEffect(() => {
         if (task) {
-            setNewStatus(task.status)
+            // If task has changes_requested, default to in-progress so member can resubmit
+            const defaultStatus = (task as any).reviewStatus === 'changes_requested'
+                ? 'in-progress'
+                : task.status === 'review' ? 'review' : task.status
+            setNewStatus(defaultStatus as TaskStatus)
             setStatusNote('')
         }
-    })
+    }, [task, open])
 
     const handleSubmit = async () => {
         if (!projectId || !user || !task) return
         setSaving(true)
 
         try {
-            const isSubmittingForReview = newStatus === 'review' || newStatus === 'done'
+            const isSubmittingForReview = newStatus === 'review'
 
             await updateDoc(
                 doc(db, 'projects', projectId, 'tasks', task.id),
@@ -137,7 +141,7 @@ function TaskUpdateDialog({
                     status:       newStatus,
                     statusNote:   statusNote.trim() || null,
                     updatedAt:    serverTimestamp(),
-                    // If submitting for review, set review status
+                    // If submitting for review, set pending review status
                     ...(isSubmittingForReview ? {
                         reviewStatus: 'pending_review',
                         submittedAt:  serverTimestamp(),
@@ -147,7 +151,7 @@ function TaskUpdateDialog({
                         reviewedBy:   null,
                         reviewedAt:   null,
                     } : {
-                        // If moving back, clear review status
+                        // If moving back to active work, clear review status
                         reviewStatus: null,
                         submittedAt:  null,
                         submittedBy:  null,
@@ -178,7 +182,7 @@ function TaskUpdateDialog({
                     ? '📬 Submitted for review!'
                     : '✅ Status updated',
                 description: isSubmittingForReview
-                    ? 'The project owner will review your work.'
+                    ? 'The project owner will review your work. You cannot move it to Done yourself.'
                     : `Task moved to "${STATUS_LABELS[newStatus]}"`,
             })
 
@@ -197,6 +201,9 @@ function TaskUpdateDialog({
     }
 
     if (!task) return null
+
+    // Members can only set statuses up to 'review' — 'done' is set by owner approval only
+    const MEMBER_STATUSES: TaskStatus[] = ['backlog', 'todo', 'in-progress', 'review']
 
     const dueDate    = toDate(task.dueDate)
     const isOverdue  = dueDate && isPast(dueDate) && task.status !== 'done'
@@ -294,19 +301,18 @@ function TaskUpdateDialog({
                                 <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
-                                {(Object.keys(STATUS_LABELS) as TaskStatus[]).map(s => (
+                                {MEMBER_STATUSES.map(s => (
                                     <SelectItem key={s} value={s}>
                                         <div className="flex items-center gap-2">
                                             <span className={`inline-block w-2 h-2
                                                 rounded-full ${
-                                                    s === 'done' ? 'bg-green-500' :
                                                     s === 'review' ? 'bg-purple-500' :
                                                     s === 'in-progress' ? 'bg-orange-500' :
                                                     s === 'todo' ? 'bg-blue-500' :
                                                     'bg-slate-400'
                                                 }`} />
                                             {STATUS_LABELS[s]}
-                                            {(s === 'review' || s === 'done') && (
+                                            {s === 'review' && (
                                                 <span className="text-xs text-muted-foreground ml-1">
                                                     (notifies owner)
                                                 </span>
@@ -314,6 +320,14 @@ function TaskUpdateDialog({
                                         </div>
                                     </SelectItem>
                                 ))}
+                                {/* Done is NOT selectable — only owner can approve to Done */}
+                                <div className="flex items-center gap-2 px-2 py-1.5
+                                                text-sm text-muted-foreground/50
+                                                cursor-not-allowed select-none">
+                                    <span className="inline-block w-2 h-2 rounded-full bg-green-300" />
+                                    Done
+                                    <span className="text-xs ml-1">(owner approval only)</span>
+                                </div>
                             </SelectContent>
                         </Select>
 
@@ -360,15 +374,16 @@ function TaskUpdateDialog({
                         </p>
                     </div>
 
-                    {/* Info banner for review/done */}
-                    {(newStatus === 'review' || newStatus === 'done') && (
+                    {/* Info banner for review submission */}
+                    {newStatus === 'review' && (
                         <div className="bg-blue-50 dark:bg-blue-900/20 border
                                         border-blue-200 dark:border-blue-800
                                         rounded-lg p-3 flex items-start gap-2">
                             <Send className="h-4 w-4 text-blue-600 shrink-0 mt-0.5" />
                             <p className="text-xs text-blue-700 dark:text-blue-300">
                                 The project owner will be notified to review your work.
-                                They can approve it or request changes.
+                                They can approve it (→ Done) or request changes.
+                                You cannot mark it Done yourself.
                             </p>
                         </div>
                     )}
@@ -384,11 +399,11 @@ function TaskUpdateDialog({
                     </Button>
                     <Button
                         onClick={handleSubmit}
-                        disabled={saving || !statusChanged}
+                        disabled={saving}
                     >
                         {saving ? (
                             'Saving...'
-                        ) : newStatus === 'review' || newStatus === 'done' ? (
+                        ) : newStatus === 'review' ? (
                             <>
                                 <Send className="h-4 w-4 mr-2" />
                                 Submit for Review

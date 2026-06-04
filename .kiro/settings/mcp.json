@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "open-design": {
+      "command": "node",
+      "args": ["C:/Users/YOUR_USERNAME/AppData/Local/Programs/Open Design/resources/app/apps/daemon/dist/cli.js", "mcp"],
+      "disabled": false,
+      "autoApprove": []
+    }
+  }
+}

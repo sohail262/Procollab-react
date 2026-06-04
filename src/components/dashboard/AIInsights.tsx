@@ -5,14 +5,13 @@ import { Badge } from '@/components/ui/badge'
 import { Sparkles, AlertTriangle, TrendingUp, CheckCircle2, Loader2 } from 'lucide-react'
 import { aiService } from '@/services/aiService'
 import type { AIRecommendation } from '@/services/aiService'
-import type { Task, ProjectMethodology } from '@/types/project'
+import type { Task } from '@/types/project'
 
 interface AIInsightsProps {
     tasks: Task[]
-    methodology: ProjectMethodology
 }
 
-export function AIInsights({ tasks, methodology }: AIInsightsProps) {
+export function AIInsights({ tasks }: AIInsightsProps) {
     const [loading, setLoading] = useState(true)
     const [recommendations, setRecommendations] = useState<AIRecommendation[]>([])
     const [report, setReport] = useState('')
@@ -22,7 +21,7 @@ export function AIInsights({ tasks, methodology }: AIInsightsProps) {
             setLoading(true)
             try {
                 const risks = await aiService.analyzeProjectRisks(tasks)
-                const optimizations = await aiService.getOptimizationSuggestions(tasks, methodology)
+                const optimizations = await aiService.getOptimizationSuggestions(tasks, 'agile')
                 const progressReport = await aiService.generateProgressReport(tasks)
 
                 setRecommendations([...risks, ...optimizations])
@@ -37,7 +36,7 @@ export function AIInsights({ tasks, methodology }: AIInsightsProps) {
         if (tasks.length > 0) {
             analyze()
         }
-    }, [tasks, methodology])
+    }, [tasks])
 
     if (loading) {
         return (

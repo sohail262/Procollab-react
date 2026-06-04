@@ -479,6 +479,41 @@ service cloud.firestore {
         );
       }
 
+      // ── Google Drive Config ───────────────────────────────────────────────────
+      // Stores the shared project folder ID set up by the owner/admin once.
+      // READ:  all project members (to load folder ID for listing docs)
+      // WRITE: project owner or team lead only
+      match /driveConfig/{configId} {
+        allow read, list, get: if isValidUser() && canAccessProject(projectId);
+        allow create, update: if isValidUser() && (
+          isProjectOwner(projectId) ||
+          isProjectTeamLead(projectId)
+        );
+        allow delete: if isValidUser() && isProjectOwner(projectId);
+      }
+
+      // ── Google Drive Documents (metadata) ─────────────────────────────────────
+      // Metadata only: title, fileId, webViewLink. Content lives in Google Drive.
+      // READ:   all project members
+      // CREATE: any project member (who has connected their Google account)
+      // UPDATE/DELETE: creator or owner/lead
+      match /driveDocuments/{docId} {
+        allow read, list, get: if isValidUser() && canAccessProject(projectId);
+        allow create: if isValidUser() &&
+          canAccessProject(projectId) &&
+          request.resource.data.createdBy == request.auth.uid;
+        allow update: if isValidUser() && (
+          resource.data.createdBy == request.auth.uid ||
+          isProjectOwner(projectId)                   ||
+          isProjectTeamLead(projectId)
+        );
+        allow delete: if isValidUser() && (
+          resource.data.createdBy == request.auth.uid ||
+          isProjectOwner(projectId)                   ||
+          isProjectTeamLead(projectId)
+        );
+      }
+
       // ── Budget ────────────────────────────────────────────────────────────────
       match /budget/{configId} {
         allow read, list, get: if isValidUser() && canAccessProject(projectId);

@@ -3,7 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { DashboardLayout } from '@/components/layout/DashboardLayout'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'
+import { ScrollArea } from '@/components/ui/scroll-area'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
 import { usePermissions, MemberPermissions, invalidatePermissionsCache } from '@/hooks/use-permissions'
@@ -11,20 +12,22 @@ import { usePermissions, MemberPermissions, invalidatePermissionsCache } from '@
 import {
     LayoutDashboard, KanbanSquare, GanttChartSquare,
     CalendarDays, Users, BarChart3, Settings,
-    Plus, ArrowLeft, Loader2, Pencil, FileText,
+    Plus, ArrowLeft, Loader2, Pencil, FileText, FolderOpen,
     DollarSign, Image, Lock, AlertTriangle, Video,
+    Activity, CheckCircle2, XCircle, ChevronRight,
 } from 'lucide-react'
 import {
     doc, getDoc, updateDoc,
     collection, query, onSnapshot,
-    addDoc, serverTimestamp,
+    addDoc, serverTimestamp, orderBy, limit,
 } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
-import type { ProjectMethodology, Task } from '@/types/project'
+import type { Task } from '@/types/project'
 import { useAuth } from '@/hooks/use-auth'
 import { useProjectRole } from '@/hooks/use-project-role'
 import { ClipboardList, Star } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
+import { formatDistanceToNow } from 'date-fns'
 
 // ⚡ OPTIMIZATION: Lazy-load all dashboard tab components.
 // Previously all 13 tabs (including tldraw ~2MB, recharts ~400KB) were bundled
@@ -39,7 +42,7 @@ const ResourceManagement = lazy(() => import('@/components/dashboard/ResourceMan
 const AIInsights       = lazy(() => import('@/components/dashboard/AIInsights').then(m => ({ default: m.AIInsights })))
 const Analytics        = lazy(() => import('@/components/dashboard/Analytics').then(m => ({ default: m.Analytics })))
 const Whiteboard       = lazy(() => import('@/components/dashboard/Whiteboard').then(m => ({ default: m.Whiteboard })))
-const Documents        = lazy(() => import('@/components/dashboard/Documents').then(m => ({ default: m.Documents })))
+const GoogleDocsPanel  = lazy(() => import('@/components/dashboard/GoogleDocsPanel').then(m => ({ default: m.GoogleDocsPanel })))
 const BudgetTracker    = lazy(() => import('@/components/dashboard/BudgetTracker').then(m => ({ default: m.BudgetTracker })))
 const GalleryView      = lazy(() => import('@/components/dashboard/GalleryView').then(m => ({ default: m.GalleryView })))
 const MeetingRoom      = lazy(() => import('@/components/dashboard/MeetingRoom').then(m => ({ default: m.MeetingRoom })))
@@ -120,8 +123,10 @@ const [teamMembers, setTeamMembers] = useState<
     const [loading,          setLoading]          = useState(true)
     const [project,          setProject]          = useState<any>(null)
     const [tasks,            setTasks]            = useState<Task[]>([])
+    const [activities,       setActivities]       = useState<any[]>([])
+    const [showAllActivity,  setShowAllActivity]  = useState(false)
+    const [allActivities,    setAllActivities]    = useState<any[]>([])
     const [activeTab,        setActiveTab]        = useState('overview')
-    const [methodology,      setMethodology]      = useState<ProjectMethodology>('agile')
     const [showTemplates,    setShowTemplates]    = useState(false)
     const [isTaskDialogOpen, setIsTaskDialogOpen] = useState(false)
     const [editingTask,      setEditingTask]      = useState<Task | null>(null)
@@ -140,7 +145,6 @@ const [teamMembers, setTeamMembers] = useState<
                 if (docSnap.exists()) {
                     const data = docSnap.data()
                     setProject({ id: docSnap.id, ...data })
-                    if (data.methodology) setMethodology(data.methodology)
                     
                     // Load team members
                     const memberEntries = Object.entries(data.teamMembers ?? {})
@@ -227,27 +231,21 @@ const [teamMembers, setTeamMembers] = useState<
         permissions?.tasks?.read,  // re-run if task permission changes
     ])
 
-    // ── Methodology change ────────────────────────────────────────────────────
-    const handleMethodologyChange = async (value: ProjectMethodology) => {
-        if (!isOwner && !isAdmin) return
+    // ── Effect 3: Activities listener ────────────────────────────────────
+    useEffect(() => {
+        if (!id || !user?.uid) return
+        const q = query(
+            collection(db, 'projects', id, 'activities'),
+            orderBy('timestamp', 'desc'),
+            limit(10)
+        )
+        const unsub = onSnapshot(q, snap => {
+            setActivities(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+        })
+        return () => unsub()
+    }, [id, user?.uid])
 
-        const previous = methodology
-        setMethodology(value)
-
-        if (id) {
-            try {
-                await updateDoc(doc(db, 'projects', id), { methodology: value })
-            } catch (err) {
-                console.error('Failed to update methodology:', err)
-                setMethodology(previous)
-                toast({
-                    title:       'Error',
-                    description: 'Could not update methodology.',
-                    variant:     'destructive',
-                })
-            }
-        }
-    }
+    // ── Methodology change handler removed — no longer applicable ─────────────
 
     // ── Save task ─────────────────────────────────────────────────────────────
     const handleSaveTask = async (taskData: Partial<Task>) => {
@@ -366,24 +364,6 @@ const [teamMembers, setTeamMembers] = useState<
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2">
-                        {(isOwner || isAdmin) && (
-                            <Select
-                                value={methodology}
-                                onValueChange={(v: any) => handleMethodologyChange(v)}
-                            >
-                                <SelectTrigger className="w-[150px] sm:w-[180px]">
-                                    <SelectValue placeholder="Select Methodology" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="agile">Agile</SelectItem>
-                                    <SelectItem value="scrum">Scrum</SelectItem>
-                                    <SelectItem value="kanban">Kanban</SelectItem>
-                                    <SelectItem value="waterfall">Waterfall</SelectItem>
-                                    <SelectItem value="hybrid">Hybrid</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        )}
-
                         {(isOwner || isAdmin) && (
                             <Button onClick={openNewTaskDialog} size="sm">
                                 <Plus className="h-4 w-4 mr-1 sm:mr-2" />
@@ -526,8 +506,8 @@ const [teamMembers, setTeamMembers] = useState<
                                                data-[state=active]:border-primary
                                                data-[state=active]:shadow-none
                                                rounded-none h-full px-3 sm:px-4">
-                                    <FileText className="h-4 w-4 sm:mr-2" />
-                                    <span className="hidden sm:inline">Documents</span>
+                                    <FolderOpen className="h-4 w-4 sm:mr-2" />
+                                    <span className="hidden sm:inline">Drive Docs</span>
                                 </TabsTrigger>
                             )}
 
@@ -678,11 +658,11 @@ const [teamMembers, setTeamMembers] = useState<
                                             </CardHeader>
                                             <CardContent>
                                                 <div className="text-2xl font-bold">
-                                                    {project?.currentMembers || 0}
+                                                    {teamMembers.length}
                                                 </div>
                                                 <p className="text-xs text-muted-foreground mt-1">
                                                     {project?.maxMembers
-                                                        ? `${project.maxMembers - (project.currentMembers || 0)} spots remaining`
+                                                        ? `${Math.max(0, project.maxMembers - teamMembers.length)} spots remaining`
                                                         : 'Open for applications'
                                                     }
                                                 </p>
@@ -692,41 +672,161 @@ const [teamMembers, setTeamMembers] = useState<
 
                                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                                         <Card className="col-span-1 lg:col-span-2">
-                                            <CardHeader>
-                                                <CardTitle>Recent Activity</CardTitle>
-                                                <CardDescription>
-                                                    Latest updates from your team
-                                                </CardDescription>
+                                            <CardHeader className="flex flex-row items-start
+                                                                    justify-between gap-2">
+                                                <div>
+                                                    <CardTitle className="flex items-center gap-2">
+                                                        <Activity className="h-4 w-4" />
+                                                        Recent Activity
+                                                    </CardTitle>
+                                                    <CardDescription className="mt-1">
+                                                        Latest 10 updates from your team
+                                                    </CardDescription>
+                                                </div>
+                                                <Button
+                                                    variant="outline"
+                                                    size="sm"
+                                                    className="shrink-0 gap-1.5"
+                                                    onClick={() => {
+                                                        // Load all activities when sheet opens
+                                                        if (!id || !user?.uid) return
+                                                        const q = query(
+                                                            collection(db, 'projects', id, 'activities'),
+                                                            orderBy('timestamp', 'desc')
+                                                        )
+                                                        onSnapshot(q, snap => {
+                                                            setAllActivities(
+                                                                snap.docs.map(d => ({ id: d.id, ...d.data() }))
+                                                            )
+                                                        })
+                                                        setShowAllActivity(true)
+                                                    }}
+                                                >
+                                                    View All
+                                                    <ChevronRight className="h-3.5 w-3.5" />
+                                                </Button>
                                             </CardHeader>
                                             <CardContent>
-                                                <div className="space-y-4">
-                                                    {[1, 2, 3].map((_, i) => (
-                                                        <div key={i}
-                                                            className="flex items-start gap-4
-                                                                       pb-4 border-b last:border-0">
-                                                            <div className="h-8 w-8 rounded-full
-                                                                            bg-primary/10 flex
-                                                                            items-center justify-center">
-                                                                <Users className="h-4 w-4 text-primary" />
-                                                            </div>
-                                                            <div>
-                                                                <p className="text-sm font-medium">
-                                                                    New task created
-                                                                </p>
-                                                                <p className="text-xs text-muted-foreground">
-                                                                    User X created "Implement authentication"
-                                                                </p>
-                                                                <p className="text-xs text-muted-foreground mt-1">
-                                                                    2 hours ago
-                                                                </p>
-                                                            </div>
-                                                        </div>
-                                                    ))}
-                                                </div>
+                                                {activities.length === 0 ? (
+                                                    <div className="flex flex-col items-center
+                                                                    justify-center py-8
+                                                                    text-muted-foreground gap-2">
+                                                        <Activity className="h-8 w-8 opacity-30" />
+                                                        <p className="text-sm">No activity yet</p>
+                                                        <p className="text-xs opacity-60">
+                                                            Activity will appear here as your team works
+                                                        </p>
+                                                    </div>
+                                                ) : (
+                                                    <div className="space-y-3">
+                                                        {activities.map((activity, i) => {
+                                                            const ts = activity.timestamp?.toDate
+                                                                ? activity.timestamp.toDate()
+                                                                : activity.timestamp
+                                                                    ? new Date(activity.timestamp)
+                                                                    : null
+                                                            return (
+                                                                <div key={activity.id ?? i}
+                                                                    className="flex items-start gap-3
+                                                                               pb-3 border-b last:border-0">
+                                                                    <div className="h-7 w-7 rounded-full
+                                                                                    bg-primary/10 flex
+                                                                                    items-center justify-center
+                                                                                    shrink-0 mt-0.5">
+                                                                        <Activity className="h-3.5 w-3.5 text-primary" />
+                                                                    </div>
+                                                                    <div className="flex-1 min-w-0">
+                                                                        <p className="text-sm
+                                                                                       line-clamp-2 leading-snug">
+                                                                            {activity.description || 'Activity'}
+                                                                        </p>
+                                                                        {ts && (
+                                                                            <p className="text-xs
+                                                                                           text-muted-foreground
+                                                                                           mt-0.5">
+                                                                                {formatDistanceToNow(ts, { addSuffix: true })}
+                                                                            </p>
+                                                                        )}
+                                                                    </div>
+                                                                </div>
+                                                            )
+                                                        })}
+                                                    </div>
+                                                )}
                                             </CardContent>
                                         </Card>
 
-                                        <AIInsights tasks={tasks} methodology={methodology} />
+                                        {/* ── Full Activity Sheet ── */}
+                                        <Sheet open={showAllActivity} onOpenChange={setShowAllActivity}>
+                                            <SheetContent side="right" className="w-full sm:max-w-[480px] p-0">
+                                                <SheetHeader className="px-6 py-5 border-b">
+                                                    <SheetTitle className="flex items-center gap-2">
+                                                        <Activity className="h-5 w-5" />
+                                                        All Activity
+                                                    </SheetTitle>
+                                                    <SheetDescription>
+                                                        Complete history of project activity,
+                                                        newest first
+                                                    </SheetDescription>
+                                                </SheetHeader>
+                                                <ScrollArea className="h-[calc(100vh-120px)]">
+                                                    <div className="px-6 py-4">
+                                                        {allActivities.length === 0 ? (
+                                                            <div className="flex flex-col items-center
+                                                                            justify-center py-16
+                                                                            text-muted-foreground gap-3">
+                                                                <Activity className="h-10 w-10 opacity-20" />
+                                                                <p className="text-sm">No activity yet</p>
+                                                            </div>
+                                                        ) : (
+                                                            <div className="space-y-1">
+                                                                {allActivities.map((activity, i) => {
+                                                                    const ts = activity.timestamp?.toDate
+                                                                        ? activity.timestamp.toDate()
+                                                                        : activity.timestamp
+                                                                            ? new Date(activity.timestamp)
+                                                                            : null
+                                                                    return (
+                                                                        <div key={activity.id ?? i}
+                                                                            className="flex items-start gap-3
+                                                                                       py-3.5 border-b
+                                                                                       last:border-0">
+                                                                            <div className="h-8 w-8 rounded-full
+                                                                                            bg-primary/10 flex
+                                                                                            items-center justify-center
+                                                                                            shrink-0 mt-0.5">
+                                                                                <Activity className="h-4 w-4 text-primary" />
+                                                                            </div>
+                                                                            <div className="flex-1 min-w-0">
+                                                                                <p className="text-sm leading-snug">
+                                                                                    {activity.description || 'Activity'}
+                                                                                </p>
+                                                                                {ts && (
+                                                                                    <p className="text-xs
+                                                                                                   text-muted-foreground
+                                                                                                   mt-1">
+                                                                                        {ts.toLocaleDateString(
+                                                                                            undefined,
+                                                                                            { month: 'short', day: 'numeric', year: 'numeric' }
+                                                                                        )}{' '}·{' '}
+                                                                                        {ts.toLocaleTimeString(
+                                                                                            undefined,
+                                                                                            { hour: '2-digit', minute: '2-digit' }
+                                                                                        )}
+                                                                                    </p>
+                                                                                )}
+                                                                            </div>
+                                                                        </div>
+                                                                    )
+                                                                })}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                </ScrollArea>
+                                            </SheetContent>
+                                        </Sheet>
+
+                                        <AIInsights tasks={tasks} />
                                     </div>
                                 </>
                             )}
@@ -751,7 +851,6 @@ const [teamMembers, setTeamMembers] = useState<
                             ) : (
                                 <GanttChart
                                     readOnly={!canWriteTab('gantt')}
-                                    tasks={tasks}
                                 />
                             )}
                         </TabsContent>
@@ -811,15 +910,14 @@ const [teamMembers, setTeamMembers] = useState<
                             )}
                         </TabsContent>
 
-                        {/* Documents */}
-                        <TabsContent value="documents" className="h-[calc(100vh-200px)]">
+                        {/* Google Drive Docs */}
+                        <TabsContent value="documents" className="h-[calc(100vh-200px)] overflow-hidden">
                             {!canViewTab('documents') ? (
-                                <AccessDenied feature="Documents/Files" />
+                                <AccessDenied feature="Google Drive Documents" />
                             ) : (
-                                <>
-                                    {!canWriteTab('documents') && <ReadOnlyNotice />}
-                                    <Documents readOnly={!canWriteTab('documents')} />
-                                </>
+                                <Suspense fallback={<TabLoader />}>
+                                    <GoogleDocsPanel />
+                                </Suspense>
                             )}
                         </TabsContent>
 

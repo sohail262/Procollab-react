@@ -1,30 +1,43 @@
-// Analytics.tsx
+// Analytics.tsx — Task-based analytics. No sprint/methodology charts.
 import { useState, useEffect } from 'react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Progress } from '@/components/ui/progress'
 import type { Task } from '@/types/project'
 import {
     collection,
     query,
     onSnapshot,
-    orderBy,
-    doc,
-    getDoc
 } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
 import { useParams } from 'react-router-dom'
 import {
-    BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-    PieChart, Pie, Cell, LineChart, Line
+    BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
+    PieChart, Pie, Cell, ResponsiveContainer,
 } from 'recharts'
 import { useAuth } from '@/hooks/use-auth'
 import { Skeleton } from '@/components/ui/skeleton'
+import { isPast } from 'date-fns'
+import {
+    CheckCircle2, Clock, AlertTriangle, ListTodo,
+    TrendingUp, Eye,
+} from 'lucide-react'
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-interface Sprint {
-    id: string
-    name: string
-    points: number
-    completedAt: any // Firestore Timestamp
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function toDate(val: any): Date {
+    if (!val) return new Date(0)
+    if (val instanceof Date) return val
+    if (typeof val.toDate === 'function') return val.toDate()
+    return new Date(val)
+}
+
+// ─── Empty chart placeholder ──────────────────────────────────────────────────
+function EmptyChart({ message }: { message: string }) {
+    return (
+        <div className="flex items-center justify-center h-full
+                        text-muted-foreground text-sm text-center px-4">
+            {message}
+        </div>
+    )
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -32,210 +45,226 @@ export function Analytics() {
     const { id: projectId } = useParams()
     const { user } = useAuth()
 
-    const [tasks, setTasks] = useState<Task[]>([])
-    const [sprints, setSprints] = useState<Sprint[]>([])
+    const [tasks,   setTasks]   = useState<Task[]>([])
     const [loading, setLoading] = useState(true)
 
-    // ── Tasks listener ──────────────────────────────────────────────────────
+    // ── Tasks real-time listener ─────────────────────────────────────────────
     useEffect(() => {
         if (!projectId || !user) return
 
         const q = query(collection(db, 'projects', projectId, 'tasks'))
-
-        const unsubscribe = onSnapshot(
+        const unsub = onSnapshot(
             q,
-            (snapshot) => {
-                setTasks(
-                    snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Task))
-                )
+            snap => {
+                setTasks(snap.docs.map(d => ({ id: d.id, ...d.data() } as Task)))
                 setLoading(false)
             },
-            (error) => {
-                console.error('Analytics tasks listener error:', error)
+            err => {
+                console.error('Analytics tasks listener error:', err)
                 setLoading(false)
             }
         )
-
-        return () => unsubscribe()
+        return () => unsub()
     }, [projectId, user])
 
-    // ── Sprints listener (velocity chart) ───────────────────────────────────
-    // Firestore path: projects/{projectId}/sprints
-    // Each sprint doc: { name: string, points: number, completedAt: Timestamp }
-    useEffect(() => {
-        if (!projectId || !user) return
+    // ── Derived metrics ──────────────────────────────────────────────────────
+    const total      = tasks.length
+    const done       = tasks.filter(t => t.status === 'done').length
+    const inProgress = tasks.filter(t => t.status === 'in-progress').length
+    const inReview   = tasks.filter(t => t.status === 'review').length
+    const overdue    = tasks.filter(
+        t => t.dueDate && isPast(toDate(t.dueDate)) && t.status !== 'done'
+    ).length
+    const completionRate = total > 0 ? Math.round((done / total) * 100) : 0
 
-        const q = query(
-            collection(db, 'projects', projectId, 'sprints'),
-            orderBy('completedAt', 'asc')
-        )
-
-        const unsubscribe = onSnapshot(
-            q,
-            (snapshot) => {
-                const data = snapshot.docs.map(d => ({
-                    id: d.id,
-                    ...d.data()
-                })) as Sprint[]
-                setSprints(data)
-            },
-            (error) => {
-                console.error('Analytics sprints listener error:', error)
-            }
-        )
-
-        return () => unsubscribe()
-    }, [projectId, user])
-
-    // ── Data transformations ─────────────────────────────────────────────────
+    // ── Chart data ───────────────────────────────────────────────────────────
     const statusData = [
-        { name: 'Backlog', value: tasks.filter(t => t.status === 'backlog').length },
-        { name: 'To Do', value: tasks.filter(t => t.status === 'todo').length },
-        { name: 'In Progress', value: tasks.filter(t => t.status === 'in-progress').length },
-        { name: 'Review', value: tasks.filter(t => t.status === 'review').length },
-        { name: 'Done', value: tasks.filter(t => t.status === 'done').length },
+        { name: 'Backlog',     value: tasks.filter(t => t.status === 'backlog').length,     color: '#64748b' },
+        { name: 'To Do',       value: tasks.filter(t => t.status === 'todo').length,         color: '#3b82f6' },
+        { name: 'In Progress', value: tasks.filter(t => t.status === 'in-progress').length,  color: '#f97316' },
+        { name: 'Review',      value: tasks.filter(t => t.status === 'review').length,       color: '#a855f7' },
+        { name: 'Done',        value: tasks.filter(t => t.status === 'done').length,         color: '#22c55e' },
     ].filter(d => d.value > 0)
 
     const priorityData = [
-        { name: 'Low', value: tasks.filter(t => t.priority === 'low').length },
-        { name: 'Medium', value: tasks.filter(t => t.priority === 'medium').length },
-        { name: 'High', value: tasks.filter(t => t.priority === 'high').length },
-        { name: 'Urgent', value: tasks.filter(t => t.priority === 'urgent').length },
+        { name: 'Low',    value: tasks.filter(t => t.priority === 'low').length,    fill: '#22c55e' },
+        { name: 'Medium', value: tasks.filter(t => t.priority === 'medium').length, fill: '#3b82f6' },
+        { name: 'High',   value: tasks.filter(t => t.priority === 'high').length,   fill: '#f97316' },
+        { name: 'Urgent', value: tasks.filter(t => t.priority === 'urgent').length, fill: '#ef4444' },
     ].filter(d => d.value > 0)
 
-    // Velocity: use real sprint data; fall back to placeholder message
-    const velocityData = sprints.map(s => ({ name: s.name, points: s.points }))
-
-    const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8']
-
-    // ── Summary stats ────────────────────────────────────────────────────────
-    const totalTasks = tasks.length
-    const completedTasks = tasks.filter(t => t.status === 'done').length
-    const completionRate = totalTasks > 0
-        ? Math.round((completedTasks / totalTasks) * 100)
-        : 0
+    // ── Assignee breakdown ───────────────────────────────────────────────────
+    const assigneeMap: Record<string, { name: string; total: number; done: number }> = {}
+    tasks.forEach(t => {
+        const name = t.assignee?.name ?? 'Unassigned'
+        if (!assigneeMap[name]) assigneeMap[name] = { name, total: 0, done: 0 }
+        assigneeMap[name].total++
+        if (t.status === 'done') assigneeMap[name].done++
+    })
+    const assigneeData = Object.values(assigneeMap)
+        .sort((a, b) => b.total - a.total)
+        .slice(0, 6)
 
     // ── Loading skeleton ─────────────────────────────────────────────────────
     if (loading) {
         return (
             <div className="space-y-6">
-                <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-                    {[1, 2, 3].map(i => (
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                    {[1,2,3,4,5,6].map(i => (
                         <Card key={i}>
-                            <CardContent className="pt-6">
-                                <Skeleton className="h-8 w-24 mb-2" />
-                                <Skeleton className="h-4 w-32" />
+                            <CardContent className="pt-4">
+                                <Skeleton className="h-7 w-16 mb-2" />
+                                <Skeleton className="h-3 w-20" />
                             </CardContent>
                         </Card>
                     ))}
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <Skeleton className="h-[280px]" />
-                    <Skeleton className="h-[280px]" />
-                </div>                <Skeleton className="h-[280px]" />
+                    <Skeleton className="h-[300px]" />
+                    <Skeleton className="h-[300px]" />
+                </div>
+                <Skeleton className="h-[220px]" />
             </div>
         )
     }
 
     return (
-        <div className="space-y-4 sm:space-y-6">
+        <div className="space-y-6">
 
-            {/* ── Summary Cards ── */}
-            <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-                <Card>
-                    <CardHeader className="pb-2 p-4 sm:p-6">
-                        <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">
-                            Total Tasks
-                        </CardTitle>
-                    </CardHeader>
-                    <CardContent className="p-4 pt-0 sm:p-6 sm:pt-0">
-                        <div className="text-2xl sm:text-3xl font-bold">{totalTasks}</div>
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardHeader className="pb-2 p-4 sm:p-6">
-                        <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">
-                            Completed
-                        </CardTitle>
-                    </CardHeader>
-                    <CardContent className="p-4 pt-0 sm:p-6 sm:pt-0">
-                        <div className="text-2xl sm:text-3xl font-bold text-green-600">{completedTasks}</div>
-                    </CardContent>
-                </Card>
-                <Card className="col-span-2 lg:col-span-1">
-                    <CardHeader className="pb-2 p-4 sm:p-6">
-                        <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">
-                            Completion Rate
-                        </CardTitle>
-                    </CardHeader>
-                    <CardContent className="p-4 pt-0 sm:p-6 sm:pt-0">
-                        <div className="text-2xl sm:text-3xl font-bold">{completionRate}%</div>
-                    </CardContent>
-                </Card>
+            {/* ── Summary metric cards ── */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+                {[
+                    {
+                        label: 'Total Tasks',
+                        value: total,
+                        icon: <ListTodo className="h-4 w-4" />,
+                        color: 'text-foreground',
+                        bg:    'bg-muted/40',
+                    },
+                    {
+                        label: 'Completed',
+                        value: done,
+                        icon: <CheckCircle2 className="h-4 w-4" />,
+                        color: 'text-green-600',
+                        bg:    'bg-green-50 dark:bg-green-900/20',
+                    },
+                    {
+                        label: 'In Progress',
+                        value: inProgress,
+                        icon: <TrendingUp className="h-4 w-4" />,
+                        color: 'text-orange-600',
+                        bg:    'bg-orange-50 dark:bg-orange-900/20',
+                    },
+                    {
+                        label: 'In Review',
+                        value: inReview,
+                        icon: <Eye className="h-4 w-4" />,
+                        color: 'text-purple-600',
+                        bg:    'bg-purple-50 dark:bg-purple-900/20',
+                    },
+                    {
+                        label: 'Overdue',
+                        value: overdue,
+                        icon: <AlertTriangle className="h-4 w-4" />,
+                        color: overdue > 0 ? 'text-red-600' : 'text-muted-foreground',
+                        bg:    overdue > 0
+                            ? 'bg-red-50 dark:bg-red-900/20'
+                            : 'bg-muted/40',
+                    },
+                    {
+                        label: 'Completion',
+                        value: `${completionRate}%`,
+                        icon: <Clock className="h-4 w-4" />,
+                        color: 'text-blue-600',
+                        bg:    'bg-blue-50 dark:bg-blue-900/20',
+                    },
+                ].map(({ label, value, icon, color, bg }) => (
+                    <Card key={label} className={`border-0 ${bg}`}>
+                        <CardContent className="p-4">
+                            <div className={`flex items-center gap-1.5 mb-1 ${color} opacity-70`}>
+                                {icon}
+                                <span className="text-xs font-medium">{label}</span>
+                            </div>
+                            <div className={`text-2xl font-bold ${color}`}>{value}</div>
+                        </CardContent>
+                    </Card>
+                ))}
             </div>
 
-            {/* ── Charts Row ── */}
+            {/* ── Overall progress bar ── */}
+            <Card>
+                <CardContent className="pt-5 pb-4 px-5">
+                    <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm font-medium">Overall Progress</span>
+                        <span className="text-sm font-bold text-green-600">{completionRate}%</span>
+                    </div>
+                    <Progress value={completionRate} className="h-2.5" />
+                    <p className="text-xs text-muted-foreground mt-2">
+                        {done} of {total} tasks completed
+                    </p>
+                </CardContent>
+            </Card>
+
+            {/* ── Charts row ── */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
 
-                {/* Status Distribution */}
+                {/* Status Distribution — Pie */}
                 <Card>
-                    <CardHeader className="p-4 sm:p-6">
+                    <CardHeader className="p-4 sm:p-6 pb-2">
                         <CardTitle className="text-sm sm:text-base">Task Status Distribution</CardTitle>
-                        <CardDescription className="text-xs sm:text-sm">Overview of task progress</CardDescription>
+                        <CardDescription className="text-xs">Breakdown of all tasks by current status</CardDescription>
                     </CardHeader>
-                    <CardContent className="h-[240px] sm:h-[300px] w-full min-w-0 p-2 sm:p-6">
+                    <CardContent className="h-[280px] w-full p-2 sm:p-4">
                         {statusData.length === 0 ? (
-                            <EmptyChart message="No tasks found" />
+                            <EmptyChart message="No tasks yet — create some tasks to see the distribution." />
                         ) : (
                             <ResponsiveContainer width="100%" height="100%">
                                 <PieChart>
                                     <Pie
                                         data={statusData}
                                         cx="50%"
-                                        cy="50%"
+                                        cy="47%"
+                                        outerRadius={90}
+                                        dataKey="value"
                                         labelLine={false}
                                         label={({ name, percent }: any) =>
-                                            `${name} ${((percent ?? 0) * 100).toFixed(0)}%`
+                                            percent > 0.06
+                                                ? `${name} ${((percent ?? 0) * 100).toFixed(0)}%`
+                                                : ''
                                         }
-                                        outerRadius={70}
-                                        dataKey="value"
                                     >
-                                        {statusData.map((_, index) => (
-                                            <Cell
-                                                key={`cell-${index}`}
-                                                fill={COLORS[index % COLORS.length]}
-                                            />
+                                        {statusData.map((entry, i) => (
+                                            <Cell key={i} fill={entry.color} />
                                         ))}
                                     </Pie>
-                                    <Tooltip />
+                                    <Tooltip
+                                        formatter={(v: any, name: any) => [v + ' tasks', name]}
+                                    />
                                 </PieChart>
                             </ResponsiveContainer>
                         )}
                     </CardContent>
                 </Card>
 
-                {/* Priority Distribution */}
+                {/* Priority Breakdown — Bar */}
                 <Card>
-                    <CardHeader className="p-4 sm:p-6">
-                        <CardTitle className="text-sm sm:text-base">Task Priority Breakdown</CardTitle>
-                        <CardDescription className="text-xs sm:text-sm">Tasks by priority level</CardDescription>
+                    <CardHeader className="p-4 sm:p-6 pb-2">
+                        <CardTitle className="text-sm sm:text-base">Priority Breakdown</CardTitle>
+                        <CardDescription className="text-xs">Number of tasks by priority level</CardDescription>
                     </CardHeader>
-                    <CardContent className="h-[240px] sm:h-[300px] w-full min-w-0 p-2 sm:p-6">
+                    <CardContent className="h-[280px] w-full p-2 sm:p-4">
                         {priorityData.length === 0 ? (
-                            <EmptyChart message="No tasks found" />
+                            <EmptyChart message="No tasks with priorities yet." />
                         ) : (
                             <ResponsiveContainer width="100%" height="100%">
-                                <BarChart data={priorityData}>
-                                    <CartesianGrid strokeDasharray="3 3" />
-                                    <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                                    <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
-                                    <Tooltip />
-                                    <Bar dataKey="value" fill="#82ca9d">
-                                        {priorityData.map((_, index) => (
-                                            <Cell
-                                                key={`cell-${index}`}
-                                                fill={COLORS[index % COLORS.length]}
-                                            />
+                                <BarChart data={priorityData} margin={{ top: 5, right: 10, left: -15, bottom: 5 }}>
+                                    <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+                                    <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+                                    <YAxis allowDecimals={false} tick={{ fontSize: 12 }} />
+                                    <Tooltip formatter={(v: any) => [v + ' tasks']} />
+                                    <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                                        {priorityData.map((entry, i) => (
+                                            <Cell key={i} fill={entry.fill} />
                                         ))}
                                     </Bar>
                                 </BarChart>
@@ -245,43 +274,42 @@ export function Analytics() {
                 </Card>
             </div>
 
-            {/* ── Velocity Chart ── */}
-            <Card>
-                <CardHeader className="p-4 sm:p-6">
-                    <CardTitle className="text-sm sm:text-base">Team Velocity</CardTitle>
-                    <CardDescription className="text-xs sm:text-sm">Story points completed per sprint</CardDescription>
-                </CardHeader>
-                <CardContent className="h-[240px] sm:h-[300px] w-full min-w-0 p-2 sm:p-6">
-                    {velocityData.length === 0 ? (
-                        <EmptyChart message="No sprint data yet. Complete sprints to see velocity." />
-                    ) : (
-                        <ResponsiveContainer width="100%" height="100%">
-                            <LineChart data={velocityData}>
-                                <CartesianGrid strokeDasharray="3 3" />
-                                <XAxis dataKey="name" tick={{ fontSize: 11 }} />
-                                <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
-                                <Tooltip />
-                                <Legend />
-                                <Line
-                                    type="monotone"
-                                    dataKey="points"
-                                    stroke="#8884d8"
-                                    activeDot={{ r: 8 }}
-                                />
-                            </LineChart>
-                        </ResponsiveContainer>
-                    )}
-                </CardContent>
-            </Card>
-        </div>
-    )
-}
-
-// ─── Helper ───────────────────────────────────────────────────────────────────
-function EmptyChart({ message }: { message: string }) {
-    return (
-        <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-            {message}
+            {/* ── Assignee workload ── */}
+            {assigneeData.length > 0 && (
+                <Card>
+                    <CardHeader className="p-4 sm:p-6 pb-2">
+                        <CardTitle className="text-sm sm:text-base">Team Workload</CardTitle>
+                        <CardDescription className="text-xs">
+                            Tasks assigned to each team member
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent className="p-4 sm:p-6 pt-3">
+                        <div className="space-y-3">
+                            {assigneeData.map(m => {
+                                const pct = m.total > 0
+                                    ? Math.round((m.done / m.total) * 100)
+                                    : 0
+                                return (
+                                    <div key={m.name}>
+                                        <div className="flex items-center justify-between mb-1.5">
+                                            <span className="text-sm font-medium truncate max-w-[160px]">
+                                                {m.name}
+                                            </span>
+                                            <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                                                <span>{m.done}/{m.total} done</span>
+                                                <span className="font-semibold text-foreground w-8 text-right">
+                                                    {pct}%
+                                                </span>
+                                            </div>
+                                        </div>
+                                        <Progress value={pct} className="h-2" />
+                                    </div>
+                                )
+                            })}
+                        </div>
+                    </CardContent>
+                </Card>
+            )}
         </div>
     )
 }

@@ -470,6 +470,7 @@ export function TaskDialog({
                                 placeholder="Select due date and time"
                                 showTime={true}
                                 disabled={readOnly}
+                                disablePast={!task}
                             />
                         </div>
 

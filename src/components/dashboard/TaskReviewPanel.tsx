@@ -81,8 +81,13 @@ function ReviewDialog({
                     reviewedBy:   user.uid,
                     reviewedAt:   serverTimestamp(),
                     updatedAt:    serverTimestamp(),
-                    // If approved, mark as done
-                    ...(decision === 'approved' ? { status: 'done' } : {}),
+                    // If approved → mark as done
+                    // If changes requested → move back to in-progress so it
+                    // reappears on the member's Kanban column
+                    ...(decision === 'approved'
+                        ? { status: 'done' }
+                        : { status: 'in-progress' }
+                    ),
                 }
             )
 
@@ -153,68 +158,85 @@ function ReviewDialog({
         <Dialog open={open} onOpenChange={onOpenChange}>
             <DialogContent className="sm:max-w-[520px]">
                 <DialogHeader>
-                    <DialogTitle>Review Task</DialogTitle>
+                    <DialogTitle className="flex items-center gap-2">
+                        Review Submission
+                    </DialogTitle>
                     <DialogDescription>
                         Review the submitted work and approve or request changes.
                     </DialogDescription>
                 </DialogHeader>
 
-                <div className="space-y-4 py-2">
+                <div className="space-y-4 py-1">
 
-                    {/* Task details */}
+                    {/* ── Task info card ── */}
                     <div className="bg-muted/50 rounded-lg p-4 space-y-3">
-                        <h3 className="font-semibold">{task.title}</h3>
-                        {task.description && (
-                            <p className="text-sm text-muted-foreground">
-                                {task.description}
-                            </p>
-                        )}
 
-                        {/* Submitted by */}
-                        {assignee && (
-                            <div className="flex items-center gap-2 text-sm">
-                                <Avatar className="h-6 w-6">
-                                    <AvatarImage src={assignee.avatar} />
-                                    <AvatarFallback className="text-xs">
-                                        {assignee.name.charAt(0)}
-                                    </AvatarFallback>
-                                </Avatar>
-                                <span className="text-muted-foreground">
-                                    Submitted by{' '}
-                                    <span className="font-medium text-foreground">
-                                        {assignee.name}
-                                    </span>
-                                </span>
-                                {submittedAt && (
-                                    <span className="text-xs text-muted-foreground ml-auto">
-                                        {format(submittedAt, 'MMM d, h:mm a')}
-                                    </span>
-                                )}
+                        {/* Task title + description */}
+                        <div>
+                            <h3 className="font-semibold text-base">{task.title}</h3>
+                            {task.description && (
+                                <p className="text-sm text-muted-foreground mt-1 line-clamp-2">
+                                    {task.description}
+                                </p>
+                            )}
+                        </div>
+
+                        {/* Divider */}
+                        <div className="border-t border-border/50" />
+
+                        {/* Submitted by row */}
+                        <div className="flex items-center gap-3">
+                            <Avatar className="h-8 w-8 shrink-0">
+                                <AvatarImage src={assignee?.avatar} />
+                                <AvatarFallback className="text-xs font-semibold">
+                                    {(assignee?.name ?? 'U').charAt(0).toUpperCase()}
+                                </AvatarFallback>
+                            </Avatar>
+                            <div className="flex-1 min-w-0">
+                                <p className="text-xs text-muted-foreground">Submitted by</p>
+                                <p className="text-sm font-semibold truncate">
+                                    {/* Prefer task.assignee.name, then teamMembers lookup, then graceful fallback */}
+                                    {task.assignee?.name
+                                        ?? assignee?.name
+                                        ?? 'Team Member'}
+                                </p>
+                            </div>
+                            {submittedAt && (
+                                <div className="shrink-0 text-right">
+                                    <p className="text-xs text-muted-foreground">
+                                        {format(submittedAt, 'MMM d')}
+                                    </p>
+                                    <p className="text-xs text-muted-foreground">
+                                        {format(submittedAt, 'h:mm a')}
+                                    </p>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Member's note — inside the task card */}
+                        {(task as any).statusNote && (
+                            <div className="bg-blue-500/10 dark:bg-blue-900/30 border
+                                            border-blue-300 dark:border-blue-700
+                                            rounded-md p-3 flex items-start gap-2">
+                                <Send className="h-3.5 w-3.5 text-blue-500 shrink-0 mt-0.5" />
+                                <div className="min-w-0">
+                                    <p className="text-xs font-medium text-blue-600
+                                                  dark:text-blue-400 mb-0.5">
+                                        Member's note:
+                                    </p>
+                                    <p className="text-sm text-blue-800 dark:text-blue-200">
+                                        {(task as any).statusNote}
+                                    </p>
+                                </div>
                             </div>
                         )}
                     </div>
 
-                    {/* Member's note */}
-                    {(task as any).statusNote && (
-                        <div className="space-y-1">
-                            <p className="text-sm font-medium flex items-center gap-1.5">
-                                <Send className="h-3.5 w-3.5" />
-                                Member's Note:
-                            </p>
-                            <div className="bg-blue-50 dark:bg-blue-900/20 border
-                                            border-blue-200 dark:border-blue-800
-                                            rounded-lg p-3 text-sm
-                                            text-blue-800 dark:text-blue-200">
-                                {(task as any).statusNote}
-                            </div>
-                        </div>
-                    )}
-
-                    {/* Feedback textarea */}
+                    {/* ── Your feedback ── */}
                     <div className="space-y-2">
                         <label className="text-sm font-medium">
                             Your Feedback{' '}
-                            <span className="text-muted-foreground font-normal">
+                            <span className="text-muted-foreground font-normal text-xs">
                                 (required if requesting changes)
                             </span>
                         </label>
@@ -225,15 +247,17 @@ function ReviewDialog({
                             rows={3}
                             maxLength={500}
                         />
+                        <p className="text-xs text-muted-foreground text-right">
+                            {feedback.length}/500
+                        </p>
                     </div>
                 </div>
 
-                <DialogFooter className="flex gap-2 sm:gap-2">
+                <DialogFooter className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2 pt-2">
                     <Button
                         variant="outline"
                         onClick={() => onOpenChange(false)}
                         disabled={saving}
-                        className="flex-1 sm:flex-none"
                     >
                         Cancel
                     </Button>
@@ -241,7 +265,6 @@ function ReviewDialog({
                         variant="destructive"
                         onClick={() => handleDecision('changes_requested')}
                         disabled={saving || !feedback.trim()}
-                        className="flex-1 sm:flex-none"
                     >
                         <XCircle className="h-4 w-4 mr-2" />
                         Request Changes
@@ -249,8 +272,7 @@ function ReviewDialog({
                     <Button
                         onClick={() => handleDecision('approved')}
                         disabled={saving}
-                        className="flex-1 sm:flex-none bg-green-600
-                                   hover:bg-green-700 text-white"
+                        className="bg-green-600 hover:bg-green-700 text-white"
                     >
                         <CheckCircle2 className="h-4 w-4 mr-2" />
                         Approve
