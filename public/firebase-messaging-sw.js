@@ -53,10 +53,33 @@ messaging.onBackgroundMessage((payload) => {
         payload.data?.body ||
         'You have a new notification'
 
+    const type = payload.data?.type || 'info'
+    let actions = [
+        { action: 'view', title: 'Open' },
+        { action: 'dismiss', title: 'Dismiss' },
+    ]
+
+    if (type === 'connection_request') {
+        actions = [
+            { action: 'accept', title: 'Accept' },
+            { action: 'view', title: 'View Profile' },
+        ]
+    } else if (type === 'warning') {
+        actions = [
+            { action: 'view', title: 'View' },
+            { action: 'dismiss', title: 'Dismiss' },
+        ]
+    } else if (type === 'info') {
+        actions = [
+            { action: 'view', title: 'View Details' },
+            { action: 'dismiss', title: 'Dismiss' },
+        ]
+    }
+
     const notificationOptions = {
         body: notificationBody,
-        icon: '/icons/icon-192x192.png',
-        badge: '/icons/badge-72x72.png',
+        icon: '/images/logoo_procollab.png',
+        badge: '/images/logoo_procollab.png',
         // ✅ tag = same ID replaces duplicate browser notifications
         tag: notificationId,
         renotify: false,
@@ -68,10 +91,7 @@ messaging.onBackgroundMessage((payload) => {
             type: payload.data?.type || 'info',
             projectId: payload.data?.projectId || null,
         },
-        actions: [
-            { action: 'view', title: 'View' },
-            { action: 'dismiss', title: 'Dismiss' },
-        ],
+        actions,
     }
 
     // ✅ Close existing notification with same tag before showing
@@ -95,9 +115,13 @@ self.addEventListener('notificationclick', (event) => {
 
     const action = event.action
     const notifData = event.notification.data || {}
-    const urlToOpen = notifData.url || '/'
+    let urlToOpen = notifData.url || '/'
 
     if (action === 'dismiss') return
+
+    if (action === 'accept') {
+        urlToOpen = `${urlToOpen}${urlToOpen.includes('?') ? '&' : '?'}action=accept`
+    }
 
     event.waitUntil(
         self.clients

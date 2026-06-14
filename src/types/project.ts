@@ -42,6 +42,7 @@ export interface Task {
     reviewedAt?: Timestamp | Date
     submittedAt?: Timestamp | Date // when member submitted for review
     submittedBy?: string // member uid
+    linkedTools?: string[]
 }
 
 export interface TimeLog {

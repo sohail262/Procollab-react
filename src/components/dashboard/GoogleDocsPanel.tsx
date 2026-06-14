@@ -11,7 +11,7 @@
  *                  delete only their own docs, view everything
  */
 import { useState, useEffect, useRef } from 'react'
-import { useGoogleLogin } from '@react-oauth/google'
+import { useGoogleDriveToken } from '@/hooks/use-google-drive-token'
 import {
     doc, getDoc, setDoc, updateDoc,
     collection, onSnapshot, addDoc, deleteDoc,
@@ -22,9 +22,11 @@ import { useParams } from 'react-router-dom'
 import { useAuth } from '@/hooks/use-auth'
 import { usePermissions } from '@/hooks/use-permissions'
 import { useToast } from '@/hooks/use-toast'
+import { updateCollaborativeActivity } from '@/services/analyticsService'
 import {
     createProjectFolder,
     createFileInFolder,
+    uploadFileToFolder,
     deleteFile,
     renameFile,
     getEmbedUrl,
@@ -50,7 +52,7 @@ import {
     FileText, Sheet, Presentation, Plus, Trash2,
     ExternalLink, Link2, Pencil, MoreVertical,
     FolderOpen, LogIn, RefreshCw, X, Check,
-    AlertTriangle, ChevronLeft,
+    AlertTriangle, ChevronLeft, Upload,
 } from 'lucide-react'
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -110,13 +112,14 @@ export function GoogleDocsPanel() {
 
     const isOwnerOrAdmin = isOwner || isAdmin
 
-    // ── Drive / Firestore state ────────────────────────────────────────────────
+    // ── Google Drive token (persisted, shared across components) ─────────────
+    const { token: accessToken, connected, connecting, connect: connectGoogle, disconnect } = useGoogleDriveToken()
+
+    // ── Drive / Firestore state ───────────────────────────────────────────────
     const [driveConfig,     setDriveConfig]     = useState<DriveConfig | null>(null)
     const [configLoading,   setConfigLoading]   = useState(true)
     const [docs,            setDocs]            = useState<StoredDoc[]>([])
     const [docsLoading,     setDocsLoading]     = useState(true)
-    const [accessToken,     setAccessToken]     = useState<string | null>(null)
-    const [connecting,      setConnecting]      = useState(false)
     const [setupFolder,     setSetupFolder]     = useState(false)
 
     // ── UI state ──────────────────────────────────────────────────────────────
@@ -129,6 +132,10 @@ export function GoogleDocsPanel() {
     const [renamingDoc,     setRenamingDoc]     = useState<StoredDoc | null>(null)
     const [renameTitle,     setRenameTitle]     = useState('')
     const [renaming,        setRenaming]        = useState(false)
+    const [uploading,       setUploading]       = useState(false)
+
+    // Hidden file input ref for upload
+    const fileInputRef = useRef<HTMLInputElement>(null)
 
     // Project name for folder creation
     const [projectName, setProjectName] = useState('')
@@ -183,41 +190,16 @@ export function GoogleDocsPanel() {
         return () => unsub()
     }, [projectId])
 
-    // ── Google OAuth login ─────────────────────────────────────────────────────
-    const googleLogin = useGoogleLogin({
-        scope: 'https://www.googleapis.com/auth/drive.file',
-        onSuccess: async tokenResponse => {
-            setAccessToken(tokenResponse.access_token)
-            toast({
-                title:       '✅ Google connected',
-                description: 'You can now create and manage documents.',
-            })
-            // If owner/admin and no folder yet → auto-trigger folder setup
-            if (isOwnerOrAdmin && !driveConfig) {
-                setSetupFolder(true)
-            }
-        },
-        onError: () => {
-            toast({
-                title:       'Google sign-in failed',
-                description: 'Please try again.',
-                variant:     'destructive',
-            })
-            setConnecting(false)
-        },
-    })
-
     const handleConnectGoogle = () => {
-        setConnecting(true)
-        googleLogin()
-        setTimeout(() => setConnecting(false), 3000) // reset if popup closed
+        if (!driveConfig) {
+            setSetupFolder(true)
+        }
+        connectGoogle()
     }
 
     // ── Setup Drive folder (owner/admin only) ─────────────────────────────────
     const handleSetupFolder = async () => {
         if (!accessToken || !projectId || !user) return
-        setSetupFolder(false)
-        setConnecting(true)
         try {
             const { id: folderId, webViewLink } = await createProjectFolder(
                 accessToken,
@@ -238,7 +220,7 @@ export function GoogleDocsPanel() {
             )
 
             toast({
-                title:       '📁 Drive folder created!',
+                title:       'Drive folder created!',
                 description: `"Procollab – ${projectName}" is ready in your Google Drive.`,
             })
         } catch (err: any) {
@@ -248,8 +230,6 @@ export function GoogleDocsPanel() {
                 description: err.message || 'Please try again.',
                 variant:     'destructive',
             })
-        } finally {
-            setConnecting(false)
         }
     }
 
@@ -286,8 +266,10 @@ export function GoogleDocsPanel() {
                 }
             )
 
+            updateCollaborativeActivity(user.uid, projectId)
+
             toast({
-                title:       `📄 ${newDocTitle} created!`,
+                title:       `${newDocTitle} created!`,
                 description: `Your ${mimeLabel(file.mimeType)} is ready to edit.`,
             })
 
@@ -297,7 +279,7 @@ export function GoogleDocsPanel() {
             console.error('Create doc error:', err)
             // Token may have expired — prompt re-auth
             if (err.message?.includes('401') || err.message?.includes('403')) {
-                setAccessToken(null)
+                disconnect()
                 toast({
                     title:       'Session expired',
                     description: 'Please reconnect your Google account.',
@@ -351,6 +333,58 @@ export function GoogleDocsPanel() {
         }
     }
 
+    // ── Upload a file ──────────────────────────────────────────────────────────
+    const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0]
+        if (!file || !accessToken || !driveConfig || !projectId || !user) return
+        setUploading(true)
+        try {
+            const uploaded = await uploadFileToFolder(
+                accessToken,
+                driveConfig.folderId,
+                file
+            )
+            // Store metadata in Firestore
+            await addDoc(
+                collection(db, 'projects', projectId, 'driveDocuments'),
+                {
+                    fileId:      uploaded.id,
+                    title:       uploaded.name,
+                    mimeType:    uploaded.mimeType,
+                    webViewLink: uploaded.webViewLink,
+                    createdBy:   user.uid,
+                    createdAt:   serverTimestamp(),
+                }
+            )
+
+            updateCollaborativeActivity(user.uid, projectId)
+            toast({
+                title:       `${file.name} uploaded!`,
+                description: 'File is now in the shared project folder.',
+            })
+        } catch (err: any) {
+            console.error('Upload error:', err)
+            if (err.message?.includes('401') || err.message?.includes('403')) {
+                disconnect()
+                toast({
+                    title:       'Session expired',
+                    description: 'Please reconnect your Google account.',
+                    variant:     'destructive',
+                })
+            } else {
+                toast({
+                    title:       'Upload failed',
+                    description: err.message,
+                    variant:     'destructive',
+                })
+            }
+        } finally {
+            setUploading(false)
+            // Reset input so the same file can be re-selected if needed
+            if (fileInputRef.current) fileInputRef.current.value = ''
+        }
+    }
+
     // ── Rename a document ──────────────────────────────────────────────────────
     const handleRename = async () => {
         if (!renamingDoc || !renameTitle.trim() || !accessToken || !projectId) return
@@ -361,6 +395,9 @@ export function GoogleDocsPanel() {
                 doc(db, 'projects', projectId, 'driveDocuments', renamingDoc.id),
                 { title: renameTitle.trim() }
             )
+            if (user) {
+                updateCollaborativeActivity(user.uid, projectId)
+            }
             if (activeDoc?.id === renamingDoc.id) {
                 setActiveDoc(prev => prev ? { ...prev, title: renameTitle.trim() } : prev)
             }
@@ -490,17 +527,38 @@ export function GoogleDocsPanel() {
                             {connecting ? 'Connecting…' : 'Connect Google to create / edit'}
                         </Button>
                     ) : (
-                        <Button
-                            className="w-full gap-2 h-8 text-xs"
-                            onClick={() => {
-                                setNewDocType('document')
-                                setNewDocTitle('')
-                                setShowNewDialog(true)
-                            }}
-                        >
-                            <Plus className="h-3.5 w-3.5" />
-                            New Document
-                        </Button>
+                        <div className="flex gap-1.5">
+                            <Button
+                                className="flex-1 gap-2 h-8 text-xs"
+                                onClick={() => {
+                                    setNewDocType('document')
+                                    setNewDocTitle('')
+                                    setShowNewDialog(true)
+                                }}
+                            >
+                                <Plus className="h-3.5 w-3.5" />
+                                New
+                            </Button>
+                            <Button
+                                variant="outline"
+                                className="h-8 w-8 p-0 shrink-0"
+                                title="Upload a file to Drive"
+                                disabled={uploading}
+                                onClick={() => fileInputRef.current?.click()}
+                            >
+                                {uploading
+                                    ? <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                                    : <Upload className="h-3.5 w-3.5" />
+                                }
+                            </Button>
+                            {/* Hidden file input */}
+                            <input
+                                ref={fileInputRef}
+                                type="file"
+                                className="hidden"
+                                onChange={handleUpload}
+                            />
+                        </div>
                     )}
                 </div>
 

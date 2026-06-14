@@ -40,6 +40,7 @@ import {
 } from 'firebase/database'
 import { db, database } from '@/lib/firebase'
 import { useAuth } from '@/hooks/use-auth'
+import { updateCollaborativeActivity } from '@/services/analyticsService'
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 const SNAPSHOT_INTERVAL_MS = 30_000
@@ -404,6 +405,10 @@ export function Whiteboard({ readOnly = false }: WhiteboardProps) {
             push(changesRef, sanitizeForFirebase(payload)).catch(err =>
                 console.error('Error broadcasting change:', err)
             )
+
+            if (projectId) {
+                updateCollaborativeActivity(uid, projectId)
+            }
         }
 
         const scheduleFlush = () => {

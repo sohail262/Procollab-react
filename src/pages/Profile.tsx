@@ -8,14 +8,17 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
     Loader2, MapPin, Link as LinkIcon, Github, Linkedin, Twitter,
     Mail, Calendar, UserPlus, Check, BookOpen, Trash2,
-    LayoutDashboard, FileText, Users, ImageIcon, X,
+    LayoutDashboard, FileText, Users, ImageIcon, X, Award, Star,
 } from 'lucide-react'
 import {
     doc, getDoc, collection, query, where,
     getDocs, deleteDoc, onSnapshot, updateDoc,
+    addDoc, serverTimestamp, orderBy,
 } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
+import { cachedGetDoc, cachedQuery } from '@/lib/queryUtils'
 import { useToast } from '@/hooks/use-toast'
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import {
     sendConnectionRequest,
     acceptConnectionRequest,
@@ -24,6 +27,8 @@ import {
     getConnectionStatus,
 } from '@/services/connectionService'
 import { BANNER_PRESETS, DEFAULT_BANNER, type BannerPreset } from '@/components/BannerPresets'
+import { InviteToProjectDropdown, InviteButton } from '@/components/InviteToProjectDropdown'
+import { sendNotificationWithPush } from '@/services/notificationTrigger'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface UserProfile {
@@ -43,6 +48,24 @@ interface UserProfile {
     twitter?: string
     joinedAt?: any
     bannerStyle?: string
+    portfolioURL?: string
+    isOpenToWork?: boolean
+    availabilityHours?: number
+    timezone?: string
+    preferredRoles?: string[]
+    pastProjectsShowcase?: {
+        title: string
+        description: string
+        outcome: string
+        screenshotURL?: string
+    }[]
+    reputation?: {
+        collaborationScore: number
+        reliabilityScore: number
+        communicationScore: number
+        completionScore: number
+        totalReviews: number
+    }
 }
 interface Project {
     id: string
@@ -74,6 +97,7 @@ export default function Profile() {
     const [profile, setProfile] = useState<UserProfile | null>(null)
     const [projects, setProjects] = useState<Project[]>([])
     const [applications, setApplications] = useState<Application[]>([])
+    const [reviews, setReviews] = useState<any[]>([])
     const [loading, setLoading] = useState(true)
     const [connectionStatus, setConnectionStatus] = useState<
         'none' | 'pending_out' | 'pending_in' | 'connected'
@@ -84,6 +108,11 @@ export default function Profile() {
     const [showAllNetwork, setShowAllNetwork] = useState(false)
     const [showBannerPicker, setShowBannerPicker] = useState(false)
     const [savingBanner, setSavingBanner] = useState(false)
+
+    // Invite-to-project state
+    const [myProjects, setMyProjects] = useState<{ id: string; title: string }[]>([])
+    const [inviteDropdownOpen, setInviteDropdownOpen] = useState(false)
+    const [sentInvites, setSentInvites] = useState<Set<string>>(new Set())
 
     const NETWORK_LIMIT = 15
 
@@ -104,8 +133,133 @@ export default function Profile() {
         }
     }
 
-    const isOwnProfile = !id || (currentUser && id === currentUser.uid)
+        const isOwnProfile = !id || (currentUser && id === currentUser.uid)
     const profileId = id || currentUser?.uid
+
+    // Profile Strength Calculation
+    const getProfileStrength = useCallback(() => {
+        if (!profile) return { score: 0, suggestions: [] }
+        
+        let score = 0
+        const suggestions = []
+        
+        // 1. Photo (15%)
+        if (profile.photoURL) {
+            score += 15
+        } else {
+            suggestions.push({
+                label: 'Add a profile photo',
+                help: 'Build trust with potential teammates (adds 15%).'
+            })
+        }
+        
+        // 2. Bio (15%)
+        if (profile.bio && profile.bio.trim().length > 0) {
+            score += 15
+        } else {
+            suggestions.push({
+                label: 'Write an About section',
+                help: 'Introduce yourself, your background, and interests (adds 15%).'
+            })
+        }
+        
+        // 3. Skills (20%)
+        if (profile.skills && profile.skills.length > 0) {
+            score += 20
+        } else {
+            suggestions.push({
+                label: 'List your skills',
+                help: 'Add at least 3 skills to make your profile searchable (adds 20%).'
+            })
+        }
+        
+        // 4. Social / Portfolio (20%)
+        const hasSocial = !!(profile.github || profile.linkedin || profile.twitter || profile.website || profile.portfolioURL)
+        if (hasSocial) {
+            score += 20
+        } else {
+            suggestions.push({
+                label: 'Add social or portfolio links',
+                help: 'Connect your GitHub, LinkedIn, or Portfolio URL (adds 20%).'
+            })
+        }
+        
+        // 5. Work preferences (15%)
+        const hasPreferences = !!(profile.isOpenToWork || profile.availabilityHours || profile.timezone || (profile.preferredRoles && profile.preferredRoles.length > 0))
+        if (hasPreferences) {
+            score += 15
+        } else {
+            suggestions.push({
+                label: 'Set collaboration preferences',
+                help: 'Add your availability, timezone, and preferred roles (adds 15%).'
+            })
+        }
+        
+        // 6. Portfolio Showcase (15%)
+        if (profile.pastProjectsShowcase && profile.pastProjectsShowcase.length > 0) {
+            score += 15
+        } else {
+            suggestions.push({
+                label: 'Add a showcase project',
+                help: 'Feature an outcome-based project you worked on (adds 15%).'
+            })
+        }
+        
+        return { score, suggestions }
+    }, [profile])
+
+    const { score: profileStrengthScore, suggestions: profileStrengthSuggestions } = getProfileStrength()
+
+    // Compute reputation dynamically based on Firestore reviews subcollection
+    const computedReputation = (() => {
+        if (!reviews || reviews.length === 0) {
+            if (profile?.reputation) {
+                const rep = profile.reputation
+                const coop = typeof rep.collaborationScore === 'number' ? rep.collaborationScore : 100
+                const rel = typeof rep.reliabilityScore === 'number' ? rep.reliabilityScore : 100
+                const comm = typeof rep.communicationScore === 'number' ? rep.communicationScore : 100
+                const comp = typeof rep.completionScore === 'number' ? rep.completionScore : 100
+                const total = typeof rep.totalReviews === 'number' ? rep.totalReviews : 1
+                return {
+                    totalReviews: total,
+                    collaborationScore: coop,
+                    reliabilityScore: rel,
+                    communicationScore: comm,
+                    completionScore: comp,
+                    overallRating: ((coop + rel + comm + comp) / 4) / 20
+                }
+            }
+            return null
+        }
+        
+        const total = reviews.length
+        let coopSum = 0
+        let relSum = 0
+        let commSum = 0
+        let skillSum = 0
+
+        reviews.forEach(r => {
+            coopSum += typeof r.cooperation === 'number' ? r.cooperation : 5
+            relSum += typeof r.reliability === 'number' ? r.reliability : 5
+            commSum += typeof r.communication === 'number' ? r.communication : 5
+            skillSum += typeof r.skill === 'number' ? r.skill : 5
+        })
+
+        const collaborationScore = Math.round((coopSum / total) * 20)
+        const reliabilityScore = Math.round((relSum / total) * 20)
+        const communicationScore = Math.round((commSum / total) * 20)
+        const completionScore = Math.round((skillSum / total) * 20)
+        const overallRating = ((coopSum + relSum + commSum + skillSum) / (total * 4))
+
+        return {
+            totalReviews: total,
+            collaborationScore,
+            reliabilityScore,
+            communicationScore,
+            completionScore,
+            overallRating,
+        }
+    })()
 
     // ── Re-derive connection status from Firestore ────────────────────────────
     const refreshConnectionStatus = useCallback(async () => {
@@ -113,6 +267,66 @@ export default function Profile() {
         const status = await getConnectionStatus(currentUser.uid, profileId)
         setConnectionStatus(status)
     }, [currentUser, profileId, isOwnProfile])
+
+    // ── Load profile + real-time friends listener ─────────────────────────────
+    useEffect(() => {
+        if (currentUser) {
+            loadMyProjects()
+        }
+    }, [currentUser])
+
+    const loadMyProjects = async () => {
+        if (!currentUser) return
+        try {
+            // ── FIX: Use cachedQuery (shared key with dashboardService) ──
+            const snap = await cachedQuery(
+                query(collection(db, 'projects'), where('createdBy', '==', currentUser.uid)),
+                { ttl: 300_000, cacheKey: `my-projects-${currentUser.uid}` }
+            )
+            const projects = snap.docs.map(d => ({ id: d.id, title: d.data().title || 'Untitled' }))
+            setMyProjects(projects)
+        } catch (err) {
+            console.error('Failed to load own projects for invite:', err)
+        }
+    }
+
+    const handleInvite = async (projectId: string, projectTitle: string, message?: string) => {
+        if (!currentUser || !profile) return
+        const key = `${profile.id}_${projectId}`
+        if (sentInvites.has(key)) return
+
+        try {
+            await addDoc(collection(db, 'projects', projectId, 'invitations'), {
+                email: '',
+                userId: profile.id,
+                invitedBy: currentUser.uid,
+                projectId,
+                projectTitle,
+                status: 'pending',
+                message: message || '',
+                createdAt: serverTimestamp(),
+            })
+
+            const body = message 
+                ? `You've been invited to join "${projectTitle}". Message: "${message}"`
+                : `You've been invited to join "${projectTitle}".`
+
+            await sendNotificationWithPush(profile.id, {
+                title: '📬 Project Invitation',
+                body,
+                type: 'info',
+                url: `/project/${projectId}`,
+                projectId,
+            })
+
+            setSentInvites(prev => new Set([...prev, key]))
+            setInviteDropdownOpen(false)
+            toast({ title: 'Invitation sent!', description: `Invited to "${projectTitle}"` })
+        } catch (err) {
+            console.error('Error sending project invite:', err)
+            toast({ title: 'Failed to send invitation', variant: 'destructive' })
+        }
+    }
 
     // ── Load profile + real-time friends listener ─────────────────────────────
     useEffect(() => {
@@ -124,66 +338,117 @@ export default function Profile() {
             try {
                 setLoading(true)
 
-                // User document
-                const userDoc = await getDoc(doc(db, 'users', profileId!))
-                if (userDoc.exists()) {
-                    setProfile({ id: userDoc.id, ...userDoc.data() } as UserProfile)
-                }
-
-                // Projects created by this user
-                const projectsSnapshot = await getDocs(
-                    query(
-                        collection(db, 'projects'),
-                        where('createdBy', '==', profileId)
-                    )
-                )
-                setProjects(
-                    projectsSnapshot.docs.map(d => ({
-                        id: d.id,
-                        ...d.data(),
-                    })) as Project[]
-                )
-
-                // Applications (own profile only)
+                // ── FIX: Try sessionStorage for own profile (instant revisit) ──
+                const ssKey = `profile_${profileId}`
+                const SS_TTL = 3 * 60_000 // 3 min
                 if (isOwnProfile) {
-                    const appsSnapshot = await getDocs(
-                        collection(db, 'users', profileId!, 'applications')
+                    try {
+                        const raw = sessionStorage.getItem(ssKey)
+                        if (raw) {
+                            const { profileData, projectsData, applicationsData, ts } = JSON.parse(raw)
+                            if (Date.now() - ts < SS_TTL) {
+                                setProfile(profileData)
+                                setProjects(projectsData)
+                                setApplications(applicationsData)
+                                setLoading(false)
+                                // Still refresh connection status in bg
+                                if (!isOwnProfile && currentUser) refreshConnectionStatus()
+                                // Set up real-time friends listener only
+                                unsubFriends = onSnapshot(
+                                    collection(db, 'users', profileId!, 'friends'),
+                                    snap => {
+                                        const list = snap.docs.map(fd => {
+                                            const uid = fd.id
+                                            const fdata = fd.data() as any
+                                            return {
+                                                uid,
+                                                displayName: (typeof fdata.name === 'string' && fdata.name.trim()) ||
+                                                    (typeof fdata.displayName === 'string' && fdata.displayName.trim()) || 'Member',
+                                                photoURL: fdata.photoURL ?? undefined,
+                                            } as NetworkFriend
+                                        })
+                                        setNetworkFriends(list)
+                                    }
+                                )
+                                return
+                            }
+                        }
+                    } catch { /* ignore */ }
+                }
+
+                // ── FIX: Parallel fetch instead of 4 sequential awaits ──
+                const basePromises: Promise<any>[] = [
+                    // 1. User document (cached)
+                    cachedGetDoc(doc(db, 'users', profileId!), { ttl: 300_000 }),
+                    // 2. Projects created by this user (cached)
+                    cachedQuery(
+                        query(collection(db, 'projects'), where('createdBy', '==', profileId)),
+                        { ttl: 300_000, cacheKey: `profile-projects-${profileId}` }
+                    ),
+                    // 3. Reviews (cached)
+                    cachedQuery(
+                        query(collection(db, 'users', profileId!, 'reviews'), orderBy('createdAt', 'desc')),
+                        { ttl: 300_000, cacheKey: `profile-reviews-${profileId}` }
                     )
-                    setApplications(
-                        appsSnapshot.docs.map(d => ({
-                            id: d.id,
-                            ...d.data(),
-                        })) as Application[]
+                ]
+
+                // 4. Applications — own profile only (cached)
+                if (isOwnProfile) {
+                    basePromises.push(
+                        cachedQuery(
+                            collection(db, 'users', profileId!, 'applications') as any,
+                            { ttl: 120_000, cacheKey: `profile-apps-${profileId}` }
+                        )
                     )
                 }
 
-                // ✅ Real-time listener on friends sub-collection
-                // Fires whenever anyone is added/removed as a friend,
-                // which also triggers a connection status re-check
+                const [userDoc, projectsSnap, reviewsSnap, appsSnap] = await Promise.all(basePromises)
+
+                let profileData: UserProfile | null = null
+                if (userDoc.exists()) {
+                    profileData = { id: userDoc.id, ...userDoc.data() } as UserProfile
+                    setProfile(profileData)
+                }
+
+                const projectsData = projectsSnap.docs.map((d: any) => ({ id: d.id, ...d.data() })) as Project[]
+                setProjects(projectsData)
+
+                const reviewsData = reviewsSnap.docs.map((d: any) => ({ id: d.id, ...d.data() }))
+                setReviews(reviewsData)
+
+                let applicationsData: Application[] = []
+                if (isOwnProfile && appsSnap) {
+                    applicationsData = appsSnap.docs.map((d: any) => ({ id: d.id, ...d.data() })) as Application[]
+                    setApplications(applicationsData)
+                }
+
+                // Persist own profile to sessionStorage
+                if (isOwnProfile && profileData) {
+                    try {
+                        sessionStorage.setItem(ssKey, JSON.stringify({
+                            profileData,
+                            projectsData,
+                            applicationsData,
+                            ts: Date.now()
+                        }))
+                    } catch { /* quota */ }
+                }
+
+                // Real-time friends listener (optimised — uses denormalised data, 0 extra reads)
                 unsubFriends = onSnapshot(
                     collection(db, 'users', profileId!, 'friends'),
                     async snap => {
-                        const list = await Promise.all(
-                            snap.docs.map(async fd => {
-                                const uid = fd.id
-                                const fdata = fd.data()
-                                const us = await getDoc(doc(db, 'users', uid))
-                                const u = us.exists() ? (us.data() as any) : {}
-                                const displayName =
-                                    (typeof fdata.name === 'string' && fdata.name.trim()) ||
-                                    `${u.firstName || ''} ${u.lastName || ''}`.trim() ||
-                                    u.email ||
-                                    'Member'
-                                return {
-                                    uid,
-                                    displayName,
-                                    photoURL: u.photoURL,
-                                } as NetworkFriend
-                            })
-                        )
+                        const list = snap.docs.map(fd => {
+                            const uid = fd.id
+                            const fdata = fd.data() as any
+                            const displayName =
+                                (typeof fdata.name === 'string' && fdata.name.trim()) ||
+                                (typeof fdata.displayName === 'string' && fdata.displayName.trim()) ||
+                                'Member'
+                            return { uid, displayName, photoURL: fdata.photoURL ?? undefined } as NetworkFriend
+                        })
                         setNetworkFriends(list)
 
-                        // Re-check status whenever friends list changes
                         if (!isOwnProfile && currentUser) {
                             await refreshConnectionStatus()
                         }
@@ -259,7 +524,7 @@ export default function Profile() {
         }
     }
 
-    const handleAcceptIncomingOnProfile = async () => {
+    const handleAcceptIncomingOnProfile = useCallback(async () => {
         if (!currentUser || !profile) return
         try {
             setActionLoading(true)
@@ -272,7 +537,18 @@ export default function Profile() {
         } finally {
             setActionLoading(false)
         }
-    }
+    }, [currentUser, profile, refreshConnectionStatus, toast])
+
+    // ✅ Auto-accept connection request if query param is set
+    useEffect(() => {
+        const searchParams = new URLSearchParams(window.location.search)
+        const actionParam = searchParams.get('action')
+        if (actionParam === 'accept' && connectionStatus === 'pending_in' && !actionLoading && profile) {
+            handleAcceptIncomingOnProfile()
+            // Clean up the URL parameter
+            navigate(window.location.pathname, { replace: true })
+        }
+    }, [connectionStatus, actionLoading, profile, handleAcceptIncomingOnProfile, navigate])
 
     const handleRejectIncomingOnProfile = async () => {
         if (!currentUser || !profile) return
@@ -435,7 +711,7 @@ export default function Profile() {
 
                     {/* Banner picker overlay */}
                     {showBannerPicker && (
-                        <div className="absolute inset-0 z-20 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 rounded-xl">
+                        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
                             <div className="bg-white dark:bg-gray-900 rounded-xl shadow-2xl p-4 w-full max-w-2xl">
                                 <div className="flex items-center justify-between mb-3">
                                     <h3 className="font-semibold text-sm">Choose a banner</h3>
@@ -517,7 +793,26 @@ export default function Profile() {
                                             <Trash2 className="h-3.5 w-3.5" />
                                         </Button>
                                     </>
-                                ) : renderConnectionButton()}
+                                ) : (
+                                    <div className="flex items-center gap-2">
+                                        {renderConnectionButton()}
+                                        <div className="relative">
+                                            <InviteButton
+                                                isOpen={inviteDropdownOpen}
+                                                onClick={() => setInviteDropdownOpen(!inviteDropdownOpen)}
+                                            />
+                                            {inviteDropdownOpen && (
+                                                <InviteToProjectDropdown
+                                                    targetUserId={profile.id}
+                                                    projects={myProjects}
+                                                    sentInvites={sentInvites}
+                                                    onInvite={handleInvite}
+                                                    onClose={() => setInviteDropdownOpen(false)}
+                                                />
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         </div>
 
@@ -578,8 +873,15 @@ export default function Profile() {
                             )}
 
                             {/* Social links as small pill buttons */}
-                            {(profile.github || profile.linkedin || profile.twitter || profile.website) && (
+                            {(profile.github || profile.linkedin || profile.twitter || profile.website || profile.portfolioURL) && (
                                 <div className="flex items-center gap-1.5 ml-auto">
+                                    {profile.portfolioURL && (
+                                        <a href={profile.portfolioURL} target="_blank" rel="noopener noreferrer"
+                                            className="flex items-center gap-1 px-2.5 py-1 rounded-full bg-indigo-50 dark:bg-indigo-950/40 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors text-indigo-600 dark:text-indigo-400 font-semibold">
+                                            <LinkIcon className="h-3.5 w-3.5" />
+                                            <span className="hidden sm:inline text-[10px] font-semibold">Portfolio</span>
+                                        </a>
+                                    )}
                                     {profile.github && (
                                         <a href={profile.github} target="_blank" rel="noopener noreferrer"
                                             className="flex items-center gap-1 px-2 py-1 rounded-full bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors text-gray-600 dark:text-gray-300">
@@ -620,6 +922,108 @@ export default function Profile() {
 
                     {/* Left Column */}
                     <div className="space-y-6">
+
+                        {/* Profile Strength Card (Own Profile only) */}
+                        {isOwnProfile && (
+                            <Card className="relative overflow-hidden border border-indigo-100 dark:border-indigo-900/30">
+                                <CardContent className="pt-6">
+                                    <div className="flex justify-between items-center mb-3">
+                                        <h3 className="font-bold text-sm text-gray-900 dark:text-white flex items-center gap-1.5">
+                                            <span className="flex h-2 w-2 rounded-full bg-indigo-500 animate-pulse" />
+                                            Profile Strength
+                                        </h3>
+                                        <span className="text-sm font-extrabold text-indigo-600 dark:text-indigo-400">
+                                            {profileStrengthScore}%
+                                        </span>
+                                    </div>
+                                    
+                                    {/* Progress Bar */}
+                                    <div className="w-full h-2 bg-gray-200 dark:bg-gray-800 rounded-full overflow-hidden mb-4">
+                                        <div 
+                                            className="h-full bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 transition-all duration-500" 
+                                            style={{ width: `${profileStrengthScore}%` }}
+                                        />
+                                    </div>
+
+                                    {/* Suggestions list */}
+                                    {profileStrengthSuggestions.length > 0 ? (
+                                        <div className="space-y-2.5">
+                                            <p className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Suggested actions</p>
+                                            {profileStrengthSuggestions.map((suggestion, index) => (
+                                                <div key={index} className="flex items-start gap-2 text-xs text-gray-600 dark:text-gray-300">
+                                                    <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 text-[10px] font-bold mt-0.5">
+                                                        +
+                                                    </span>
+                                                    <div className="flex-1">
+                                                        <span className="font-medium text-gray-700 dark:text-gray-200">{suggestion.label}</span>
+                                                        <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">{suggestion.help}</p>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                            <Button 
+                                                variant="outline" 
+                                                size="sm" 
+                                                className="w-full text-xs mt-2 border-indigo-200 hover:bg-indigo-50 hover:text-indigo-600 dark:border-indigo-900/30 dark:hover:bg-indigo-950/30 dark:hover:text-indigo-400 transition-colors"
+                                                onClick={() => navigate('/settings/profile')}
+                                            >
+                                                Update Profile
+                                            </Button>
+                                        </div>
+                                    ) : (
+                                        <div className="text-center py-2">
+                                            <p className="text-xs text-green-600 dark:text-green-400 font-medium">Your profile is complete and optimized.</p>
+                                        </div>
+                                    )}
+                                </CardContent>
+                            </Card>
+                        )}
+
+                        {/* Collaboration Preferences Card */}
+                        <Card>
+                            <CardHeader className="pb-3">
+                                <CardTitle className="text-sm font-bold flex items-center justify-between">
+                                    <span>Collaboration Preferences</span>
+                                    {profile.isOpenToWork ? (
+                                        <Badge className="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/20 font-semibold text-[10px] py-0.5">
+                                            ● Open to Work
+                                        </Badge>
+                                    ) : (
+                                        <Badge variant="outline" className="text-gray-400 dark:text-gray-500 text-[10px] py-0.5">
+                                            Not Active
+                                        </Badge>
+                                    )}
+                                </CardTitle>
+                            </CardHeader>
+                            <CardContent className="space-y-4">
+                                <div className="grid grid-cols-2 gap-3 text-xs">
+                                    <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-100 dark:border-gray-800">
+                                        <span className="text-gray-400 dark:text-gray-500 block mb-0.5 text-[10px]">Availability</span>
+                                        <span className="font-semibold text-gray-800 dark:text-gray-200 text-xs">
+                                            {profile.availabilityHours ? `${profile.availabilityHours} hrs/week` : 'Not specified'}
+                                        </span>
+                                    </div>
+                                    <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-100 dark:border-gray-800">
+                                        <span className="text-gray-400 dark:text-gray-500 block mb-0.5 text-[10px]">Timezone</span>
+                                        <span className="font-semibold text-gray-800 dark:text-gray-200 text-xs truncate block">
+                                            {profile.timezone || 'Not specified'}
+                                        </span>
+                                    </div>
+                                </div>
+
+                                {profile.preferredRoles && profile.preferredRoles.length > 0 && (
+                                    <div>
+                                        <span className="text-[10px] text-gray-400 dark:text-gray-500 block mb-2 font-semibold uppercase tracking-wider">Preferred Roles</span>
+                                        <div className="flex flex-wrap gap-1.5">
+                                            {profile.preferredRoles.map((role, i) => (
+                                                <Badge key={i} variant="outline" className="bg-blue-50/50 dark:bg-blue-950/20 text-blue-600 dark:text-blue-400 border-blue-200/50 dark:border-blue-900/30 text-[10px]">
+                                                    {role}
+                                                </Badge>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                            </CardContent>
+                        </Card>
 
                         {/* About */}
                         <Card>
@@ -694,6 +1098,66 @@ export default function Profile() {
                                 )}
                             </CardContent>
                         </Card>
+
+                        {/* Reputation & Reviews */}
+                        {computedReputation && computedReputation.totalReviews > 0 && (
+                            <Card>
+                                <CardHeader className="pb-3">
+                                    <CardTitle className="text-sm font-bold flex items-center justify-between">
+                                        <span>Reputation & Feedback</span>
+                                        <Badge className="bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 hover:bg-amber-500/20 font-semibold text-[10px] py-0.5">
+                                            {computedReputation.totalReviews} Peer Review{computedReputation.totalReviews > 1 ? 's' : ''}
+                                        </Badge>
+                                    </CardTitle>
+                                </CardHeader>
+                                <CardContent className="space-y-4">
+                                    {typeof computedReputation.overallRating === 'number' && (
+                                        <div className="flex items-center gap-3 bg-amber-500/5 dark:bg-amber-500/10 border border-amber-500/15 dark:border-amber-500/20 rounded-lg p-3">
+                                            <div className="text-3xl font-extrabold text-amber-600 dark:text-amber-400">
+                                                {computedReputation.overallRating.toFixed(1)}
+                                            </div>
+                                            <div className="space-y-0.5">
+                                                <div className="flex gap-0.5">
+                                                    {[1, 2, 3, 4, 5].map((star) => {
+                                                        const isFilled = star <= Math.round(computedReputation.overallRating)
+                                                        return (
+                                                            <Star 
+                                                                key={star} 
+                                                                className={`h-3.5 w-3.5 ${isFilled ? 'fill-amber-400 text-amber-400' : 'text-zinc-300 dark:text-zinc-700'}`} 
+                                                            />
+                                                        )
+                                                    })}
+                                                </div>
+                                                <p className="text-[10px] text-gray-505 dark:text-gray-400 font-semibold">
+                                                    Overall Peer Rating
+                                                </p>
+                                            </div>
+                                        </div>
+                                    )}
+                                    <div className="space-y-2.5">
+                                        {[
+                                            { label: 'Cooperation & Teamwork', score: computedReputation.collaborationScore },
+                                            { label: 'Reliability & Sprints', score: computedReputation.reliabilityScore },
+                                            { label: 'Communication', score: computedReputation.communicationScore },
+                                            { label: 'Technical Contribution', score: computedReputation.completionScore },
+                                        ].map((rep, idx) => (
+                                            <div key={idx} className="space-y-1">
+                                                <div className="flex justify-between text-xs">
+                                                    <span className="text-gray-500 dark:text-gray-400 font-medium">{rep.label}</span>
+                                                    <span className="font-semibold text-gray-800 dark:text-gray-200">{Math.round(rep.score / 20 * 10) / 10} / 5</span>
+                                                </div>
+                                                <div className="w-full h-1.5 bg-gray-200 dark:bg-gray-800 rounded-full overflow-hidden">
+                                                    <div 
+                                                        className="h-full bg-amber-500 rounded-full transition-all duration-300"
+                                                        style={{ width: `${rep.score}%` }}
+                                                    />
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        )}
 
                         {/* Skills */}
                         <Card>
@@ -781,6 +1245,109 @@ export default function Profile() {
                             )}
                         </div>
 
+                        {/* Teammate Endorsements */}
+                        {reviews.length > 0 && (
+                            <div>
+                                <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
+                                    <Award className="h-5 w-5 text-amber-500" />
+                                    Teammate Endorsements
+                                </h2>
+                                <div className="space-y-4">
+                                    {reviews.map((rev) => (
+                                        <Card key={rev.id}>
+                                            <CardContent className="p-5">
+                                                <div className="flex items-start gap-3">
+                                                    <Avatar className="h-9 w-9">
+                                                        <AvatarImage src={rev.reviewerAvatar} />
+                                                        <AvatarFallback className="text-xs">
+                                                            {(rev.reviewerName || 'Anonymous').charAt(0).toUpperCase()}
+                                                        </AvatarFallback>
+                                                    </Avatar>
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="flex items-baseline justify-between gap-2">
+                                                            <h4 className="text-sm font-semibold text-gray-900 dark:text-zinc-150 truncate">
+                                                                {rev.reviewerName || 'Anonymous'}
+                                                            </h4>
+                                                            <span className="text-[10px] text-gray-400 dark:text-zinc-500 shrink-0 italic">
+                                                                on {rev.projectName}
+                                                            </span>
+                                                        </div>
+                                                        <p className="text-[10px] text-gray-400 dark:text-zinc-500 mt-0.5">
+                                                            Cooperated: {rev.cooperation}/5 · Reliable: {rev.reliability}/5 · Comm: {rev.communication}/5
+                                                        </p>
+                                                        {rev.comment && (
+                                                            <blockquote className="mt-3 text-xs text-gray-600 dark:text-gray-300 border-l-2 border-zinc-200 dark:border-zinc-800 pl-3 italic leading-relaxed">
+                                                                "{rev.comment}"
+                                                            </blockquote>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                            </CardContent>
+                                        </Card>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Portfolio Showcase */}
+                        <div>
+                            <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
+                                <ImageIcon className="h-5 w-5 text-indigo-500" />
+                                Project Showcase
+                            </h2>
+                            {profile.pastProjectsShowcase && profile.pastProjectsShowcase.length > 0 ? (
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    {profile.pastProjectsShowcase.map((proj, idx) => (
+                                        <Card key={idx} className="overflow-hidden border border-gray-200 dark:border-gray-800 hover:shadow-lg transition-all duration-300 flex flex-col">
+                                            {proj.screenshotURL && (
+                                                <div className="h-40 w-full overflow-hidden bg-gray-100 dark:bg-gray-800 relative">
+                                                    <img 
+                                                        src={proj.screenshotURL} 
+                                                        alt={proj.title}
+                                                        className="w-full h-full object-cover hover:scale-105 transition-transform duration-300"
+                                                        onError={(e) => {
+                                                            (e.target as HTMLElement).style.display = 'none';
+                                                        }}
+                                                    />
+                                                </div>
+                                            )}
+                                            <CardContent className="p-5 flex-1 flex flex-col justify-between">
+                                                <div>
+                                                    <h3 className="font-bold text-sm text-gray-900 dark:text-white mb-2">{proj.title}</h3>
+                                                    <p className="text-xs text-gray-600 dark:text-gray-300 mb-4 line-clamp-3 leading-relaxed">{proj.description}</p>
+                                                </div>
+                                                {proj.outcome && (
+                                                    <div className="mt-auto pt-3 border-t border-gray-100 dark:border-gray-800/60">
+                                                        <span className="text-[9px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">Impact / Outcome</span>
+                                                        <p className="text-xs font-semibold text-gray-800 dark:text-gray-200 mt-0.5 leading-relaxed">{proj.outcome}</p>
+                                                    </div>
+                                                )}
+                                            </CardContent>
+                                        </Card>
+                                    ))}
+                                </div>
+                            ) : (
+                                <Card className="border-dashed border-2">
+                                    <CardContent className="p-8 text-center text-gray-500">
+                                        <ImageIcon className="h-10 w-10 mx-auto mb-3 text-gray-300 dark:text-gray-700" />
+                                        <p className="text-sm font-medium mb-1">No showcase projects yet</p>
+                                        {isOwnProfile && (
+                                            <p className="text-xs text-gray-400 mb-4">Add projects you've worked on outside of ProCollab to build credibility.</p>
+                                        )}
+                                        {isOwnProfile && (
+                                            <Button 
+                                                size="sm" 
+                                                variant="outline"
+                                                onClick={() => navigate('/settings/profile')}
+                                            >
+                                                Add Project
+                                            </Button>
+                                        )}
+                                    </CardContent>
+                                </Card>
+                            )}
+                        </div>
+
                         {/* Applications — own profile only */}
                         {isOwnProfile && (
                             <div>
@@ -808,9 +1375,9 @@ export default function Profile() {
                                                     </div>
                                                     <Badge
                                                         variant={
-                                                            app.status === 'accepted'
+                                                            (app.status || 'applied') === 'accepted'
                                                                 ? 'default'
-                                                                : app.status === 'rejected'
+                                                                : (app.status || 'applied') === 'rejected'
                                                                     ? 'destructive'
                                                                     : 'secondary'
                                                         }

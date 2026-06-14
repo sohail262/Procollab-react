@@ -14,6 +14,9 @@ import { ScrollArea } from '@/components/ui/scroll-area'
 import { Separator }  from '@/components/ui/separator'
 import { DatePicker } from '@/components/ui/date-time-picker'
 import {
+    Tabs, TabsContent, TabsList, TabsTrigger,
+} from '@/components/ui/tabs'
+import {
     Select, SelectContent,
     SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
@@ -22,20 +25,24 @@ import {
     AlertTriangle, ArrowLeft, ArrowRight,
     CheckCircle2,  FileText,   Loader2,
     Search,        Clock,      BarChart3,
-    Trash2,        Users,      Calendar,
-    Target,        Sparkles,
+    Trash2,        Users,      Target,
+    Sparkles,      Plus,       Pencil,
+    X,             Flag,       FolderOpen,
+    CloudUpload,
 } from 'lucide-react'
 import {
     PROJECT_TEMPLATES,
     TEMPLATE_CATEGORIES,
     type ProjectTemplate,
     type TemplateCategory,
+    type TemplateTask,
+    type TemplateMilestone,
 } from '@/config/projectTemplates'
 import {
     collection, addDoc, doc, getDocs,
     serverTimestamp, writeBatch,
     updateDoc, deleteDoc, query,
-    getCountFromServer,
+    getCountFromServer, getDoc,
 } from 'firebase/firestore'
 import { db }       from '@/lib/firebase'
 import { useAuth }  from '@/hooks/use-auth'
@@ -61,29 +68,31 @@ interface ProjectSetupForm {
     discipline:    string
 }
 
-// Step 3 — template-specific parameters
+// Step 3 — template-specific parameters (tech/sprint config)
 interface TemplateParams {
-    // common
     techStack:       string
     repositoryUrl:   string
-    // scrum / agile
     sprintDuration:  string
     storyPointScale: string
-    // waterfall
-    phase:           string
-    // research
     researchField:   string
-    // marketing
     campaignBudget:  string
-    // student
     supervisorName:  string
     submissionDate:  string
     university:      string
-    // design
     designTool:      string
 }
 
-// Step 4 — existing data state
+// Editable task row (inherits TemplateTask)
+interface EditableTask extends TemplateTask {
+    _id: string // local key
+}
+
+// Editable milestone row
+interface EditableMilestone extends TemplateMilestone {
+    _id: string
+}
+
+// Step 4 — existing data counts
 interface ExistingDataCounts {
     tasks:     number
     documents: number
@@ -96,7 +105,17 @@ const DIFFICULTY_COLORS: Record<string, string> = {
     advanced:     'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
 }
 
+const PRIORITY_COLORS: Record<string, string> = {
+    urgent: 'bg-red-500',
+    high:   'bg-orange-400',
+    medium: 'bg-blue-400',
+    low:    'bg-green-400',
+}
+
 type Step = 1 | 2 | 3 | 4 | 5
+
+let _eid = 0
+const eid = () => `e_${++_eid}`
 
 // ─── Step indicator ───────────────────────────────────────────────────────────
 function StepIndicator({
@@ -172,13 +191,16 @@ export function TemplateGallery({
         discipline:  '',
     })
 
-    // ── Step 3 — template params ─────────────────────────────────────────────
+    // ── Step 3 — editable customisation ─────────────────────────────────────
+    const [editableTasks,      setEditableTasks]      = useState<EditableTask[]>([])
+    const [editableMilestones, setEditableMilestones] = useState<EditableMilestone[]>([])
+
+    // ── Step 3 — template-specific params & Drive state ──────────────────────
     const [params, setParams] = useState<TemplateParams>({
         techStack:        '',
         repositoryUrl:    '',
         sprintDuration:   '14',
         storyPointScale:  'fibonacci',
-        phase:            '',
         researchField:    '',
         campaignBudget:   '',
         supervisorName:   '',
@@ -201,10 +223,13 @@ export function TemplateGallery({
             setApplyProgress(0)
             setSelected(null)
             setSetupForm(f => ({ ...f, name: projectName }))
+            setEditableTasks([])
+            setEditableMilestones([])
         }
     }, [open, projectName])
 
-    // ── Step 1 — filter templates ────────────────────────────────────────────
+
+    // ── Step 1 — filter templates ────────────────────────────────────────
     const filtered = PROJECT_TEMPLATES.filter(t => {
         const matchSearch =
             t.name.toLowerCase().includes(search.toLowerCase()) ||
@@ -213,6 +238,12 @@ export function TemplateGallery({
         const matchCat = category === 'all' || t.category === category
         return matchSearch && matchCat
     })
+
+    // ── Initialise editable lists when selected changes ──────────────────────
+    const initEditableLists = (template: ProjectTemplate) => {
+        setEditableTasks(template.tasks.map(t => ({ ...t, _id: eid() })))
+        setEditableMilestones(template.milestones.map(m => ({ ...m, _id: eid() })))
+    }
 
     // ── Check existing data when moving to step 4 ────────────────────────────
     const checkExistingData = async () => {
@@ -241,6 +272,7 @@ export function TemplateGallery({
 
     // ── Navigation ────────────────────────────────────────────────────────────
     const goToStep = async (nextStep: Step) => {
+        if (nextStep === 3 && selected) initEditableLists(selected)
         if (nextStep === 4) await checkExistingData()
         setStep(nextStep)
     }
@@ -250,8 +282,8 @@ export function TemplateGallery({
                              setupForm.goal.trim().length >= 2
 
     // ── Delete a subcollection ────────────────────────────────────────────────
-    const deleteSubcollection = async (subcollection: string) => {
-        const colRef  = collection(db, 'projects', projectId, subcollection)
+    const deleteSubcollection = async (subcollectionName: string) => {
+        const colRef  = collection(db, 'projects', projectId, subcollectionName)
         const snap    = await getDocs(query(colRef))
         const batch   = writeBatch(db)
         snap.docs.forEach(d => batch.delete(d.ref))
@@ -271,9 +303,10 @@ export function TemplateGallery({
                 await Promise.all([
                     deleteSubcollection('tasks'),
                     deleteSubcollection('documents'),
+                    deleteSubcollection('driveDocuments'),
                     deleteSubcollection('sprints'),
                 ])
-                setApplyProgress(20)
+                setApplyProgress(15)
             }
 
             // ── Step B: Update project metadata ───────────────────────────
@@ -291,17 +324,14 @@ export function TemplateGallery({
                 ...(params.repositoryUrl && { repositoryUrl: params.repositoryUrl }),
                 ...(params.techStack     && { techStack:     params.techStack }),
             })
-            setApplyProgress(35)
+            setApplyProgress(30)
 
-            // ── Step C: Create tasks ──────────────────────────────────────
-            setApplyStatus(`Creating ${selected.tasks.length} tasks…`)
+            // ── Step C: Create tasks (from editable list) ─────────────────
+            setApplyStatus(`Creating ${editableTasks.length} tasks…`)
             const tasksBatch = writeBatch(db)
-
-            // Calculate actual due dates from startDate + milestone offsets
             const projectStart = new Date(setupForm.startDate)
 
-            // Tag tasks with template params
-            const enrichedTasks = selected.tasks.map(task => ({
+            const enrichedTasks = editableTasks.map(task => ({
                 ...task,
                 tags: [
                     ...task.tags,
@@ -312,9 +342,10 @@ export function TemplateGallery({
             }))
 
             for (const task of enrichedTasks) {
+                const { _id, ...taskData } = task
                 const taskRef = doc(collection(db, 'projects', projectId, 'tasks'))
                 tasksBatch.set(taskRef, {
-                    ...task,
+                    ...taskData,
                     projectId,
                     createdBy:   user.uid,
                     createdAt:   serverTimestamp(),
@@ -326,40 +357,8 @@ export function TemplateGallery({
                 })
             }
             await tasksBatch.commit()
-            setApplyProgress(55)
+            setApplyProgress(50)
 
-            // ── Step D: Create documents with param substitution ─────────
-            setApplyStatus(`Creating ${selected.documents.length} documents…`)
-            const docsBatch = writeBatch(db)
-
-            for (const docItem of selected.documents) {
-                // Inject parameters into document content
-                let content = docItem.content
-                content = content.replace(/$$Your project title here$$/g, setupForm.name)
-                content = content.replace(/$$Title here$$/g,             setupForm.name)
-                content = content.replace(/<p>Describe your web application here\.<\/p>/g,
-                    `<p>${setupForm.description || 'Project description here.'}</p>`)
-                content = content.replace(/<p>What problem are you solving\?<\/p>/g,
-                    `<p>${setupForm.goal}</p>`)
-                if (params.supervisorName) {
-                    content = content.replace(/Supervisor: /g,
-                        `Supervisor: ${params.supervisorName}`)
-                }
-                if (params.university) {
-                    content = content + `\n<p><strong>University:</strong> ${params.university}</p>`
-                }
-
-                const dRef = doc(collection(db, 'projects', projectId, 'documents'))
-                docsBatch.set(dRef, {
-                    title:     docItem.title,
-                    content,
-                    type:      'doc',
-                    createdBy: user.uid,
-                    createdAt: serverTimestamp(),
-                    updatedAt: serverTimestamp(),
-                })
-            }
-            await docsBatch.commit()
             setApplyProgress(75)
 
             // ── Step E: Create sprints ─────────────────────────────────────
@@ -372,7 +371,7 @@ export function TemplateGallery({
 
                 for (const sprint of selected.sprints) {
                     const duration = selected.methodology === 'scrum'
-                        ? sprintDuration  // user-defined sprint length
+                        ? sprintDuration
                         : sprint.durationDays
                     const sprintEnd = new Date(sprintStart)
                     sprintEnd.setDate(sprintEnd.getDate() + duration)
@@ -397,8 +396,8 @@ export function TemplateGallery({
 
             setApplied(true)
             toast({
-                title:       `${selected.emoji} "${setupForm.name}" is ready!`,
-                description: `Template applied with ${selected.tasks.length} tasks, ${selected.documents.length} docs, and ${selected.sprints.length} sprints.`,
+                title:       `"${setupForm.name}" is ready!`,
+                description: `Template applied with ${editableTasks.length} tasks.`,
             })
 
             setTimeout(() => onApplied(setupForm.name), 2000)
@@ -417,7 +416,7 @@ export function TemplateGallery({
     // ─────────────────────────────────────────────────────────────────────────
     // RENDER
     // ─────────────────────────────────────────────────────────────────────────
-    const stepLabels = ['Browse', 'Setup', 'Configure', 'Review', 'Apply']
+    const stepLabels = ['Browse', 'Setup', 'Customise', 'Review', 'Apply']
 
     return (
         <Dialog open={open} onOpenChange={onClose}>
@@ -427,7 +426,7 @@ export function TemplateGallery({
                 {/* ── Header ── */}
                 <div className="px-6 pt-5 pb-4 border-b flex-shrink-0">
                     <DialogTitle className="text-xl font-bold flex items-center gap-2">
-                        <span>📦</span> Project Template Wizard
+                        Project Template Wizard
                     </DialogTitle>
                     <DialogDescription className="mt-1">
                         Set up your project from a curated template in a few steps.
@@ -463,7 +462,7 @@ export function TemplateGallery({
                                         />
                                     </div>
                                     <div className="flex flex-wrap gap-1.5">
-                                        {[{ id: 'all', label: 'All', emoji: '🗂' },
+                                        {[{ id: 'all', label: 'All' },
                                           ...TEMPLATE_CATEGORIES].map(cat => (
                                             <button
                                                 key={cat.id}
@@ -478,7 +477,7 @@ export function TemplateGallery({
                                                         : 'bg-background border-border hover:bg-muted'
                                                 }`}
                                             >
-                                                {cat.emoji} {cat.label}
+                                                {cat.label}
                                             </button>
                                         ))}
                                     </div>
@@ -498,9 +497,6 @@ export function TemplateGallery({
                                                 }`}
                                             >
                                                 <div className="flex gap-3">
-                                                    <span className="text-2xl mt-0.5">
-                                                        {template.emoji}
-                                                    </span>
                                                     <div className="flex-1 min-w-0">
                                                         <div className="flex items-center
                                                             gap-1.5 flex-wrap">
@@ -529,10 +525,6 @@ export function TemplateGallery({
                                                                 {template.preview.taskCount} tasks
                                                             </span>
                                                             <span className="flex items-center gap-1">
-                                                                <FileText className="h-3 w-3" />
-                                                                {template.preview.docCount} docs
-                                                            </span>
-                                                            <span className="flex items-center gap-1">
                                                                 <Clock className="h-3 w-3" />
                                                                 ~{template.estimatedWeeks}w
                                                             </span>
@@ -555,9 +547,6 @@ export function TemplateGallery({
                                     <ScrollArea className="flex-1">
                                         <div className="p-5 space-y-4">
                                             <div className="flex items-start gap-3">
-                                                <span className="text-4xl">
-                                                    {selected.emoji}
-                                                </span>
                                                 <div>
                                                     <h3 className="text-lg font-bold">
                                                         {selected.name}
@@ -579,16 +568,14 @@ export function TemplateGallery({
                                             </div>
 
                                             {/* Stats */}
-                                            <div className="grid grid-cols-3 gap-2">
+                                            <div className="grid grid-cols-2 gap-2">
                                                 {[
-                                                    { icon: '📋', val: selected.preview.taskCount,      label: 'Tasks'      },
-                                                    { icon: '📄', val: selected.preview.docCount,       label: 'Documents'  },
-                                                    { icon: '🏁', val: selected.preview.milestoneCount, label: 'Milestones' },
+                                                    { label: 'Tasks',      val: selected.preview.taskCount      },
+                                                    { label: 'Milestones', val: selected.preview.milestoneCount },
                                                 ].map(s => (
                                                     <div key={s.label}
                                                         className="bg-muted/50 rounded-lg
                                                             p-2.5 text-center">
-                                                        <p className="text-lg">{s.icon}</p>
                                                         <p className="font-bold">{s.val}</p>
                                                         <p className="text-xs
                                                             text-muted-foreground">
@@ -610,10 +597,7 @@ export function TemplateGallery({
                                                                 gap-2 text-sm">
                                                             <span className={`w-2 h-2
                                                                 rounded-full shrink-0 ${
-                                                                t.priority === 'urgent' ? 'bg-red-500' :
-                                                                t.priority === 'high'   ? 'bg-orange-400' :
-                                                                t.priority === 'medium' ? 'bg-blue-400' :
-                                                                                          'bg-green-400'
+                                                                PRIORITY_COLORS[t.priority] ?? 'bg-muted'
                                                             }`} />
                                                             <span className="line-clamp-1">
                                                                 {t.title}
@@ -644,7 +628,7 @@ export function TemplateGallery({
                                                         <div key={i}
                                                             className="flex items-center
                                                                 gap-2 text-sm py-1">
-                                                            <span>🏁</span>
+                                                            <Flag className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                                                             <span className="flex-1">
                                                                 {m.title}
                                                             </span>
@@ -661,7 +645,7 @@ export function TemplateGallery({
                                 ) : (
                                     <div className="flex flex-col items-center
                                         justify-center h-full text-muted-foreground">
-                                        <span className="text-5xl mb-3">👈</span>
+                                        <FileText className="h-10 w-10 opacity-20 mb-3" />
                                         <p className="text-sm">Select a template to preview</p>
                                     </div>
                                 )}
@@ -676,7 +660,6 @@ export function TemplateGallery({
                         <ScrollArea className="h-full">
                             <div className="p-6 space-y-5 max-w-xl mx-auto">
                                 <div className="text-center mb-2">
-                                    <span className="text-4xl">🚀</span>
                                     <h3 className="text-lg font-bold mt-2">
                                         Set Up Your Project
                                     </h3>
@@ -686,7 +669,6 @@ export function TemplateGallery({
                                     </p>
                                 </div>
 
-                                {/* Project name */}
                                 <div className="space-y-2">
                                     <Label htmlFor="proj-name">
                                         Project Name <span className="text-destructive">*</span>
@@ -701,7 +683,6 @@ export function TemplateGallery({
                                     />
                                 </div>
 
-                                {/* Description */}
                                 <div className="space-y-2">
                                     <Label htmlFor="proj-desc">
                                         Short Description
@@ -717,7 +698,6 @@ export function TemplateGallery({
                                     />
                                 </div>
 
-                                {/* Goal */}
                                 <div className="space-y-2">
                                     <Label htmlFor="proj-goal">
                                         Main Goal <span className="text-destructive">*</span>
@@ -734,26 +714,20 @@ export function TemplateGallery({
                                 </div>
 
                                 <div className="grid grid-cols-2 gap-4">
-                                    {/* Start date */}
                                     <div className="space-y-2">
-                                        <Label htmlFor="start-date">
-                                            Start Date
-                                        </Label>
+                                        <Label htmlFor="start-date">Start Date</Label>
                                         <DatePicker
                                             date={setupForm.startDate ? new Date(setupForm.startDate) : undefined}
                                             onDateChange={(date) => setSetupForm(f => ({
-                                                ...f, 
+                                                ...f,
                                                 startDate: date ? date.toISOString().split('T')[0] : new Date().toISOString().split('T')[0]
                                             }))}
                                             placeholder="Select project start date"
                                         />
                                     </div>
 
-                                    {/* Team size */}
                                     <div className="space-y-2">
-                                        <Label htmlFor="team-size">
-                                            Team Size
-                                        </Label>
+                                        <Label htmlFor="team-size">Team Size</Label>
                                         <Select
                                             value={setupForm.teamSize}
                                             onValueChange={v => setSetupForm(f => ({
@@ -774,11 +748,8 @@ export function TemplateGallery({
                                     </div>
                                 </div>
 
-                                {/* Discipline */}
                                 <div className="space-y-2">
-                                    <Label htmlFor="discipline">
-                                        Primary Discipline
-                                    </Label>
+                                    <Label htmlFor="discipline">Primary Discipline</Label>
                                     <Select
                                         value={setupForm.discipline}
                                         onValueChange={v => setSetupForm(f => ({
@@ -793,9 +764,9 @@ export function TemplateGallery({
                                             <SelectItem value="backend">Backend Development</SelectItem>
                                             <SelectItem value="fullstack">Full Stack Development</SelectItem>
                                             <SelectItem value="mobile">Mobile Development</SelectItem>
-                                            <SelectItem value="data-science">Data Science / ML</SelectItem>
+                                            <SelectItem value="devops">DevOps / Infrastructure</SelectItem>
                                             <SelectItem value="design">UI/UX Design</SelectItem>
-                                            <SelectItem value="devops">DevOps / Cloud</SelectItem>
+                                            <SelectItem value="data">Data Science / ML</SelectItem>
                                             <SelectItem value="research">Research</SelectItem>
                                             <SelectItem value="marketing">Marketing</SelectItem>
                                             <SelectItem value="other">Other</SelectItem>
@@ -807,213 +778,342 @@ export function TemplateGallery({
                     )}
 
                     {/* ════════════════════════════════════════════════════
-                        STEP 3 — Template-Specific Parameters
+                        STEP 3 — Customise (Editable Tasks / Docs / Milestones + Params)
                     ════════════════════════════════════════════════════ */}
                     {step === 3 && selected && (
                         <ScrollArea className="h-full">
-                            <div className="p-6 space-y-5 max-w-xl mx-auto">
-                                <div className="text-center mb-2">
-                                    <span className="text-4xl">{selected.emoji}</span>
-                                    <h3 className="text-lg font-bold mt-2">
-                                        Configure {selected.name}
+                            <div className="p-6 space-y-5 max-w-3xl mx-auto">
+                                <div className="mb-2">
+                                    <h3 className="text-lg font-bold">
+                                        Customise Template Content
                                     </h3>
-                                    <p className="text-sm text-muted-foreground">
-                                        These settings will be embedded into your
-                                        tasks and documents.
+                                    <p className="text-sm text-muted-foreground mt-1">
+                                        Add, edit, or remove tasks, documents, and milestones before applying.
+                                        Changes here apply only to this project.
                                     </p>
                                 </div>
 
-                                {/* ── Software / Web / Mobile ─────────────── */}
-                                {['software'].includes(selected.category) && (
-                                    <>
-                                        <div className="space-y-2">
-                                            <Label htmlFor="tech-stack">
-                                                Tech Stack
-                                            </Label>
-                                            <Input
-                                                id="tech-stack"
-                                                value={params.techStack}
-                                                onChange={e => setParams(p => ({
-                                                    ...p, techStack: e.target.value,
-                                                }))}
-                                                placeholder="e.g. React, Node.js, PostgreSQL"
-                                            />
-                                            <p className="text-xs text-muted-foreground">
-                                                Comma-separated — will be added as tags to tasks
+                                <Tabs defaultValue="tasks">
+                                    <TabsList className="mb-4">
+                                        <TabsTrigger value="tasks">
+                                            Tasks ({editableTasks.length})
+                                        </TabsTrigger>
+                                        <TabsTrigger value="milestones">
+                                            Milestones ({editableMilestones.length})
+                                        </TabsTrigger>
+                                        <TabsTrigger value="params">
+                                            Config
+                                        </TabsTrigger>
+                                    </TabsList>
+
+                                    {/* ── Tasks tab ── */}
+                                    <TabsContent value="tasks" className="space-y-2">
+                                        {editableTasks.map((task, idx) => (
+                                            <div key={task._id}
+                                                className="flex items-start gap-2 p-3 rounded-lg border bg-muted/20">
+                                                <span className={`w-2 h-2 rounded-full mt-2.5 shrink-0 ${
+                                                    PRIORITY_COLORS[task.priority] ?? 'bg-muted'
+                                                }`} />
+                                                <div className="flex-1 space-y-1.5">
+                                                    <Input
+                                                        value={task.title}
+                                                        onChange={e => setEditableTasks(prev =>
+                                                            prev.map(t => t._id === task._id
+                                                                ? { ...t, title: e.target.value }
+                                                                : t
+                                                            )
+                                                        )}
+                                                        className="h-7 text-sm"
+                                                        placeholder="Task title"
+                                                    />
+                                                    <div className="flex gap-2">
+                                                        <Select
+                                                            value={task.priority}
+                                                            onValueChange={v => setEditableTasks(prev =>
+                                                                prev.map(t => t._id === task._id
+                                                                    ? { ...t, priority: v as any }
+                                                                    : t
+                                                                )
+                                                            )}
+                                                        >
+                                                            <SelectTrigger className="h-6 text-xs w-[100px]">
+                                                                <SelectValue />
+                                                            </SelectTrigger>
+                                                            <SelectContent>
+                                                                <SelectItem value="urgent">Urgent</SelectItem>
+                                                                <SelectItem value="high">High</SelectItem>
+                                                                <SelectItem value="medium">Medium</SelectItem>
+                                                                <SelectItem value="low">Low</SelectItem>
+                                                            </SelectContent>
+                                                        </Select>
+                                                        <Select
+                                                            value={task.status}
+                                                            onValueChange={v => setEditableTasks(prev =>
+                                                                prev.map(t => t._id === task._id
+                                                                    ? { ...t, status: v as any }
+                                                                    : t
+                                                                )
+                                                            )}
+                                                        >
+                                                            <SelectTrigger className="h-6 text-xs w-[120px]">
+                                                                <SelectValue />
+                                                            </SelectTrigger>
+                                                            <SelectContent>
+                                                                <SelectItem value="backlog">Backlog</SelectItem>
+                                                                <SelectItem value="todo">To Do</SelectItem>
+                                                                <SelectItem value="in-progress">In Progress</SelectItem>
+                                                                <SelectItem value="review">Review</SelectItem>
+                                                                <SelectItem value="done">Done</SelectItem>
+                                                            </SelectContent>
+                                                        </Select>
+                                                    </div>
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setEditableTasks(prev => prev.filter(t => t._id !== task._id))}
+                                                    className="h-6 w-6 flex items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors mt-0.5"
+                                                >
+                                                    <X className="h-3.5 w-3.5" />
+                                                </button>
+                                            </div>
+                                        ))}
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            className="w-full gap-2 mt-2"
+                                            onClick={() => setEditableTasks(prev => [
+                                                ...prev,
+                                                { _id: eid(), title: '', description: '', status: 'todo', priority: 'medium', tags: [] }
+                                            ])}
+                                        >
+                                            <Plus className="h-3.5 w-3.5" />
+                                            Add Task
+                                        </Button>
+                                    </TabsContent>
+
+
+
+                                    {/* ── Milestones tab ── */}
+                                    <TabsContent value="milestones" className="space-y-2">
+                                        {editableMilestones.length === 0 && (
+                                            <p className="text-sm text-muted-foreground text-center py-4">
+                                                No milestones in this template.
                                             </p>
-                                        </div>
-                                        <div className="space-y-2">
-                                            <Label htmlFor="repo-url">
-                                                Repository URL
-                                            </Label>
-                                            <Input
-                                                id="repo-url"
-                                                value={params.repositoryUrl}
-                                                onChange={e => setParams(p => ({
-                                                    ...p, repositoryUrl: e.target.value,
-                                                }))}
-                                                placeholder="https://github.com/org/repo"
-                                            />
-                                        </div>
-                                    </>
-                                )}
-
-                                {/* ── Scrum / Agile sprint config ─────────── */}
-                                {['scrum', 'agile'].includes(selected.methodology) && (
-                                    <>
-                                        <Separator />
-                                        <p className="text-sm font-semibold">
-                                            Sprint Settings
-                                        </p>
-                                        <div className="grid grid-cols-2 gap-4">
-                                            <div className="space-y-2">
-                                                <Label>Sprint Duration</Label>
-                                                <Select
-                                                    value={params.sprintDuration}
-                                                    onValueChange={v => setParams(p => ({
-                                                        ...p, sprintDuration: v,
-                                                    }))}
+                                        )}
+                                        {editableMilestones.map((m) => (
+                                            <div key={m._id}
+                                                className="flex items-center gap-2 p-3 rounded-lg border bg-muted/20">
+                                                <Flag className="h-4 w-4 text-muted-foreground shrink-0" />
+                                                <Input
+                                                    value={m.title}
+                                                    onChange={e => setEditableMilestones(prev =>
+                                                        prev.map(ms => ms._id === m._id
+                                                            ? { ...ms, title: e.target.value }
+                                                            : ms
+                                                        )
+                                                    )}
+                                                    className="h-7 text-sm flex-1"
+                                                    placeholder="Milestone title"
+                                                />
+                                                <div className="flex items-center gap-1 shrink-0">
+                                                    <span className="text-xs text-muted-foreground">Day</span>
+                                                    <Input
+                                                        type="number"
+                                                        min={1}
+                                                        value={m.daysFromStart}
+                                                        onChange={e => setEditableMilestones(prev =>
+                                                            prev.map(ms => ms._id === m._id
+                                                                ? { ...ms, daysFromStart: parseInt(e.target.value) || 1 }
+                                                                : ms
+                                                            )
+                                                        )}
+                                                        className="h-7 w-16 text-sm text-center"
+                                                    />
+                                                </div>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setEditableMilestones(prev => prev.filter(ms => ms._id !== m._id))}
+                                                    className="h-6 w-6 flex items-center justify-center rounded text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
                                                 >
-                                                    <SelectTrigger>
-                                                        <SelectValue />
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        <SelectItem value="7">1 week</SelectItem>
-                                                        <SelectItem value="14">2 weeks</SelectItem>
-                                                        <SelectItem value="21">3 weeks</SelectItem>
-                                                        <SelectItem value="28">4 weeks</SelectItem>
-                                                    </SelectContent>
-                                                </Select>
+                                                    <X className="h-3.5 w-3.5" />
+                                                </button>
                                             </div>
-                                            <div className="space-y-2">
-                                                <Label>Story Point Scale</Label>
-                                                <Select
-                                                    value={params.storyPointScale}
-                                                    onValueChange={v => setParams(p => ({
-                                                        ...p, storyPointScale: v,
-                                                    }))}
-                                                >
-                                                    <SelectTrigger>
-                                                        <SelectValue />
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        <SelectItem value="fibonacci">
-                                                            Fibonacci (1,2,3,5,8…)
-                                                        </SelectItem>
-                                                        <SelectItem value="linear">
-                                                            Linear (1-10)
-                                                        </SelectItem>
-                                                        <SelectItem value="tshirt">
-                                                            T-Shirt (XS-XL)
-                                                        </SelectItem>
-                                                    </SelectContent>
-                                                </Select>
-                                            </div>
-                                        </div>
-                                    </>
-                                )}
+                                        ))}
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            className="w-full gap-2 mt-2"
+                                            onClick={() => setEditableMilestones(prev => [
+                                                ...prev,
+                                                { _id: eid(), title: 'New Milestone', description: '', daysFromStart: 14 }
+                                            ])}
+                                        >
+                                            <Plus className="h-3.5 w-3.5" />
+                                            Add Milestone
+                                        </Button>
+                                    </TabsContent>
 
-                                {/* ── Research specific ───────────────────── */}
-                                {selected.category === 'research' && (
-                                    <>
-                                        <Separator />
-                                        <div className="space-y-2">
-                                            <Label>Research Field / Domain</Label>
-                                            <Input
-                                                value={params.researchField}
-                                                onChange={e => setParams(p => ({
-                                                    ...p, researchField: e.target.value,
-                                                }))}
-                                                placeholder="e.g. Machine Learning, Psychology"
-                                            />
-                                        </div>
-                                    </>
-                                )}
+                                    {/* ── Config / Params tab ── */}
+                                    <TabsContent value="params" className="space-y-4">
+                                        {/* Software-specific */}
+                                        {['software'].includes(selected.category) && (
+                                            <>
+                                                <div className="space-y-2">
+                                                    <Label>Tech Stack</Label>
+                                                    <Input
+                                                        value={params.techStack}
+                                                        onChange={e => setParams(p => ({ ...p, techStack: e.target.value }))}
+                                                        placeholder="e.g. React, Node.js, PostgreSQL"
+                                                    />
+                                                    <p className="text-xs text-muted-foreground">
+                                                        Comma-separated — will be added as tags to tasks
+                                                    </p>
+                                                </div>
+                                                <div className="space-y-2">
+                                                    <Label>Repository URL</Label>
+                                                    <Input
+                                                        value={params.repositoryUrl}
+                                                        onChange={e => setParams(p => ({ ...p, repositoryUrl: e.target.value }))}
+                                                        placeholder="https://github.com/org/repo"
+                                                    />
+                                                </div>
+                                            </>
+                                        )}
 
-                                {/* ── Education / Student ─────────────────── */}
-                                {selected.category === 'education' && (
-                                    <>
-                                        <Separator />
-                                        <p className="text-sm font-semibold">
-                                            Academic Details
-                                        </p>
-                                        <div className="space-y-2">
-                                            <Label>University / Institution</Label>
-                                            <Input
-                                                value={params.university}
-                                                onChange={e => setParams(p => ({
-                                                    ...p, university: e.target.value,
-                                                }))}
-                                                placeholder="e.g. University of Manchester"
-                                            />
-                                        </div>
-                                        <div className="space-y-2">
-                                            <Label>Supervisor Name</Label>
-                                            <Input
-                                                value={params.supervisorName}
-                                                onChange={e => setParams(p => ({
-                                                    ...p, supervisorName: e.target.value,
-                                                }))}
-                                                placeholder="Dr. Jane Smith"
-                                            />
-                                        </div>
-                                        <div className="space-y-2">
-                                            <Label>Final Submission Date</Label>
-                                            <Input
-                                                type="date"
-                                                value={params.submissionDate}
-                                                onChange={e => setParams(p => ({
-                                                    ...p, submissionDate: e.target.value,
-                                                }))}
-                                            />
-                                        </div>
-                                    </>
-                                )}
+                                        {/* Sprint settings */}
+                                        {['scrum', 'agile'].includes(selected.methodology) && (
+                                            <>
+                                                <Separator />
+                                                <p className="text-sm font-semibold">Sprint Settings</p>
+                                                <div className="grid grid-cols-2 gap-4">
+                                                    <div className="space-y-2">
+                                                        <Label>Sprint Duration</Label>
+                                                        <Select
+                                                            value={params.sprintDuration}
+                                                            onValueChange={v => setParams(p => ({ ...p, sprintDuration: v }))}
+                                                        >
+                                                            <SelectTrigger><SelectValue /></SelectTrigger>
+                                                            <SelectContent>
+                                                                <SelectItem value="7">1 week</SelectItem>
+                                                                <SelectItem value="14">2 weeks</SelectItem>
+                                                                <SelectItem value="21">3 weeks</SelectItem>
+                                                                <SelectItem value="28">4 weeks</SelectItem>
+                                                            </SelectContent>
+                                                        </Select>
+                                                    </div>
+                                                    <div className="space-y-2">
+                                                        <Label>Story Point Scale</Label>
+                                                        <Select
+                                                            value={params.storyPointScale}
+                                                            onValueChange={v => setParams(p => ({ ...p, storyPointScale: v }))}
+                                                        >
+                                                            <SelectTrigger><SelectValue /></SelectTrigger>
+                                                            <SelectContent>
+                                                                <SelectItem value="fibonacci">Fibonacci (1,2,3,5,8…)</SelectItem>
+                                                                <SelectItem value="linear">Linear (1-10)</SelectItem>
+                                                                <SelectItem value="tshirt">T-Shirt (XS-XL)</SelectItem>
+                                                            </SelectContent>
+                                                        </Select>
+                                                    </div>
+                                                </div>
+                                            </>
+                                        )}
 
-                                {/* ── Marketing ───────────────────────────── */}
-                                {selected.category === 'marketing' && (
-                                    <>
-                                        <Separator />
-                                        <div className="space-y-2">
-                                            <Label>Campaign Budget ($)</Label>
-                                            <Input
-                                                type="number"
-                                                value={params.campaignBudget}
-                                                onChange={e => setParams(p => ({
-                                                    ...p, campaignBudget: e.target.value,
-                                                }))}
-                                                placeholder="e.g. 5000"
-                                            />
-                                        </div>
-                                    </>
-                                )}
+                                        {/* Research specific */}
+                                        {selected.category === 'research' && (
+                                            <>
+                                                <Separator />
+                                                <div className="space-y-2">
+                                                    <Label>Research Field / Domain</Label>
+                                                    <Input
+                                                        value={params.researchField}
+                                                        onChange={e => setParams(p => ({ ...p, researchField: e.target.value }))}
+                                                        placeholder="e.g. Machine Learning, Psychology"
+                                                    />
+                                                </div>
+                                            </>
+                                        )}
 
-                                {/* ── Design ──────────────────────────────── */}
-                                {selected.category === 'design' && (
-                                    <>
-                                        <Separator />
-                                        <div className="space-y-2">
-                                            <Label>Primary Design Tool</Label>
-                                            <Select
-                                                value={params.designTool}
-                                                onValueChange={v => setParams(p => ({
-                                                    ...p, designTool: v,
-                                                }))}
-                                            >
-                                                <SelectTrigger>
-                                                    <SelectValue placeholder="Select…" />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    <SelectItem value="figma">Figma</SelectItem>
-                                                    <SelectItem value="sketch">Sketch</SelectItem>
-                                                    <SelectItem value="xd">Adobe XD</SelectItem>
-                                                    <SelectItem value="framer">Framer</SelectItem>
-                                                    <SelectItem value="other">Other</SelectItem>
-                                                </SelectContent>
-                                            </Select>
-                                        </div>
-                                    </>
-                                )}
+                                        {/* Education / Student */}
+                                        {selected.category === 'education' && (
+                                            <>
+                                                <Separator />
+                                                <p className="text-sm font-semibold">Academic Details</p>
+                                                <div className="space-y-2">
+                                                    <Label>University / Institution</Label>
+                                                    <Input
+                                                        value={params.university}
+                                                        onChange={e => setParams(p => ({ ...p, university: e.target.value }))}
+                                                        placeholder="e.g. University of Manchester"
+                                                    />
+                                                </div>
+                                                <div className="space-y-2">
+                                                    <Label>Supervisor Name</Label>
+                                                    <Input
+                                                        value={params.supervisorName}
+                                                        onChange={e => setParams(p => ({ ...p, supervisorName: e.target.value }))}
+                                                        placeholder="Dr. Jane Smith"
+                                                    />
+                                                </div>
+                                                <div className="space-y-2">
+                                                    <Label>Final Submission Date</Label>
+                                                    <Input
+                                                        type="date"
+                                                        value={params.submissionDate}
+                                                        onChange={e => setParams(p => ({ ...p, submissionDate: e.target.value }))}
+                                                    />
+                                                </div>
+                                            </>
+                                        )}
+
+                                        {/* Marketing */}
+                                        {selected.category === 'marketing' && (
+                                            <>
+                                                <Separator />
+                                                <div className="space-y-2">
+                                                    <Label>Campaign Budget (INR)</Label>
+                                                    <Input
+                                                        type="number"
+                                                        value={params.campaignBudget}
+                                                        onChange={e => setParams(p => ({ ...p, campaignBudget: e.target.value }))}
+                                                        placeholder="e.g. 50000"
+                                                    />
+                                                </div>
+                                            </>
+                                        )}
+
+                                        {/* Design */}
+                                        {selected.category === 'design' && (
+                                            <>
+                                                <Separator />
+                                                <div className="space-y-2">
+                                                    <Label>Primary Design Tool</Label>
+                                                    <Select
+                                                        value={params.designTool}
+                                                        onValueChange={v => setParams(p => ({ ...p, designTool: v }))}
+                                                    >
+                                                        <SelectTrigger><SelectValue placeholder="Select…" /></SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="figma">Figma</SelectItem>
+                                                            <SelectItem value="sketch">Sketch</SelectItem>
+                                                            <SelectItem value="xd">Adobe XD</SelectItem>
+                                                            <SelectItem value="framer">Framer</SelectItem>
+                                                            <SelectItem value="other">Other</SelectItem>
+                                                        </SelectContent>
+                                                    </Select>
+                                                </div>
+                                            </>
+                                        )}
+
+                                        {/* No config needed */}
+                                        {!['software', 'research', 'education', 'marketing', 'design'].includes(selected.category) &&
+                                         !['scrum', 'agile'].includes(selected.methodology) && (
+                                            <p className="text-sm text-muted-foreground text-center py-6">
+                                                No additional configuration needed for this template type.
+                                            </p>
+                                        )}
+                                    </TabsContent>
+                                </Tabs>
                             </div>
                         </ScrollArea>
                     )}
@@ -1025,7 +1125,6 @@ export function TemplateGallery({
                         <ScrollArea className="h-full">
                             <div className="p-6 space-y-5 max-w-xl mx-auto">
                                 <div className="text-center">
-                                    <span className="text-4xl">⚙️</span>
                                     <h3 className="text-lg font-bold mt-2">
                                         Review &amp; Confirm
                                     </h3>
@@ -1035,25 +1134,23 @@ export function TemplateGallery({
                                 </div>
 
                                 {/* Summary card */}
-                                <div className="bg-muted/40 rounded-xl p-4 space-y-3
-                                                border">
+                                <div className="bg-muted/40 rounded-xl p-4 space-y-3 border">
                                     <p className="text-sm font-semibold">
                                         What will be applied
                                     </p>
                                     <div className="space-y-2 text-sm">
                                         {[
-                                            { icon: '📦', label: 'Template',    val: `${selected?.emoji} ${selected?.name}` },
-                                            { icon: '🚀', label: 'Project Name', val: setupForm.name },
-                                            { icon: '🎯', label: 'Goal',         val: setupForm.goal },
-                                            { icon: '📅', label: 'Start Date',   val: setupForm.startDate },
-                                            { icon: '👥', label: 'Team Size',    val: `${setupForm.teamSize} people` },
-                                            { icon: '📋', label: 'Tasks',        val: `${selected?.tasks.length} tasks` },
-                                            { icon: '📄', label: 'Documents',    val: `${selected?.documents.length} pre-filled docs` },
-                                            { icon: '🏃', label: 'Sprints',      val: `${selected?.sprints.length} sprint(s)` },
+                                            { label: 'Template',     val: selected?.name ?? '' },
+                                            { label: 'Project Name', val: setupForm.name },
+                                            { label: 'Goal',         val: setupForm.goal },
+                                            { label: 'Start Date',   val: setupForm.startDate },
+                                            { label: 'Team Size',    val: `${setupForm.teamSize} people` },
+                                            { label: 'Tasks',        val: `${editableTasks.length} tasks` },
+                                            { label: 'Sprints',      val: `${selected?.sprints.length ?? 0} sprint(s)` },
+                                            { label: 'Milestones',   val: `${editableMilestones.length} milestone${editableMilestones.length !== 1 ? 's' : ''}` },
                                         ].map(row => (
                                             <div key={row.label}
                                                 className="flex items-start gap-2">
-                                                <span>{row.icon}</span>
                                                 <span className="text-muted-foreground
                                                     min-w-[100px]">
                                                     {row.label}:
@@ -1065,7 +1162,6 @@ export function TemplateGallery({
                                         ))}
                                         {params.techStack && (
                                             <div className="flex items-start gap-2">
-                                                <span>💻</span>
                                                 <span className="text-muted-foreground min-w-[100px]">
                                                     Tech Stack:
                                                 </span>
@@ -1077,7 +1173,7 @@ export function TemplateGallery({
                                     </div>
                                 </div>
 
-                                {/* ── Existing data warning ── */}
+                                {/* Existing data warning */}
                                 {checkingData ? (
                                     <div className="flex items-center gap-2
                                         text-sm text-muted-foreground justify-center py-4">
@@ -1104,7 +1200,6 @@ export function TemplateGallery({
                                             </div>
                                         </div>
 
-                                        {/* Existing data counts */}
                                         <div className="grid grid-cols-3 gap-2">
                                             {[
                                                 { icon: <BarChart3 className="h-4 w-4" />, label: 'Tasks',     count: existingData.tasks     },
@@ -1129,7 +1224,6 @@ export function TemplateGallery({
                                             ))}
                                         </div>
 
-                                        {/* Note: team members always preserved */}
                                         <div className="flex items-center gap-2
                                             text-xs text-green-600 dark:text-green-400
                                             bg-green-50 dark:bg-green-900/20 rounded-lg p-2">
@@ -1139,7 +1233,6 @@ export function TemplateGallery({
                                             </strong> — they are never removed.
                                         </div>
 
-                                        {/* Toggle */}
                                         <div className="flex items-center
                                             justify-between bg-white dark:bg-background
                                             rounded-lg p-3 border">
@@ -1165,8 +1258,7 @@ export function TemplateGallery({
                                         {!clearExisting && (
                                             <p className="text-xs text-muted-foreground
                                                 bg-muted/50 rounded-lg p-2.5">
-                                                ℹ️ Template content will be
-                                                <strong> added on top</strong> of
+                                                Template content will be <strong>added on top</strong> of
                                                 your existing data.
                                             </p>
                                         )}
@@ -1229,11 +1321,10 @@ export function TemplateGallery({
                                     </div>
                                     <div>
                                         <p className="text-xl font-bold">
-                                            🎉 "{setupForm.name}" is ready!
+                                            "{setupForm.name}" is ready!
                                         </p>
                                         <p className="text-sm text-muted-foreground mt-2">
-                                            {selected?.tasks.length} tasks •{' '}
-                                            {selected?.documents.length} documents •{' '}
+                                            {editableTasks.length} tasks &bull;{' '}
                                             {selected?.sprints.length} sprints
                                         </p>
                                     </div>

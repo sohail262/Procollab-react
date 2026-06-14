@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { DashboardLayout } from '@/components/layout/DashboardLayout'
 import {
     Card, CardContent, CardHeader,
@@ -7,6 +7,7 @@ import {
 } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -39,6 +40,8 @@ import { db } from '@/lib/firebase'
 import { useAuth } from '@/hooks/use-auth'
 import { useToast } from '@/hooks/use-toast'
 import { useProjectRole } from '@/hooks/use-project-role'
+import { trackTeammateInvited, trackTeamFormed, trackApplicationResolved } from '@/services/analyticsService'
+
 import {
     type MemberPermissions,
 } from '@/hooks/use-permissions'
@@ -84,9 +87,11 @@ interface JoinRequest {
     skills:         string
     experience:     string
     motivation:     string
+    coverLetter?:   string
+    customMessage?: string
     timeCommitment: string
     appliedAt:      Date
-    status:         'pending' | 'accepted' | 'rejected'
+    status:         'pending' | 'applied' | 'viewed' | 'shortlisted' | 'interviewing' | 'accepted' | 'rejected'
     userName?:      string
     userAvatar?:    string
 }
@@ -165,7 +170,9 @@ export function ManageTeam() {
     const [invitations,   setInvitations]   = useState<Invitation[]>([])
     const [joinRequests,  setJoinRequests]  = useState<JoinRequest[]>([])
     const [selectedMember,setSelectedMember]= useState<TeamMember | null>(null)
-    const [activeTab,     setActiveTab]     = useState('members')
+    const [searchParams] = useSearchParams()
+    const initialTab = searchParams.get('tab') || 'members'
+    const [activeTab,     setActiveTab]     = useState(initialTab)
 
     const [removeDialog, setRemoveDialog] = useState<{
         open:       boolean
@@ -174,10 +181,19 @@ export function ManageTeam() {
         memberName: string
     }>({ open: false, memberId: '', memberUid: '', memberName: '' })
 
+    const [removalReason, setRemovalReason] = useState('')
+
     const [mailDialog, setMailDialog] = useState<{
         open:    boolean
         options: MailClientOption[]
     }>({ open: false, options: [] })
+
+    const [emailPromptOpen, setEmailPromptOpen] = useState(false)
+    const [pendingAction, setPendingAction] = useState<{
+        type: 'status' | 'accept'
+        request: JoinRequest
+        newStatus?: 'shortlisted' | 'interviewing' | 'rejected'
+    } | null>(null)
 
     // ── Real-time listeners ───────────────────────────────
     useEffect(() => {
@@ -231,13 +247,12 @@ export function ManageTeam() {
             )
         )
 
-        // Pending applications
-        // ✅ Fetch user profiles in parallel (not sequential loop)
+        // Pending/active applications list
         unsubs.push(
             onSnapshot(
                 query(
                     collection(db, 'projects', id, 'applications'),
-                    where('status', '==', 'pending')
+                    where('status', 'in', ['pending', 'applied', 'viewed', 'shortlisted', 'interviewing'])
                 ),
                 async snap => {
                     if (snap.empty) {
@@ -288,9 +303,12 @@ export function ManageTeam() {
                             skills:         data.skills         || '',
                             experience:     data.experience     || '',
                             motivation:     data.motivation     || data.message || '',
+                            coverLetter:    data.coverLetter    || '',
+                            customMessage:  data.customMessage  || '',
                             timeCommitment: data.timeCommitment || '',
                             appliedAt:      data.appliedAt?.toDate() ?? new Date(),
                             status:         data.status,
+                            statusHistory:  data.statusHistory  || [],
                             userName,
                             userAvatar,
                         }
@@ -303,6 +321,51 @@ export function ManageTeam() {
 
         return () => unsubs.forEach(fn => fn())
     }, [id])
+
+    // ✅ Auto-mark applications as viewed when owner views them
+    useEffect(() => {
+        if (!id || !user || activeTab !== 'applications' || joinRequests.length === 0) return
+
+        const appliedRequests = joinRequests.filter(r => r.status === 'applied')
+        if (appliedRequests.length === 0) return
+
+        appliedRequests.forEach(async (request) => {
+            try {
+                const statusEntry = {
+                    status: 'viewed',
+                    timestamp: new Date(),
+                    changedBy: user.uid
+                }
+
+                // Update project side
+                await updateDoc(doc(db, 'projects', id, 'applications', request.id), {
+                    status: 'viewed',
+                    statusHistory: arrayUnion(statusEntry)
+                })
+
+                // Update applicant side
+                const userAppsSnap = await getDocs(
+                    query(
+                        collection(db, 'users', request.userId, 'applications'),
+                        where('projectId', '==', id)
+                    )
+                )
+                await Promise.all(
+                    userAppsSnap.docs.map(appDoc =>
+                        updateDoc(
+                            doc(db, 'users', request.userId, 'applications', appDoc.id),
+                            {
+                                status: 'viewed',
+                                statusHistory: arrayUnion(statusEntry)
+                            }
+                        )
+                    )
+                )
+            } catch (err) {
+                console.error('Error auto-marking application as viewed:', err)
+            }
+        })
+    }, [activeTab, joinRequests, id, user])
 
     // ── Invite ────────────────────────────────────────────
     const handleInvite = async () => {
@@ -420,6 +483,8 @@ export function ManageTeam() {
                 role:         inviteRole,
                 token,
             })
+            trackTeammateInvited(user.uid, id, targetUserId || email)
+
             setMailDialog({ open: true, options: mailOptions })
 
             toast({
@@ -427,6 +492,7 @@ export function ManageTeam() {
                 description: `Invite prepared for ${email}.`,
             })
             setInviteEmail('')
+
 
         } catch (error) {
             console.error('Error preparing invitation:', error)
@@ -504,7 +570,7 @@ export function ManageTeam() {
                 title:     'Removed from Project',
                 body:      `You have been removed from "${
                     project?.title ?? 'a project'
-                }". Contact the project owner if you think this was a mistake.`,
+                }". Reason: "${removalReason.trim()}". Contact the project owner if you think this was a mistake.`,
                 type:      'warning',
                 url:       '/discover',
                 projectId: id,
@@ -528,6 +594,7 @@ export function ManageTeam() {
             setRemoveDialog({
                 open: false, memberId: '', memberUid: '', memberName: '',
             })
+            setRemovalReason('')
         }
     }
 
@@ -625,11 +692,128 @@ export function ManageTeam() {
         }
     }
 
-    // ── Accept application ────────────────────────────────
-    const handleAcceptRequest = async (request: JoinRequest) => {
-        if (!id) return
+    const handleGrantAllPermissions = async (memberId: string, grantAll: boolean) => {
+        if (!id || !selectedMember) return
+        try {
+            const updated: MemberPermissions = {} as MemberPermissions
+            PERMISSION_TABS.forEach(tab => {
+                updated[tab.key as keyof MemberPermissions] = {
+                    read: grantAll,
+                    write: grantAll
+                }
+            })
 
-        // ✅ Guard: check if already a member (race condition prevention)
+            await updateDoc(
+                doc(db, 'projects', id, 'members', memberId),
+                { permissions: updated }
+            )
+
+            setSelectedMember({ ...selectedMember, permissions: updated })
+
+            toast({
+                title:       'Permissions updated',
+                description: grantAll ? 'Granted all read/write permissions.' : 'Revoked all permissions.',
+            })
+        } catch (error) {
+            console.error('Error updating all permissions:', error)
+            toast({
+                title:       'Error',
+                description: 'Failed to update permissions.',
+                variant:     'destructive',
+            })
+        }
+    }
+
+    // ── Update status DB operations ──────────────────────────────────────
+    const performStatusUpdate = async (
+        request: JoinRequest, 
+        newStatus: 'shortlisted' | 'interviewing' | 'rejected'
+    ) => {
+        if (!id || !user) return
+        try {
+            const statusEntry = {
+                status: newStatus,
+                timestamp: new Date(),
+                changedBy: user.uid
+            }
+
+            // 1. Update project side
+            await updateDoc(
+                doc(db, 'projects', id, 'applications', request.id),
+                {
+                    status: newStatus,
+                    statusHistory: arrayUnion(statusEntry)
+                }
+            )
+
+            // Track application resolution
+            trackApplicationResolved(user.uid, request.userId, id, newStatus)
+
+
+            // 2. Update user side
+            const userAppsSnap = await getDocs(
+                query(
+                    collection(db, 'users', request.userId, 'applications'),
+                    where('projectId', '==', id)
+                )
+            )
+            await Promise.all(
+                userAppsSnap.docs.map(appDoc =>
+                    updateDoc(
+                        doc(db, 'users', request.userId, 'applications', appDoc.id),
+                        {
+                            status: newStatus,
+                            statusHistory: arrayUnion(statusEntry)
+                        }
+                    )
+                )
+            )
+
+            // 3. Send notification
+            let title = 'Application Update'
+            let body = `Your application to join "${project?.title || 'project'}" has been updated.`
+            let type: 'info' | 'success' | 'warning' = 'info'
+            
+            if (newStatus === 'shortlisted') {
+                title = '🎉 Application Shortlisted!'
+                body = `Good news! Your application for "${project?.title}" has been shortlisted.`
+                type = 'success'
+            } else if (newStatus === 'interviewing') {
+                title = '🤝 Interview Invited!'
+                body = `The owner of "${project?.title}" wants to schedule an interview with you.`
+                type = 'success'
+            } else if (newStatus === 'rejected') {
+                title = 'Application Update'
+                body = `Your application to join "${project?.title}" was not accepted this time.`
+                type = 'warning'
+            }
+
+            await sendNotificationWithPush(request.userId, {
+                title,
+                body,
+                type,
+                url: '/dashboard/applications',
+                projectId: id,
+            })
+
+            toast({
+                title: `Application ${newStatus}`,
+                description: `${request.userName || request.userEmail} notified.`,
+            })
+        } catch (error) {
+            console.error(`Error updating application to ${newStatus}:`, error)
+            toast({
+                title: 'Error',
+                description: `Failed to update application status.`,
+                variant: 'destructive',
+            })
+        }
+    }
+
+    const performAcceptRequest = async (request: JoinRequest) => {
+        if (!id || !user) return
+
+        // Guard: check if already a member
         const existingMemberSnap = await getDoc(
             doc(db, 'projects', id, 'members', request.userId)
         )
@@ -649,10 +833,15 @@ export function ManageTeam() {
         try {
             const displayName  = request.userName || request.userEmail
             const defaultPerms = getDefaultPermissions('member')
+            const statusEntry = {
+                status: 'accepted',
+                timestamp: new Date(),
+                changedBy: user.uid
+            }
 
             const batch = writeBatch(db)
 
-            // ✅ Write to members subcollection
+            // 1. Write to members subcollection
             batch.set(
                 doc(db, 'projects', id, 'members', request.userId),
                 {
@@ -660,18 +849,17 @@ export function ManageTeam() {
                     name:        displayName,
                     email:       request.userEmail,
                     avatar:      request.userAvatar ?? '',
-                    role:        'member',         // ✅ always lowercase
+                    role:        'member',
                     permissions: defaultPerms,
                     joinedAt:    serverTimestamp(),
                     joinedVia:   'application',
                 }
             )
 
-            // ✅ Update root project doc — all three fields
-            // ✅ role lowercase in teamMembers map
+            // 2. Update root project doc
             batch.update(doc(db, 'projects', id), {
                 [`teamMembers.${request.userId}`]: {
-                    role:        'member',         // ✅ lowercase (was 'Member')
+                    role:        'member',
                     joinedAt:    serverTimestamp(),
                     permissions: defaultPerms,
                 },
@@ -679,7 +867,7 @@ export function ManageTeam() {
                 currentMembers: increment(1),
             })
 
-            // ✅ Write to user's joinedProjects
+            // 3. Write to user's joinedProjects
             batch.set(
                 doc(db, 'users', request.userId, 'joinedProjects', id),
                 {
@@ -690,16 +878,35 @@ export function ManageTeam() {
                 }
             )
 
-            // ✅ Mark application accepted in project subcollection
+            // 4. Mark application accepted and update history
             batch.update(
                 doc(db, 'projects', id, 'applications', request.id),
-                { status: 'accepted' }
+                { 
+                    status: 'accepted',
+                    statusHistory: arrayUnion(statusEntry)
+                }
             )
 
             await batch.commit()
 
-            // ✅ Update user's own application docs
-            // Do outside batch (different collection root)
+            // Track application resolution
+            trackApplicationResolved(user.uid, request.userId, id, 'accepted')
+
+            // Track team formed event
+            const newTeamSize = (project?.currentMembers || 1) + 1
+            if (newTeamSize >= 2) {
+                trackTeamFormed(user.uid, id, newTeamSize)
+                
+                // Set functionalDuoAt if not set yet
+                const projectRef = doc(db, 'projects', id)
+                await updateDoc(projectRef, {
+                    functionalDuoAt: serverTimestamp()
+                }).catch(() => {})
+            }
+
+
+
+            // 5. Update user's applications subcollection docs
             const userAppsSnap = await getDocs(
                 query(
                     collection(db, 'users', request.userId, 'applications'),
@@ -707,20 +914,21 @@ export function ManageTeam() {
                 )
             )
 
-            // ✅ Update ALL user application docs for this project
-            // (handles edge case of multiple application attempts)
             await Promise.all(
                 userAppsSnap.docs.map(appDoc =>
                     updateDoc(
                         doc(db, 'users', request.userId, 'applications', appDoc.id),
-                        { status: 'accepted' }
+                        { 
+                            status: 'accepted',
+                            statusHistory: arrayUnion(statusEntry)
+                        }
                     )
                 )
             )
 
-            // ✅ Notify accepted member
+            // 6. Notify accepted member
             await sendNotificationWithPush(request.userId, {
-                title:     'Application Accepted! 🎉',
+                title:     'Application Accepted!',
                 body:      `Your application to join "${
                     project?.title ?? 'a project'
                 }" has been accepted! Welcome to the team.`,
@@ -757,63 +965,93 @@ export function ManageTeam() {
         }
     }
 
-    // ── Reject application ────────────────────────────────
-    const handleRejectRequest = async (request: JoinRequest) => {
-        if (!id) return
-        try {
-            const batch = writeBatch(db)
+    // ── Update status for shortlist/interview/reject ─────────────────────
+    const handleUpdateStatus = (
+        request: JoinRequest, 
+        newStatus: 'shortlisted' | 'interviewing' | 'rejected'
+    ) => {
+        setPendingAction({ type: 'status', request, newStatus })
+        setEmailPromptOpen(true)
+    }
 
-            // ✅ Mark rejected in project subcollection
-            batch.update(
-                doc(db, 'projects', id, 'applications', request.id),
-                { status: 'rejected' }
-            )
+    // ── Accept application ────────────────────────────────
+    const handleAcceptRequest = (request: JoinRequest) => {
+        setPendingAction({ type: 'accept', request })
+        setEmailPromptOpen(true)
+    }
 
-            await batch.commit()
+    const handleEmailChoice = async (client: 'gmail' | 'outlook' | 'default' | 'skip') => {
+        if (!pendingAction) return
+        const { type, request, newStatus } = pendingAction
 
-            // ✅ Update user's own application docs in parallel
-            const userAppsSnap = await getDocs(
-                query(
-                    collection(db, 'users', request.userId, 'applications'),
-                    where('projectId', '==', id)
-                )
-            )
+        // 1. First run the database updates
+        if (type === 'status' && newStatus) {
+            await performStatusUpdate(request, newStatus)
+        } else if (type === 'accept') {
+            await performAcceptRequest(request)
+        }
 
-            await Promise.all(
-                userAppsSnap.docs.map(appDoc =>
-                    updateDoc(
-                        doc(db, 'users', request.userId, 'applications', appDoc.id),
-                        { status: 'rejected' }
-                    )
-                )
-            )
+        // 2. Open email client if not skipped
+        if (client !== 'skip') {
+            const ownerName = user?.displayName || user?.email || 'Project Lead'
+            const projectTitle = project?.title || 'our project'
+            const recipientName = request.userName || 'Collaborator'
+            let emailSubject = ''
+            let emailBody = ''
 
-            // ✅ Notify rejected applicant
-            await sendNotificationWithPush(request.userId, {
-                title:     'Application Update',
-                body:      `Your application to join "${
-                    project?.title ?? 'a project'
-                }" was not accepted this time. Keep exploring other projects!`,
-                type:      'info',
-                url:       '/discover',
-                projectId: id,
-            })
+            if (type === 'status' && newStatus) {
+                if (newStatus === 'shortlisted') {
+                    emailSubject = `Update on your application for ${projectTitle}`
+                    emailBody = `Hi ${recipientName},\n\nWe have reviewed your application to join "${projectTitle}" and have shortlisted you for the team! We will be in touch soon with next steps.\n\nBest regards,\n${ownerName}\n${projectTitle} Team`
+                } else if (newStatus === 'interviewing') {
+                    emailSubject = `Invitation to interview for ${projectTitle}`
+                    emailBody = `Hi ${recipientName},\n\nWe would love to invite you for an interview regarding your application to join "${projectTitle}".\n\nPlease let us know your availability over the next few days.\n\nBest regards,\n${ownerName}\n${projectTitle} Team`
+                } else if (newStatus === 'rejected') {
+                    emailSubject = `Update on your application for ${projectTitle}`
+                    emailBody = `Hi ${recipientName},\n\nThank you for your interest in "${projectTitle}" and for taking the time to apply.\n\nUnfortunately, we have decided to go in a different direction for this role. We wish you the best of luck in your search.\n\nBest regards,\n${ownerName}\n${projectTitle} Team`
+                }
+            } else if (type === 'accept') {
+                const displayName = request.userName || request.userEmail
+                emailSubject = `Application Accepted: Welcome to ${projectTitle}!`
+                emailBody = `Hi ${displayName},\n\nCongratulations! Your application to join "${projectTitle}" has been accepted. Welcome to the team!\n\nYou now have access to the project dashboard.\n\nBest regards,\n${ownerName}\n${projectTitle} Team`
+            }
 
-            toast({
-                title:       'Application rejected',
-                description: `${request.userName || request.userEmail} notified.`,
-            })
-        } catch (error) {
-            console.error('Error rejecting request:', error)
-            toast({
-                title:       'Error',
-                description: 'Failed to reject application.',
-                variant:     'destructive',
-            })
+            if (emailSubject && emailBody) {
+                let url = ''
+                if (client === 'gmail') {
+                    url = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(request.userEmail)}&su=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(emailBody)}`
+                } else if (client === 'outlook') {
+                    url = `https://outlook.office.com/mail/deeplink/compose?to=${encodeURIComponent(request.userEmail)}&subject=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(emailBody)}`
+                } else {
+                    url = `mailto:${request.userEmail}?subject=${encodeURIComponent(emailSubject)}&body=${encodeURIComponent(emailBody)}`
+                }
+                window.open(url, '_blank')
+            }
+        }
+
+        // Close modal and clear pending action
+        setEmailPromptOpen(false)
+        setPendingAction(null)
+    }
+
+
+    // ── Helpers ───────────────────────────────────────────
+    const getAppStatusColor = (status: string) => {
+        switch (status) {
+            case 'applied':
+            case 'pending':
+                return 'bg-blue-50 text-blue-700 border-blue-250/30 dark:bg-blue-950/20 dark:text-blue-400'
+            case 'viewed':
+                return 'bg-purple-50 text-purple-700 border-purple-250/30 dark:bg-purple-950/20 dark:text-purple-400'
+            case 'shortlisted':
+                return 'bg-amber-50 text-amber-700 border-amber-250/30 dark:bg-amber-950/20 dark:text-amber-400'
+            case 'interviewing':
+                return 'bg-cyan-50 text-cyan-700 border-cyan-255/30 dark:bg-cyan-950/20 dark:text-cyan-400'
+            default:
+                return 'bg-gray-100 text-gray-750'
         }
     }
 
-    // ── Helpers ───────────────────────────────────────────
     const getRoleBadgeColor = (role: string) => {
         switch (role) {
             case 'owner':  return 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
@@ -853,32 +1091,142 @@ export function ManageTeam() {
     return (
         <DashboardLayout>
 
+            {/* Email client selection prompt dialog */}
+            <Dialog open={emailPromptOpen} onOpenChange={setEmailPromptOpen}>
+                <DialogContent className="max-w-md bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl shadow-xl p-6">
+                    <DialogHeader className="mb-4">
+                        <DialogTitle className="text-lg font-bold text-gray-900 dark:text-zinc-100">
+                            Send Email Notification?
+                        </DialogTitle>
+                        <DialogDescription className="text-sm text-gray-500 dark:text-zinc-400">
+                            Choose how you would like to send an email to{' '}
+                            <span className="font-semibold text-gray-700 dark:text-zinc-300">
+                                {pendingAction?.request?.userName || pendingAction?.request?.userEmail}
+                            </span>{' '}
+                            for this application update.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    <div className="grid grid-cols-1 gap-2.5">
+                        <Button
+                            variant="outline"
+                            className="flex items-center gap-3.5 h-12 px-4 hover:bg-gray-50 dark:hover:bg-zinc-800 border-gray-200 dark:border-zinc-850 rounded-lg justify-between"
+                            onClick={() => handleEmailChoice('gmail')}
+                        >
+                            <span className="flex items-center gap-3">
+                                <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <path d="M20 4H4C2.9 4 2.01 4.9 2.01 6L2 18C2 19.1 2.9 20 4 20H20C21.1 20 22 19.1 22 18V6C22 4.9 21.1 4 20 4ZM20 8L12 13L4 8V6L12 11L20 6V8Z" fill="#EA4335" />
+                                </svg>
+                                <span className="font-medium text-sm text-gray-800 dark:text-zinc-200">Compose in Gmail (Web)</span>
+                            </span>
+                            <ExternalLink className="h-4 w-4 text-gray-400" />
+                        </Button>
+
+                        <Button
+                            variant="outline"
+                            className="flex items-center gap-3.5 h-12 px-4 hover:bg-gray-50 dark:hover:bg-zinc-800 border-gray-200 dark:border-zinc-850 rounded-lg justify-between"
+                            onClick={() => handleEmailChoice('outlook')}
+                        >
+                            <span className="flex items-center gap-3">
+                                <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <path d="M20.5 2H3.5C2.67 2 2 2.67 2 3.5V20.5C2 21.33 2.67 22 3.5 22H20.5C21.33 22 22 21.33 22 20.5V3.5C22 2.67 21.33 2 20.5 2Z" fill="#0078D4"/>
+                                    <path d="M17.5 7H6.5C5.67 7 5 7.67 5 8.5V15.5C5 16.33 5.67 17 6.5 17H17.5C18.33 17 19 16.33 19 15.5V8.5C19 7.67 18.33 7 17.5 7ZM17.5 10L12 13.5L6.5 10V8.5L12 12L17.5 8.5V10Z" fill="white"/>
+                                </svg>
+                                <span className="font-medium text-sm text-gray-800 dark:text-zinc-200">Compose in Outlook (Web)</span>
+                            </span>
+                            <ExternalLink className="h-4 w-4 text-gray-400" />
+                        </Button>
+
+                        <Button
+                            variant="outline"
+                            className="flex items-center gap-3.5 h-12 px-4 hover:bg-gray-50 dark:hover:bg-zinc-800 border-gray-200 dark:border-zinc-850 rounded-lg justify-between"
+                            onClick={() => handleEmailChoice('default')}
+                        >
+                            <span className="flex items-center gap-3">
+                                <Mail className="h-5 w-5 text-gray-550 dark:text-zinc-400" />
+                                <span className="font-medium text-sm text-gray-800 dark:text-zinc-200">Open Default Mail Client</span>
+                            </span>
+                            <ExternalLink className="h-4 w-4 text-gray-400" />
+                        </Button>
+
+                        <div className="border-t border-gray-150 dark:border-zinc-800 my-2 pt-2.5 flex gap-2">
+                            <Button
+                                variant="ghost"
+                                className="flex-1 text-gray-500 dark:text-zinc-400 hover:bg-gray-100 dark:hover:bg-zinc-800"
+                                onClick={() => handleEmailChoice('skip')}
+                            >
+                                Skip & Save Status
+                            </Button>
+                            <Button
+                                variant="ghost"
+                                className="text-red-500 hover:text-red-650 hover:bg-red-50 dark:hover:bg-red-950/20"
+                                onClick={() => {
+                                    setEmailPromptOpen(false)
+                                    setPendingAction(null)
+                                }}
+                            >
+                                Cancel
+                            </Button>
+                        </div>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
             {/* Remove member confirmation */}
-            <AlertDialog
+            <Dialog
                 open={removeDialog.open}
-                onOpenChange={open =>
-                    !open && setRemoveDialog(d => ({ ...d, open: false }))
-                }
+                onOpenChange={open => {
+                    if (!open) {
+                        setRemoveDialog(d => ({ ...d, open: false }))
+                        setRemovalReason('')
+                    }
+                }}
             >
-                <AlertDialogContent>
-                    <AlertDialogHeader>
-                        <AlertDialogTitle>Remove team member?</AlertDialogTitle>
-                        <AlertDialogDescription>
+                <DialogContent className="max-w-md bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-xl shadow-xl p-6">
+                    <DialogHeader className="mb-4">
+                        <DialogTitle className="text-lg font-bold text-gray-900 dark:text-zinc-105">
+                            Remove team member?
+                        </DialogTitle>
+                        <DialogDescription className="text-sm text-gray-500 dark:text-zinc-400">
                             <strong>{removeDialog.memberName}</strong> will immediately
                             lose access to this project and will be notified.
-                        </AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                        <AlertDialogCancel>Cancel</AlertDialogCancel>
-                        <AlertDialogAction
-                            className="bg-destructive text-destructive-foreground"
-                            onClick={handleRemoveMember}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                        <div className="space-y-2">
+                            <label className="text-xs font-bold uppercase tracking-wider text-gray-500 dark:text-zinc-400">
+                                Reason for removal <span className="text-red-500">*</span>
+                            </label>
+                            <Textarea
+                                placeholder="Please explain why this team member is being removed..."
+                                value={removalReason}
+                                onChange={e => setRemovalReason(e.target.value)}
+                                className="min-h-[100px] bg-zinc-50 dark:bg-zinc-950 border-gray-200 dark:border-zinc-850"
+                                required
+                            />
+                        </div>
+                    </div>
+                    <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-gray-150 dark:border-zinc-800">
+                        <Button
+                            variant="outline"
+                            onClick={() => {
+                                setRemoveDialog(d => ({ ...d, open: false }))
+                                setRemovalReason('')
+                            }}
                         >
-                            Remove
-                        </AlertDialogAction>
-                    </AlertDialogFooter>
-                </AlertDialogContent>
-            </AlertDialog>
+                            Cancel
+                        </Button>
+                        <Button
+                            variant="destructive"
+                            onClick={handleRemoveMember}
+                            disabled={!removalReason.trim()}
+                        >
+                            Remove Member
+                        </Button>
+                    </div>
+                </DialogContent>
+            </Dialog>
+
 
             {/* Mail client chooser */}
             <Dialog
@@ -1050,7 +1398,7 @@ export function ManageTeam() {
                                                                 <AvatarImage src={member.avatar} />
                                                             )}
                                                             <AvatarFallback>
-                                                                {member.name.charAt(0).toUpperCase()}
+                                                                {(member.name || 'U').charAt(0).toUpperCase()}
                                                             </AvatarFallback>
                                                         </Avatar>
                                                         <div>
@@ -1185,95 +1533,152 @@ export function ManageTeam() {
                             <CardHeader>
                                 <CardTitle>Join Requests</CardTitle>
                                 <CardDescription>
-                                    Review and respond to pending applications.
+                                    Review and manage the status of project applications.
                                 </CardDescription>
                             </CardHeader>
                             <CardContent>
                                 {joinRequests.length === 0 ? (
                                     <div className="text-center py-8 text-muted-foreground">
                                         <ClipboardList className="h-12 w-12 mx-auto mb-3 opacity-20" />
-                                        <p>No pending applications</p>
+                                        <p>No active applications</p>
                                     </div>
                                 ) : (
                                     <div className="space-y-4">
-                                        {joinRequests.map(request => (
-                                            <div
-                                                key={request.id}
-                                                className="border rounded-lg p-4 space-y-3"
-                                            >
-                                                <div className="flex items-start justify-between">
-                                                    <div className="flex items-center gap-3">
-                                                        <Avatar>
-                                                            {request.userAvatar && (
-                                                                <AvatarImage
-                                                                    src={request.userAvatar}
-                                                                />
+                                        {joinRequests.map(request => {
+                                            const status = request.status || 'applied'
+                                            return (
+                                                <div
+                                                    key={request.id}
+                                                    className="border rounded-xl p-4 space-y-4 bg-white dark:bg-zinc-900 shadow-sm"
+                                                >
+                                                    <div className="flex flex-wrap items-start justify-between gap-3">
+                                                        <div className="flex items-center gap-3">
+                                                            <Avatar className="h-10 w-10">
+                                                                {request.userAvatar && (
+                                                                    <AvatarImage
+                                                                        src={request.userAvatar}
+                                                                    />
+                                                                )}
+                                                                <AvatarFallback>
+                                                                    {(
+                                                                        request.userName ||
+                                                                        request.userEmail ||
+                                                                        'U'
+                                                                    )
+                                                                        .charAt(0)
+                                                                        .toUpperCase()}
+                                                                </AvatarFallback>
+                                                            </Avatar>
+                                                            <div>
+                                                                <div className="flex items-center gap-2 flex-wrap">
+                                                                    <h4 className="font-semibold text-sm">
+                                                                        {request.userName ||
+                                                                            request.userEmail}
+                                                                    </h4>
+                                                                    <Badge
+                                                                        variant="outline"
+                                                                        className={`capitalize text-[10px] font-semibold px-2 py-0.5 border ${getAppStatusColor(status)}`}
+                                                                    >
+                                                                        {status}
+                                                                    </Badge>
+                                                                </div>
+                                                                <p className="text-xs text-muted-foreground mt-0.5">
+                                                                    {request.userEmail}
+                                                                </p>
+                                                            </div>
+                                                        </div>
+                                                        <div className="flex flex-wrap items-center gap-1.5">
+                                                            {/* Shortlist trigger */}
+                                                            {(status === 'applied' || status === 'viewed' || status === 'pending') && (
+                                                                <Button
+                                                                    size="sm"
+                                                                    variant="outline"
+                                                                    className="h-8 text-xs border-amber-200 text-amber-700 hover:bg-amber-50 hover:text-amber-800"
+                                                                    onClick={() => handleUpdateStatus(request, 'shortlisted')}
+                                                                >
+                                                                    Shortlist
+                                                                </Button>
                                                             )}
-                                                            <AvatarFallback>
-                                                                {(
-                                                                    request.userName ||
-                                                                    request.userEmail
-                                                                )
-                                                                    .charAt(0)
-                                                                    .toUpperCase()}
-                                                            </AvatarFallback>
-                                                        </Avatar>
-                                                        <div>
-                                                            <h4 className="font-semibold">
-                                                                {request.userName ||
-                                                                    request.userEmail}
-                                                            </h4>
-                                                            <p className="text-sm text-muted-foreground">
-                                                                {request.userEmail}
-                                                            </p>
+                                                            {/* Interview trigger */}
+                                                            {(status === 'applied' || status === 'viewed' || status === 'pending' || status === 'shortlisted') && (
+                                                                <Button
+                                                                    size="sm"
+                                                                    variant="outline"
+                                                                    className="h-8 text-xs border-cyan-200 text-cyan-700 hover:bg-cyan-50 hover:text-cyan-800"
+                                                                    onClick={() => handleUpdateStatus(request, 'interviewing')}
+                                                                >
+                                                                    Invite to Interview
+                                                                </Button>
+                                                            )}
+                                                            {/* Accept trigger */}
+                                                            <Button
+                                                                size="sm"
+                                                                className="h-8 text-xs bg-green-600 hover:bg-green-700 text-white font-medium"
+                                                                onClick={() => handleAcceptRequest(request)}
+                                                            >
+                                                                Accept
+                                                            </Button>
+                                                            {/* Reject trigger */}
+                                                            <Button
+                                                                size="sm"
+                                                                variant="outline"
+                                                                className="h-8 text-xs text-red-600 hover:bg-red-50 hover:text-red-750 border-red-200/50"
+                                                                onClick={() => handleUpdateStatus(request, 'rejected')}
+                                                            >
+                                                                Reject
+                                                            </Button>
                                                         </div>
                                                     </div>
-                                                    <div className="flex gap-2">
-                                                        <Button
-                                                            size="sm"
-                                                            onClick={() =>
-                                                                handleAcceptRequest(request)
-                                                            }
-                                                        >
-                                                            Accept
-                                                        </Button>
-                                                        <Button
-                                                            size="sm"
-                                                            variant="outline"
-                                                            onClick={() =>
-                                                                handleRejectRequest(request)
-                                                            }
-                                                        >
-                                                            Reject
-                                                        </Button>
+
+                                                    {/* Cover Letter & customMessage Details */}
+                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                                                        {request.coverLetter && (
+                                                            <div className="rounded-lg bg-zinc-50 dark:bg-zinc-800/40 p-3 border">
+                                                                <span className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">Cover Letter</span>
+                                                                <p className="text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap leading-relaxed">
+                                                                    {request.coverLetter}
+                                                                </p>
+                                                            </div>
+                                                        )}
+                                                        {request.customMessage && (
+                                                            <div className="rounded-lg bg-zinc-50 dark:bg-zinc-800/40 p-3 border">
+                                                                <span className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">Message to Team</span>
+                                                                <p className="text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap leading-relaxed">
+                                                                    {request.customMessage}
+                                                                </p>
+                                                            </div>
+                                                        )}
+                                                        {!request.coverLetter && !request.customMessage && request.motivation && (
+                                                            <div className="col-span-full rounded-lg bg-zinc-50 dark:bg-zinc-800/40 p-3 border">
+                                                                <span className="text-[10px] uppercase tracking-wider font-bold text-gray-400 block mb-1">Motivation Letter</span>
+                                                                <p className="text-xs text-gray-700 dark:text-gray-300 whitespace-pre-wrap leading-relaxed">
+                                                                    {request.motivation}
+                                                                </p>
+                                                            </div>
+                                                        )}
+                                                    </div>
+
+                                                    <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-1 border-t border-dashed">
+                                                        <span>
+                                                            Position: <strong className="text-foreground">{request.position || 'Any'}</strong>
+                                                        </span>
+                                                        {request.skills && (
+                                                            <span className="truncate max-w-[40%]">
+                                                                Skills: <strong className="text-foreground">{request.skills}</strong>
+                                                            </span>
+                                                        )}
+                                                        {request.timeCommitment && (
+                                                            <span>
+                                                                Commitment: <strong className="text-foreground">{request.timeCommitment}</strong>
+                                                            </span>
+                                                        )}
+                                                        <span>
+                                                            Applied: {request.appliedAt.toLocaleDateString()}
+                                                        </span>
                                                     </div>
                                                 </div>
-                                                {request.motivation && (
-                                                    <p className="text-sm text-muted-foreground bg-muted/50 rounded p-2">
-                                                        "{request.motivation}"
-                                                    </p>
-                                                )}
-                                                {request.position && (
-                                                    <p className="text-xs text-muted-foreground">
-                                                        Position: {request.position}
-                                                    </p>
-                                                )}
-                                                {request.skills && (
-                                                    <p className="text-xs text-muted-foreground">
-                                                        Skills: {request.skills}
-                                                    </p>
-                                                )}
-                                                {request.timeCommitment && (
-                                                    <p className="text-xs text-muted-foreground">
-                                                        Time commitment: {request.timeCommitment}
-                                                    </p>
-                                                )}
-                                                <p className="text-xs text-muted-foreground">
-                                                    Applied:{' '}
-                                                    {request.appliedAt.toLocaleDateString()}
-                                                </p>
-                                            </div>
-                                        ))}
+                                            )
+                                        })}
                                     </div>
                                 )}
                             </CardContent>
@@ -1314,7 +1719,7 @@ export function ManageTeam() {
                                                             <AvatarImage src={member.avatar} />
                                                         )}
                                                         <AvatarFallback className="text-xs">
-                                                            {member.name.charAt(0).toUpperCase()}
+                                                            {(member.name || 'U').charAt(0).toUpperCase()}
                                                         </AvatarFallback>
                                                     </Avatar>
                                                     <div className="min-w-0">
@@ -1354,6 +1759,23 @@ export function ManageTeam() {
                                         </div>
                                     ) : (
                                         <div className="space-y-2">
+                                            {/* All permissions row */}
+                                            {selectedMember.role !== 'owner' && (
+                                                <div className="flex items-center justify-between p-3 border border-indigo-100 dark:border-indigo-900/30 bg-indigo-50/10 dark:bg-indigo-950/10 rounded-lg mb-3">
+                                                    <div className="flex items-center gap-2 text-sm font-medium text-indigo-600 dark:text-indigo-400">
+                                                        <Shield className="h-4 w-4" />
+                                                        All Permissions (Read & Write)
+                                                    </div>
+                                                    <Switch
+                                                        checked={PERMISSION_TABS.every(tab => {
+                                                            const p = selectedMember.permissions?.[tab.key as keyof MemberPermissions]
+                                                            return p?.read && p?.write
+                                                        })}
+                                                        onCheckedChange={v => handleGrantAllPermissions(selectedMember.id, v)}
+                                                    />
+                                                </div>
+                                            )}
+
                                             {/* Header row */}
                                             <div className="flex items-center justify-between px-3 pb-2 text-xs text-muted-foreground font-medium">
                                                 <span>Feature</span>

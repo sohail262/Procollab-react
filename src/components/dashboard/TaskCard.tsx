@@ -1,29 +1,93 @@
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { Calendar, Clock, MoreVertical, AlertCircle } from 'lucide-react'
+import { Calendar, Clock, MoreVertical, AlertCircle, Pencil, FileText, Calendar as CalendarIcon, MessageSquare, ClipboardList, DollarSign, Trash2 } from 'lucide-react'
 import type { Task } from '@/types/project'
 import { format } from 'date-fns'
+import { db } from '@/lib/firebase'
+import { doc, updateDoc, deleteDoc, increment } from 'firebase/firestore'
+import { useToast } from '@/hooks/use-toast'
+import { useSearchParams } from 'react-router-dom'
+import { usePermissions } from '@/hooks/use-permissions'
+import { useAuth } from '@/hooks/use-auth'
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 
 interface TaskCardProps {
     task: Task
     onClick?: () => void
 }
 
+const toolIcons: Record<string, { icon: any; label: string }> = {
+    whiteboard: { icon: Pencil, label: 'Whiteboard' },
+    docs: { icon: FileText, label: 'Drive Documents' },
+    calendar: { icon: CalendarIcon, label: 'Calendar' },
+    chat: { icon: MessageSquare, label: 'Team Chat' },
+    gantt: { icon: ClipboardList, label: 'Gantt' },
+    budget: { icon: DollarSign, label: 'Budget' },
+}
+
 export function TaskCard({ task, onClick }: TaskCardProps) {
+    const { toast } = useToast()
+    const [_, setSearchParams] = useSearchParams()
+    const { user } = useAuth()
+    const isCreator = !!(user?.uid && task.createdBy === user.uid)
+
+    const handleDeleteTask = async (e: React.MouseEvent) => {
+        e.stopPropagation()
+        if (!task.projectId) return
+
+        try {
+            await deleteDoc(doc(db, 'projects', task.projectId, 'tasks', task.id))
+            if (task.status === 'done') {
+                const projectRef = doc(db, 'projects', task.projectId)
+                await updateDoc(projectRef, {
+                    completedTasksCount: increment(-1)
+                }).catch(() => {})
+            }
+            toast({
+                title: 'Task deleted',
+                description: `Successfully deleted "${task.title}".`,
+            })
+        } catch (error) {
+            console.error('Error deleting task:', error)
+            toast({
+                title: 'Error',
+                description: 'Failed to delete task.',
+                variant: 'destructive',
+            })
+        }
+    }
+
+    const handleTaskStatusChange = async (taskId: string, newStatus: string) => {
+        try {
+            await updateDoc(doc(db, 'projects', task.projectId, 'tasks', taskId), {
+                status: newStatus,
+            })
+            toast({ title: 'Task updated' })
+        } catch (error) {
+            console.error('Error updating task:', error)
+        }
+    }
+
+    const handleToolClick = (e: React.MouseEvent, toolId: string) => {
+        e.stopPropagation()
+        setSearchParams(prev => {
+            const next = new URLSearchParams(prev)
+            next.set('tab', toolId)
+            return next
+        })
+    }
+
     const priorityColors = {
         low: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100',
         medium: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-100',
         high: 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-100',
         urgent: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-100'
-    }
-
-    const statusColors = {
-        backlog: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-100',
-        todo: 'bg-slate-100 text-slate-800 dark:bg-slate-800 dark:text-slate-100',
-        'in-progress': 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100',
-        review: 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-100',
-        done: 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100'
     }
 
     return (
@@ -37,9 +101,27 @@ export function TaskCard({ task, onClick }: TaskCardProps) {
                     <Badge variant="outline" className={`${priorityColors[task.priority]} border-0`}>
                         {task.priority}
                     </Badge>
-                    <button className="text-muted-foreground hover:text-foreground">
-                        <MoreVertical className="h-4 w-4" />
-                    </button>
+                    {isCreator && (
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <button
+                                    className="text-muted-foreground hover:text-foreground p-1 rounded hover:bg-muted/50 transition-colors"
+                                    onClick={(e) => e.stopPropagation()}
+                                >
+                                    <MoreVertical className="h-4 w-4" />
+                                </button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
+                                <DropdownMenuItem
+                                    onClick={handleDeleteTask}
+                                    className="text-destructive focus:text-destructive focus:bg-destructive/10 cursor-pointer"
+                                >
+                                    <Trash2 className="h-4 w-4 mr-2" />
+                                    Delete Task
+                                </DropdownMenuItem>
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+                    )}
                 </div>
 
                 <div>
@@ -65,7 +147,6 @@ export function TaskCard({ task, onClick }: TaskCardProps) {
                                         : (task.dueDate as any)?.toDate
                                             ? (task.dueDate as any).toDate()
                                             : new Date(task.dueDate as any)
-                                    // Check if date is valid
                                     if (isNaN(date.getTime())) return 'Invalid Date'
                                     return format(date, 'MMM d')
                                 })()}
@@ -73,13 +154,34 @@ export function TaskCard({ task, onClick }: TaskCardProps) {
                         )}
                     </div>
 
-                    {task.subtasks && task.subtasks.length > 0 && (
-                        <div className="flex items-center text-xs text-muted-foreground">
-                            <span className="font-medium">
+                    <div className="flex items-center gap-2">
+                        {task.linkedTools && task.linkedTools.length > 0 && (
+                            <div className="flex items-center gap-1">
+                                {task.linkedTools.map(toolId => {
+                                    const tool = toolIcons[toolId]
+                                    if (!tool) return null
+                                    const Icon = tool.icon
+                                    return (
+                                        <button
+                                            key={toolId}
+                                            type="button"
+                                            title={`Go to ${tool.label}`}
+                                            onClick={(e) => handleToolClick(e, toolId)}
+                                            className="p-1 rounded bg-zinc-50 dark:bg-zinc-800 text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 border border-zinc-200 dark:border-zinc-700 transition-colors"
+                                        >
+                                            <Icon className="h-3 w-3" />
+                                        </button>
+                                    )
+                                })}
+                            </div>
+                        )}
+
+                        {task.subtasks && task.subtasks.length > 0 && (
+                            <div className="flex items-center text-xs text-muted-foreground bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded px-1.5 py-0.5 font-medium select-none">
                                 {task.subtasks.filter(t => t.completed).length}/{task.subtasks.length}
-                            </span>
-                        </div>
-                    )}
+                            </div>
+                        )}
+                    </div>
                 </div>
             </CardContent>
         </Card>

@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { DashboardLayout } from '@/components/layout/DashboardLayout'
 import { ProjectCard } from '@/components/ProjectCard'
 import { ApplicationModal } from '@/components/ApplicationModal'
-import { collection, getDocs, doc, getDoc } from 'firebase/firestore'
+import { collection, getDocs, doc, getDoc, query, where } from 'firebase/firestore'
 import { db, auth } from '@/lib/firebase'
 import { FolderKanban } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -32,9 +32,12 @@ export function SavedProjects() {
     const [loading, setLoading] = useState(true)
     const [isModalOpen, setIsModalOpen] = useState(false)
     const [selectedProject, setSelectedProject] = useState<Project | null>(null)
+    const [joinedProjectIds, setJoinedProjectIds] = useState<Set<string>>(new Set())
+    const [appliedProjectIds, setAppliedProjectIds] = useState<Set<string>>(new Set())
 
     useEffect(() => {
         loadSavedProjects()
+        loadJoinedAndApplied()
     }, [])
 
     const loadSavedProjects = async () => {
@@ -67,6 +70,38 @@ export function SavedProjects() {
         } finally {
             setLoading(false)
         }
+    }
+
+    const loadJoinedAndApplied = async () => {
+        if (!auth.currentUser) return
+        const uid = auth.currentUser.uid
+
+        // Joined
+        const joined = new Set<string>()
+        try {
+            const jpSnap = await getDocs(collection(db, 'users', uid, 'joinedProjects'))
+            jpSnap.docs.forEach(d => {
+                const pId = d.data().projectId || d.id
+                if (pId) joined.add(pId)
+            })
+        } catch {}
+        setJoinedProjectIds(joined)
+
+        // Applied
+        const applied = new Set<string>()
+        try {
+            const appsSnap = await getDocs(
+                query(
+                    collection(db, 'users', uid, 'applications'),
+                    where('status', 'in', ['pending', 'applied', 'viewed', 'shortlisted', 'interviewing'])
+                )
+            )
+            appsSnap.docs.forEach(d => {
+                const pId = d.data().projectId
+                if (pId) applied.add(pId)
+            })
+        } catch {}
+        setAppliedProjectIds(applied)
     }
 
     const handleApply = (project: Project) => {
@@ -105,6 +140,8 @@ export function SavedProjects() {
                         <ProjectCard
                             key={project.id}
                             project={project}
+                            isAlreadyMember={joinedProjectIds.has(project.id)}
+                            hasApplied={appliedProjectIds.has(project.id)}
                             onApply={() => handleApply(project)}
                         />
                     ))}
@@ -114,6 +151,7 @@ export function SavedProjects() {
             <ApplicationModal
                 isOpen={isModalOpen}
                 onClose={() => setIsModalOpen(false)}
+                onSuccess={loadJoinedAndApplied}
                 project={selectedProject}
             />
         </DashboardLayout>

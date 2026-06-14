@@ -6,6 +6,7 @@ import { useState, useEffect } from 'react'
 import { doc, setDoc, deleteDoc, getDoc } from 'firebase/firestore'
 import { db, auth } from '@/lib/firebase'
 import { Button } from '@/components/ui/button'
+import { invalidateSavedProjectsCache } from '@/services/dashboardService'
 
 interface ProjectCardProps {
     project: {
@@ -25,10 +26,11 @@ interface ProjectCardProps {
         teamSize?:         number
     }
     onApply?:         () => void
-    isAlreadyMember?: boolean   // ← NEW: passed from Projects.tsx
+    isAlreadyMember?: boolean
+    hasApplied?:      boolean   // ← NEW: passed from Projects.tsx / SavedProjects.tsx
 }
 
-export function ProjectCard({ project, onApply, isAlreadyMember = false }: ProjectCardProps) {
+export function ProjectCard({ project, onApply, isAlreadyMember = false, hasApplied = false }: ProjectCardProps) {
     const navigate = useNavigate()
     const [isSaved,         setIsSaved]         = useState(false)
     const [loading,         setLoading]         = useState(false)
@@ -91,6 +93,9 @@ export function ProjectCard({ project, onApply, isAlreadyMember = false }: Proje
                 await setDoc(savedRef, { projectId: project.id, savedAt: new Date() })
                 setIsSaved(true)
             }
+            // ✅ Invalidate the saved-projects cache so the next visit to Saved Projects
+            // reflects the change immediately instead of serving stale cached data.
+            invalidateSavedProjectsCache(auth.currentUser.uid)
         } catch (error) {
             console.error('Error toggling save:', error)
         } finally {
@@ -122,7 +127,7 @@ export function ProjectCard({ project, onApply, isAlreadyMember = false }: Proje
                 : project.createdBy ? [{ id: project.createdBy }] : []
 
     // ── What action button to show ─────────────────────────────────────────
-    // Priority: owner > already member > apply
+    // Priority: owner > already member > applied > apply
     const renderActionButton = () => {
         // Owners go straight to dashboard
         if (isOwner) {
@@ -156,6 +161,21 @@ export function ProjectCard({ project, onApply, isAlreadyMember = false }: Proje
                 >
                     <CheckCircle className="h-4 w-4 mr-1" />
                     Member
+                </Button>
+            )
+        }
+
+        // Has already applied — show "Applied" disabled badge
+        if (hasApplied) {
+            return (
+                <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled
+                    className="text-blue-500 hover:text-blue-500 hover:bg-transparent h-auto p-0 px-2 cursor-default opacity-100 dark:text-blue-400"
+                >
+                    <CheckCircle className="h-4 w-4 mr-1 text-blue-500 dark:text-blue-400" />
+                    Applied
                 </Button>
             )
         }

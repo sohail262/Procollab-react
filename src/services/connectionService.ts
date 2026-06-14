@@ -7,6 +7,7 @@ import {
     collection,
 } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
+import { cachedGetDoc } from '@/lib/queryUtils'
 import {
     buildConnectionAcceptedNotif,
     buildConnectionRejectedNotif,
@@ -17,6 +18,7 @@ import {
 import {
     sendNotificationWithPush,
 } from '@/services/notificationTrigger'
+import { trackConnectionSent, trackConnectionAccepted } from '@/services/analyticsService'
 
 // ─── Status check ────────────────────────────────────────────────────────────
 
@@ -33,22 +35,20 @@ export async function getConnectionStatus(
     myUid: string,
     otherUid: string
 ): Promise<'none' | 'pending_out' | 'pending_in' | 'connected'> {
-    // 1. Check friends (both sides should have it, check mine)
-    const friendSnap = await getDoc(doc(db, 'users', myUid, 'friends', otherUid))
+    // ── FIX: Run all 3 reads in parallel instead of sequentially ──
+    // Before: 3 sequential round-trips (~300-600ms total)
+    // After:  3 concurrent round-trips (~100-200ms total)
+    // Plus: 30s cachedGetDoc TTL so rapid re-calls (onSnapshot callbacks) are free
+    const TTL = 30_000
+    const [friendSnap, outSnap, inSnap] = await Promise.all([
+        cachedGetDoc(doc(db, 'users', myUid, 'friends', otherUid), { ttl: TTL }),
+        cachedGetDoc(doc(db, 'users', otherUid, 'connectionRequests', myUid), { ttl: TTL }),
+        cachedGetDoc(doc(db, 'users', myUid, 'connectionRequests', otherUid), { ttl: TTL }),
+    ])
+
     if (friendSnap.exists()) return 'connected'
-
-    // 2. Check if I sent a request to them
-    const outSnap = await getDoc(
-        doc(db, 'users', otherUid, 'connectionRequests', myUid)
-    )
-    if (outSnap.exists()) return 'pending_out'
-
-    // 3. Check if they sent a request to me
-    const inSnap = await getDoc(
-        doc(db, 'users', myUid, 'connectionRequests', otherUid)
-    )
-    if (inSnap.exists()) return 'pending_in'
-
+    if (outSnap.exists())    return 'pending_out'
+    if (inSnap.exists())     return 'pending_in'
     return 'none'
 }
 
@@ -84,7 +84,21 @@ export async function sendConnectionRequest(
         }
     )
 
+    // ⚡ FIX: Also mirror into sender's /sentRequests/{targetUid} for
+    // efficient outgoing-status lookup (one query vs N individual getDoc reads)
+    batch.set(
+        doc(db, 'users', senderUid, 'sentRequests', targetUid),
+        {
+            to: targetUid,
+            sentAt: serverTimestamp(),
+            status: 'pending',
+        }
+    )
+
     await batch.commit()
+
+    // Track analytics
+    trackConnectionSent(senderUid, targetUid)
 
     // ✅ Send in-app + push notification
     await sendNotificationWithPush(
@@ -134,7 +148,13 @@ export async function acceptConnectionRequest(
     // ✅ Delete the connectionRequest doc
     batch.delete(requestRef)
 
+    // ⚡ FIX: Clean up the sender's sentRequests mirror on accept
+    batch.delete(doc(db, 'users', senderUid, 'sentRequests', receiverUid))
+
     await batch.commit()
+
+    // Track analytics
+    trackConnectionAccepted(receiverUid, senderUid)
 
     // ✅ Send in-app + push notification to sender
     await sendNotificationWithPush(
@@ -168,6 +188,8 @@ export async function rejectConnectionRequest(
 
     const batch = writeBatch(db)
     batch.delete(requestRef)
+    // ⚡ FIX: Clean up the sender's sentRequests mirror on reject
+    batch.delete(doc(db, 'users', senderUid, 'sentRequests', receiverUid))
     await batch.commit()
 
     // ✅ Send in-app + push notification to sender
@@ -198,6 +220,8 @@ export async function withdrawConnectionRequest(
 
     const batch = writeBatch(db)
     batch.delete(ref)
+    // ⚡ FIX: Clean up the sender's sentRequests mirror on withdraw
+    batch.delete(doc(db, 'users', senderUid, 'sentRequests', targetUserId))
     await batch.commit()
 
     // ✅ Send in-app + push notification to target

@@ -24,7 +24,7 @@ interface GalleryViewProps {
     readOnly?: boolean
 }
 
-export function GalleryView({ readOnly: _readOnly = false }: GalleryViewProps) {
+export function GalleryView({ readOnly = false }: GalleryViewProps) {
     const { id: projectId } = useParams()
     const { user } = useAuth()
     const [tasks, setTasks] = useState<Task[]>([])
@@ -106,12 +106,15 @@ export function GalleryView({ readOnly: _readOnly = false }: GalleryViewProps) {
     return (
         <div className="h-full space-y-4">
             <div className="flex items-center justify-between">
-                <h2 className="text-2xl font-bold tracking-tight">Gallery View</h2>
-                <Button onClick={() => setIsNewTaskOpen(true)}>
-                    <Plus className="h-4 w-4 mr-2" />
-                    New Item
-                </Button>
+                <h2 className="text-xl font-semibold tracking-tight">Gallery</h2>
+                {!readOnly && (
+                    <Button onClick={() => setIsNewTaskOpen(true)}>
+                        <Plus className="h-4 w-4 mr-2" />
+                        New Item
+                    </Button>
+                )}
             </div>
+
 
             <ScrollArea className="h-[calc(100vh-220px)]">
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 pb-6">
@@ -125,28 +128,32 @@ export function GalleryView({ readOnly: _readOnly = false }: GalleryViewProps) {
                                         className="object-cover w-full h-full transition-transform duration-200 group-hover:scale-105"
                                     />
                                 </AspectRatio>
-                                <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                                    <DropdownMenu>
-                                        <DropdownMenuTrigger asChild>
-                                            <Button variant="secondary" size="icon" className="h-8 w-8 bg-black/50 hover:bg-black/70 text-white border-0">
-                                                <MoreHorizontal className="h-4 w-4" />
-                                            </Button>
-                                        </DropdownMenuTrigger>
-                                        <DropdownMenuContent align="end">
-                                            <DropdownMenuItem onClick={() => {
-                                                setSelectedTask(task);
-                                                setIsEditTaskOpen(true);
-                                            }}>
-                                                <Edit2 className="h-4 w-4 mr-2" />
-                                                Edit Task
-                                            </DropdownMenuItem>
-                                            <DropdownMenuItem onClick={() => handleDeleteTask(task.id)}>
-                                                <Trash2 className="h-4 w-4 mr-2 text-destructive" />
-                                                <span className="text-destructive">Delete</span>
-                                            </DropdownMenuItem>
-                                        </DropdownMenuContent>
-                                    </DropdownMenu>
-                                </div>
+                                {!readOnly && (
+                                    <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <DropdownMenu>
+                                            <DropdownMenuTrigger asChild>
+                                                <Button variant="secondary" size="icon" className="h-8 w-8 bg-black/50 hover:bg-black/70 text-white border-0">
+                                                    <MoreHorizontal className="h-4 w-4" />
+                                                </Button>
+                                            </DropdownMenuTrigger>
+                                            <DropdownMenuContent align="end">
+                                                <DropdownMenuItem onClick={() => {
+                                                    setSelectedTask(task);
+                                                    setIsEditTaskOpen(true);
+                                                }}>
+                                                    <Edit2 className="h-4 w-4 mr-2" />
+                                                    Edit Task
+                                                </DropdownMenuItem>
+                                                {task.createdBy === user?.uid && (
+                                                    <DropdownMenuItem onClick={() => handleDeleteTask(task.id)}>
+                                                        <Trash2 className="h-4 w-4 mr-2 text-destructive" />
+                                                        <span className="text-destructive">Delete</span>
+                                                    </DropdownMenuItem>
+                                                )}
+                                            </DropdownMenuContent>
+                                        </DropdownMenu>
+                                    </div>
+                                )}
                                 <div className="absolute top-2 left-2">
                                     <Badge variant={
                                         task.priority === 'urgent' ? 'destructive' :

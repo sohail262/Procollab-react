@@ -2,8 +2,8 @@
   "rules": {
     "users": {
       "$uid": {
-        ".read": "$uid === auth.uid",
-        ".write": "$uid === auth.uid",
+        ".read": "$uid == auth.uid",
+        ".write": "$uid == auth.uid",
         ".validate": "true",
         "firstName": { ".validate": "newData.isString() || !newData.exists()" },
         "lastName": { ".validate": "newData.isString() || !newData.exists()" },
@@ -57,17 +57,17 @@
     "projects": {
       ".read": true,
       "$projectId": {
-        ".write": "auth != null && (!data.exists() || data.child('createdBy').val() === auth.uid)",
+        ".write": "auth != null && (!data.exists() || data.child('createdBy').val() == auth.uid)",
         ".validate": "newData.hasChildren(['title', 'summary', 'description', 'status', 'createdBy', 'createdAt'])",
         "title": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 100" },
         "summary": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 200" },
         "description": { ".validate": "newData.isString() && newData.val().length > 0" },
         "status": { ".validate": "newData.isString() && newData.val().matches(/^(active|recruiting|completed|on-hold)$/)" },
-        "createdBy": { ".validate": "newData.isString() && newData.val() === auth.uid" },
+        "createdBy": { ".validate": "newData.isString() && newData.val() == auth.uid" },
         "createdAt": { ".validate": "newData.isNumber()" },
         "teamMembers": {
           "$uid": {
-            ".write": "auth != null && (root.child('projects').child($projectId).child('createdBy').val() === auth.uid || $uid === auth.uid)",
+            ".write": "auth != null && (root.child('projects').child($projectId).child('createdBy').val() == auth.uid || $uid == auth.uid)",
             ".validate": "newData.hasChildren(['role', 'joinedAt'])"
           }
         }
@@ -75,12 +75,12 @@
     },
     "projectApplications": {
       "$projectId": {
-        ".read": "auth != null && root.child('projects').child($projectId).child('createdBy').val() === auth.uid",
+        ".read": "auth != null && root.child('projects').child($projectId).child('createdBy').val() == auth.uid",
         "$uid": {
-          ".read": "auth != null && $uid === auth.uid",
-          ".write": "auth != null && ($uid === auth.uid || root.child('projects').child($projectId).child('createdBy').val() === auth.uid)",
+          ".read": "auth != null && $uid == auth.uid",
+          ".write": "auth != null && ($uid == auth.uid || root.child('projects').child($projectId).child('createdBy').val() == auth.uid)",
           ".validate": "newData.hasChildren(['position', 'status', 'appliedAt'])",
-          "status": { ".validate": "!data.exists() || data.val() === newData.val() || root.child('projects').child($projectId).child('createdBy').val() === auth.uid" }
+          "status": { ".validate": "!data.exists() || data.val() == newData.val() || root.child('projects').child($projectId).child('createdBy').val() == auth.uid" }
         }
       }
     },
@@ -88,11 +88,32 @@
       "$projectId": {
         ".read": true,
         "$commentId": {
-          ".write": "auth != null && (!data.exists() || data.child('userId').val() === auth.uid)",
+          ".write": "auth != null && (!data.exists() || data.child('userId').val() == auth.uid)",
           ".validate": "newData.hasChildren(['userId', 'text', 'timestamp'])",
-          "userId": { ".validate": "newData.isString() && newData.val() === auth.uid" },
+          "userId": { ".validate": "newData.isString() && newData.val() == auth.uid" },
           "text": { ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 1000" },
           "timestamp": { ".validate": "newData.isNumber()" }
+        }
+      }
+    },
+    "projectMembers": {
+      "$projectId": {
+        ".read": "auth != null",
+        "$uid": {
+          ".write": "auth != null && auth.uid == $uid",
+          ".validate": "newData.hasChildren(['role'])",
+          "role": { ".validate": "newData.isString() && (newData.val() == 'owner' || newData.val() == 'admin' || newData.val() == 'member')" },
+          "name": { ".validate": "newData.isString() || !newData.exists()" },
+          "avatar": { ".validate": "newData.isString() || !newData.exists()" },
+          "lastReadTimestamp": { ".validate": "newData.isNumber() || !newData.exists()" }
+        }
+      }
+    },
+    "chats": {
+      "$projectId": {
+        ".read": "auth != null && root.child('projectMembers').child($projectId).child(auth.uid).exists()",
+        "$messageId": {
+          ".write": "auth != null && root.child('projectMembers').child($projectId).child(auth.uid).exists() && (!data.exists() && newData.child('senderId').val() == auth.uid || data.exists() && (!newData.exists() && (data.child('senderId').val() == auth.uid || root.child('projectMembers').child($projectId).child(auth.uid).child('role').val() == 'owner' || root.child('projectMembers').child($projectId).child(auth.uid).child('role').val() == 'admin')))"
         }
       }
     },

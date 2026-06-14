@@ -5,33 +5,178 @@ import {
     getDocs, 
     getDoc, 
     DocumentReference,
-    writeBatch
+    writeBatch,
+    queryEqual,
+    refEqual
 } from 'firebase/firestore';
 import { db } from './firebase';
 
-// Cache for query results
-const queryCache = new Map<string, { data: any; timestamp: number; ttl: number }>();
-const CACHE_TTL = 5 * 60 * 1000; // 5 minutes default
+// ─── Cache structure ──────────────────────────────────────────────────────────
+interface CacheEntry {
+    query: any;
+    data: any;
+    timestamp: number;
+    ttl: number;
+    customKey?: string;
+    /** LRU tracking — updated on every cache hit */
+    lastAccessed: number;
+}
 
-// Request deduplication
-const pendingRequests = new Map<string, Promise<any>>();
+// ✅ P2 FIX: Replaced CacheEntry[] array with Map<string, CacheEntry>.
+//
+// Before: O(N) linear scan for every cache lookup (findIndex / find over array).
+// After:  O(1) hash-map lookup by customKey, O(N) only for query-equality checks
+//         which are rare (most callers use explicit cacheKey strings).
+//
+// Secondary improvement: LRU eviction is now tracked via `lastAccessed` and
+// enforced when the cache exceeds MAX_CACHE_SIZE entries.
 
-// Rate limiting
+const cacheByKey = new Map<string, CacheEntry>();   // Fast path: cacheKey → entry
+const cacheByQuery: CacheEntry[] = [];              // Slow path: query-equality entries (no cacheKey)
+
+const CACHE_TTL     = 5 * 60 * 1000;   // 5 minutes default
+const MAX_CACHE_SIZE = 200;             // Maximum total entries before LRU eviction
+
+// ─── Request deduplication ────────────────────────────────────────────────────
+interface PendingRequest {
+    query: any;
+    promise: Promise<any>;
+    customKey?: string;
+}
+
+const pendingRequestsList: PendingRequest[] = [];
+
+// ─── Rate limiting ────────────────────────────────────────────────────────────
 const rateLimiter = new Map<string, { count: number; resetTime: number }>();
-const RATE_LIMIT_WINDOW = 60 * 1000; // 1 minute
-const RATE_LIMIT_MAX_REQUESTS = 100; // per minute per user
+const RATE_LIMIT_WINDOW       = 60 * 1000;  // 1 minute
+const RATE_LIMIT_MAX_REQUESTS = 100;        // per minute per user
 
 /**
- * Generate cache key for queries
+ * Check if two queries/refs are equal using modular SDK comparison
  */
-function getCacheKey(query: Query | DocumentReference, params?: any): string {
-    const path = 'path' in query ? query.path : query.toString();
-    return `${path}:${JSON.stringify(params || {})}`;
+function areEqual(a: any, b: any): boolean {
+    if (!a || !b) return false;
+    if (a === b) return true;
+    try {
+        const typeA = a.type;
+        const typeB = b.type;
+        if (typeA !== typeB) return false;
+        
+        if (typeA === 'document') {
+            return refEqual(a, b);
+        } else if (typeA === 'query' || typeA === 'collection') {
+            return queryEqual(a, b);
+        }
+    } catch {
+        // Fallback to strict check
+    }
+    return false;
 }
 
 /**
- * Check rate limit for user
+ * Helper cache lookup — O(1) for customKey, O(N) for query equality
  */
+function findCachedEntry(query: any, customKey?: string): CacheEntry | undefined {
+    const now = Date.now();
+    if (customKey) {
+        const entry = cacheByKey.get(customKey);
+        if (entry && now - entry.timestamp < entry.ttl) {
+            entry.lastAccessed = now; // LRU touch
+            return entry;
+        }
+        if (entry) cacheByKey.delete(customKey); // Expired — evict eagerly
+        return undefined;
+    }
+    // No custom key — fall back to linear scan over query-equality entries
+    const idx = cacheByQuery.findIndex(e =>
+        !e.customKey && areEqual(e.query, query) && now - e.timestamp < e.ttl
+    );
+    if (idx === -1) return undefined;
+    cacheByQuery[idx].lastAccessed = now; // LRU touch
+    return cacheByQuery[idx];
+}
+
+/**
+ * Helper cache store — maintains LRU eviction when over capacity
+ */
+function setCachedEntry(query: any, data: any, ttl: number, customKey?: string) {
+    const now = Date.now();
+    const entry: CacheEntry = { query, data, timestamp: now, ttl, customKey, lastAccessed: now };
+
+    if (customKey) {
+        cacheByKey.set(customKey, entry);
+    } else {
+        const idx = cacheByQuery.findIndex(e => !e.customKey && areEqual(e.query, query));
+        if (idx !== -1) {
+            cacheByQuery[idx] = entry;
+        } else {
+            cacheByQuery.push(entry);
+        }
+    }
+
+    // LRU eviction — keep total size bounded
+    const totalSize = cacheByKey.size + cacheByQuery.length;
+    if (totalSize > MAX_CACHE_SIZE) {
+        evictLRU();
+    }
+}
+
+/**
+ * LRU eviction: remove the least-recently-accessed entry across both stores.
+ */
+function evictLRU() {
+    let lruTime = Infinity;
+    let lruKey: string | undefined;
+    let lruQIdx = -1;
+
+    cacheByKey.forEach((entry, key) => {
+        if (entry.lastAccessed < lruTime) {
+            lruTime = entry.lastAccessed;
+            lruKey = key;
+            lruQIdx = -1;
+        }
+    });
+    cacheByQuery.forEach((entry, idx) => {
+        if (entry.lastAccessed < lruTime) {
+            lruTime = entry.lastAccessed;
+            lruKey = undefined;
+            lruQIdx = idx;
+        }
+    });
+
+    if (lruKey !== undefined) {
+        cacheByKey.delete(lruKey);
+    } else if (lruQIdx !== -1) {
+        cacheByQuery.splice(lruQIdx, 1);
+    }
+}
+
+// ─── Pending request helpers ──────────────────────────────────────────────────
+function findPendingRequest(query: any, customKey?: string): Promise<any> | undefined {
+    if (customKey) {
+        return pendingRequestsList.find(r => r.customKey === customKey)?.promise;
+    }
+    return pendingRequestsList.find(r => {
+        if (r.customKey) return false;
+        return areEqual(r.query, query);
+    })?.promise;
+}
+
+function addPendingRequest(query: any, promise: Promise<any>, customKey?: string) {
+    pendingRequestsList.push({ query, promise, customKey });
+}
+
+function removePendingRequest(query: any, customKey?: string) {
+    const index = pendingRequestsList.findIndex(r => {
+        if (customKey) return r.customKey === customKey;
+        return areEqual(r.query, query);
+    });
+    if (index !== -1) {
+        pendingRequestsList.splice(index, 1);
+    }
+}
+
+// ─── Rate limiter ─────────────────────────────────────────────────────────────
 function checkRateLimit(userId: string): boolean {
     const now = Date.now();
     const userLimit = rateLimiter.get(userId);
@@ -50,8 +195,10 @@ function checkRateLimit(userId: string): boolean {
     return true;
 }
 
+// ─── Public API ───────────────────────────────────────────────────────────────
+
 /**
- * Cached query execution with deduplication
+ * Cached query execution with deduplication and LRU-bounded in-memory storage.
  */
 export async function cachedQuery(
     query: Query<DocumentData>,
@@ -69,35 +216,30 @@ export async function cachedQuery(
         throw new Error('Rate limit exceeded. Please try again later.');
     }
     
-    const key = cacheKey || getCacheKey(query);
-    
     // Check cache first
     if (!skipCache) {
-        const cached = queryCache.get(key);
-        if (cached && Date.now() - cached.timestamp < cached.ttl) {
+        const cached = findCachedEntry(query, cacheKey);
+        if (cached) {
             return cached.data;
         }
     }
     
     // Check for pending request (deduplication)
-    if (pendingRequests.has(key)) {
-        return pendingRequests.get(key);
+    const pendingPromise = findPendingRequest(query, cacheKey);
+    if (pendingPromise) {
+        return pendingPromise;
     }
     
     // Execute query
     const promise = getDocs(query);
-    pendingRequests.set(key, promise);
+    addPendingRequest(query, promise, cacheKey);
     
     try {
         const result = await promise;
         
         // Cache result
         if (!skipCache) {
-            queryCache.set(key, {
-                data: result,
-                timestamp: Date.now(),
-                ttl
-            });
+            setCachedEntry(query, result, ttl, cacheKey);
         }
         
         return result;
@@ -105,12 +247,12 @@ export async function cachedQuery(
         console.error('Query failed:', error);
         throw error;
     } finally {
-        pendingRequests.delete(key);
+        removePendingRequest(query, cacheKey);
     }
 }
 
 /**
- * Cached document get with deduplication
+ * Cached document get with deduplication and LRU-bounded storage.
  */
 export async function cachedGetDoc(
     docRef: DocumentReference<DocumentData>,
@@ -128,35 +270,30 @@ export async function cachedGetDoc(
         throw new Error('Rate limit exceeded. Please try again later.');
     }
     
-    const key = cacheKey || getCacheKey(docRef);
-    
     // Check cache first
     if (!skipCache) {
-        const cached = queryCache.get(key);
-        if (cached && Date.now() - cached.timestamp < cached.ttl) {
+        const cached = findCachedEntry(docRef, cacheKey);
+        if (cached) {
             return cached.data;
         }
     }
     
     // Check for pending request (deduplication)
-    if (pendingRequests.has(key)) {
-        return pendingRequests.get(key);
+    const pendingPromise = findPendingRequest(docRef, cacheKey);
+    if (pendingPromise) {
+        return pendingPromise;
     }
     
     // Execute query
     const promise = getDoc(docRef);
-    pendingRequests.set(key, promise);
+    addPendingRequest(docRef, promise, cacheKey);
     
     try {
         const result = await promise;
         
         // Cache result
         if (!skipCache) {
-            queryCache.set(key, {
-                data: result,
-                timestamp: Date.now(),
-                ttl
-            });
+            setCachedEntry(docRef, result, ttl, cacheKey);
         }
         
         return result;
@@ -164,12 +301,13 @@ export async function cachedGetDoc(
         console.error('Document get failed:', error);
         throw error;
     } finally {
-        pendingRequests.delete(key);
+        removePendingRequest(docRef, cacheKey);
     }
 }
 
 /**
- * Batch document fetching to reduce N+1 queries
+ * Batch document fetching to reduce N+1 queries.
+ * Each doc is individually cached so repeated calls (e.g. after navigation) are free.
  */
 export async function batchGetDocs(
     docRefs: DocumentReference<DocumentData>[],
@@ -189,17 +327,17 @@ export async function batchGetDocs(
     
     const results: Array<{ id: string; data: DocumentData | undefined; exists: boolean }> = [];
     
-    // Process in batches to avoid overwhelming Firestore
+    // Process in parallel batches to avoid overwhelming Firestore
     for (let i = 0; i < docRefs.length; i += batchSize) {
         const batch = docRefs.slice(i, i + batchSize);
         
         try {
             const promises = batch.map(async (docRef) => {
-                const doc = await cachedGetDoc(docRef, { userId });
+                const d = await cachedGetDoc(docRef, { userId });
                 return {
                     id: docRef.id,
-                    data: doc.exists() ? doc.data() : undefined,
-                    exists: doc.exists()
+                    data: d.exists() ? d.data() : undefined,
+                    exists: d.exists()
                 };
             });
             
@@ -207,7 +345,7 @@ export async function batchGetDocs(
             results.push(...batchResults);
         } catch (error) {
             console.error(`Batch ${i / batchSize + 1} failed:`, error);
-            // Add failed results as non-existent
+            // Add failed results as non-existent to preserve array length
             batch.forEach(docRef => {
                 results.push({
                     id: docRef.id,
@@ -222,7 +360,7 @@ export async function batchGetDocs(
 }
 
 /**
- * Optimized batch write with retry logic
+ * Optimized batch write with retry logic and exponential backoff.
  */
 export async function optimizedBatchWrite(
     operations: Array<{
@@ -281,62 +419,105 @@ export async function optimizedBatchWrite(
 }
 
 /**
- * Clear cache for specific keys or all
+ * Clear cache entries matching a pattern string.
+ * Checks both the Map (cacheByKey) and the query-equality array (cacheByQuery).
+ *
+ * @param pattern - If omitted, clears ALL cache entries.
+ *                  If a string, clears entries whose customKey includes it,
+ *                  or whose Firestore path string contains it.
  */
 export function clearCache(pattern?: string) {
     if (!pattern) {
-        queryCache.clear();
+        cacheByKey.clear();
+        cacheByQuery.length = 0;
         return;
     }
     
-    const keysToDelete = Array.from(queryCache.keys()).filter(key => 
-        key.includes(pattern)
-    );
-    
-    keysToDelete.forEach(key => queryCache.delete(key));
+    // Clear matching entries from the Map (O(N) over map size)
+    cacheByKey.forEach((_, key) => {
+        if (key.includes(pattern)) cacheByKey.delete(key);
+    });
+
+    // Clear matching entries from the query-equality array
+    for (let i = cacheByQuery.length - 1; i >= 0; i--) {
+        const entry = cacheByQuery[i];
+        let matches = false;
+        if (entry.customKey && entry.customKey.includes(pattern)) {
+            matches = true;
+        } else if (
+            entry.query &&
+            typeof entry.query.path === 'string' &&
+            entry.query.path.includes(pattern)
+        ) {
+            matches = true;
+        } else if (
+            entry.query &&
+            entry.query._query &&
+            typeof entry.query._query.path?.toString === 'function' &&
+            entry.query._query.path.toString().includes(pattern)
+        ) {
+            matches = true;
+        }
+        if (matches) {
+            cacheByQuery.splice(i, 1);
+        }
+    }
 }
 
 /**
- * Get cache statistics
+ * Get cache statistics for debugging and monitoring.
  */
 export function getCacheStats() {
     const now = Date.now();
-    let validEntries = 0;
+    let validEntries   = 0;
     let expiredEntries = 0;
     
-    queryCache.forEach(entry => {
-        if (now - entry.timestamp < entry.ttl) {
-            validEntries++;
-        } else {
-            expiredEntries++;
-        }
+    cacheByKey.forEach(entry => {
+        if (now - entry.timestamp < entry.ttl) validEntries++;
+        else expiredEntries++;
+    });
+    cacheByQuery.forEach(entry => {
+        if (now - entry.timestamp < entry.ttl) validEntries++;
+        else expiredEntries++;
     });
     
     return {
-        totalEntries: queryCache.size,
+        totalEntries:   cacheByKey.size + cacheByQuery.length,
+        mapEntries:     cacheByKey.size,
+        arrayEntries:   cacheByQuery.length,
         validEntries,
         expiredEntries,
+        maxCacheSize:   MAX_CACHE_SIZE,
         hitRate: validEntries / (validEntries + expiredEntries) || 0
     };
 }
 
 /**
- * Cleanup expired cache entries
+ * Cleanup expired cache entries (runs on a 10-minute interval).
  */
 export function cleanupCache() {
     const now = Date.now();
-    const keysToDelete: string[] = [];
-    
-    queryCache.forEach((entry, key) => {
+    let deletedCount = 0;
+
+    // Clean the Map
+    cacheByKey.forEach((entry, key) => {
         if (now - entry.timestamp >= entry.ttl) {
-            keysToDelete.push(key);
+            cacheByKey.delete(key);
+            deletedCount++;
         }
     });
-    
-    keysToDelete.forEach(key => queryCache.delete(key));
-    
-    return keysToDelete.length;
+
+    // Clean the query-equality array
+    for (let i = cacheByQuery.length - 1; i >= 0; i--) {
+        const entry = cacheByQuery[i];
+        if (now - entry.timestamp >= entry.ttl) {
+            cacheByQuery.splice(i, 1);
+            deletedCount++;
+        }
+    }
+
+    return deletedCount;
 }
 
-// Auto cleanup every 10 minutes
+// Auto cleanup every 10 minutes to prevent stale entries accumulating
 setInterval(cleanupCache, 10 * 60 * 1000);

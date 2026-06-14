@@ -208,6 +208,13 @@ service cloud.firestore {
           request.auth.uid == friendUserId
         );
       }
+
+      match /reviews/{reviewId} {
+        allow read, list: if isSignedIn();
+        allow create:     if isSignedIn() && request.resource.data.reviewerId == request.auth.uid;
+        allow update:     if isSignedIn() && resource.data.reviewerId == request.auth.uid;
+        allow delete:     if isSignedIn() && (resource.data.reviewerId == request.auth.uid || isAdmin());
+      }
     }
 
     // ─── Projects ──────────────────────────────────────────────────────────────
@@ -223,6 +230,11 @@ service cloud.firestore {
         isProjectOwner(projectId)    ||
         isProjectTeamLead(projectId) ||
         isAdmin()                    ||
+        // Allow team members to cast completion votes or mark as completed
+        (
+          isProjectTeamMember(projectId) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['completionVotes', 'status', 'completedAt'])
+        ) ||
         // Invited user accepting — ONLY adds themselves to members[]
         (
           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['members']) &&
@@ -243,9 +255,9 @@ service cloud.firestore {
         // !! CRITICAL FIX: must include BOTH `read` AND `list`
         // onSnapshot uses a list operation — missing `list` was causing the
         // "Error fetching tasks: Missing or insufficient permissions" error
-        allow read, list, get: if isValidUser() && (
+        allow read, list, get: if (isValidUser() && (
           isAdmin() || canAccessProject(projectId)
-        );
+        )) || (projectExists(projectId) && getProject(projectId).status == 'completed');
 
         // CREATE: owner, admin, team lead only — plain members cannot create
         allow create: if isValidUser() && (
@@ -264,12 +276,8 @@ service cloud.firestore {
           (isTaskAssignee() && (isOnlyStatusUpdate() || isAssigneeStatusUpdateWithReview()))
         );
 
-        // DELETE: owner, admin, team lead only
-        allow delete: if isValidUser() && (
-          isAdmin()                ||
-          isProjectOwner(projectId) ||
-          isProjectTeamLead(projectId)
-        );
+        // DELETE: only the person who created the task
+        allow delete: if isValidUser() && resource.data.createdBy == request.auth.uid;
       }
 
       // ── Applications ──────────────────────────────────────────────────────────
@@ -385,12 +393,12 @@ service cloud.firestore {
       //   - Must allow `list` so getDocs() works
       // WRITE: owner, lead, or the member themselves
       match /members/{memberId} {
-        allow read, list, get: if isValidUser() && (
+        allow read, list, get: if (isValidUser() && (
           canAccessProject(projectId) ||
           // Allow user to read their own member doc even before
           // they appear in teamMembers map (invite acceptance flow)
           request.auth.uid == memberId
-        );
+        )) || (projectExists(projectId) && getProject(projectId).status == 'completed');
         allow create, update: if isValidUser() && (
           isProjectOwner(projectId)    ||
           isProjectTeamLead(projectId) ||
@@ -761,6 +769,24 @@ service cloud.firestore {
             .data.captainId == request.auth.uid
         )
       );
+    }
+
+    // ─── Analytics Events ────────────────────────────────────────────────────────
+    // Any authenticated user can write (fire-and-forget event tracking).
+    // Only admins can read/list (used exclusively in AdminDashboard analytics tab).
+    match /analyticsEvents/{eventId} {
+      allow create: if isValidUser() && 
+                    request.resource.data.event in [
+                      'signup_completed', 
+                      'onboarding_completed', 
+                      'project_created', 
+                      'project_applied', 
+                      'application_resolved', 
+                      'connection_accepted', 
+                      'project_completed'
+                    ];
+      allow read, list, get: if isValidUser() && isAdmin();
+      allow update, delete: if false;
     }
 
   } // end match /databases/{database}/documents

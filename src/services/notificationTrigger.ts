@@ -266,3 +266,94 @@ export async function queuePushOnly(
         console.error('[NotifTrigger] Push-only error:', error)
     }
 }
+
+// ─────────────────────────────────────────────────────────
+// Milestone 3 — Application Loop Triggers
+// ─────────────────────────────────────────────────────────
+
+/**
+ * Trigger a deadline alert for a task assignee.
+ * Call this when a task's dueDate is within 48 hours.
+ *
+ * Cost: 1 batch commit (2 Firestore writes)
+ */
+export async function triggerDeadlineAlert(
+    assigneeUid: string,
+    taskTitle: string,
+    projectId: string,
+    dueDate: Date
+): Promise<void> {
+    const formattedDate = dueDate.toLocaleDateString('en-US', {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+    })
+    await sendNotificationWithPush(assigneeUid, {
+        title: '⏰ Task Due Soon',
+        body: `"${taskTitle}" is due on ${formattedDate}. Don't forget to submit!`,
+        type: 'warning',
+        url: `/project/${projectId}/dashboard`,
+        projectId,
+    })
+    console.log('[NotifTrigger] Deadline alert sent for task:', taskTitle)
+}
+
+/**
+ * Notify a project owner when someone applies to their project.
+ * Call this immediately after a successful application write.
+ *
+ * Cost: 1 batch commit (2 Firestore writes)
+ */
+export async function triggerNewApplicantNotification(
+    ownerUid: string,
+    applicantName: string,
+    projectId: string,
+    projectTitle: string
+): Promise<void> {
+    await sendNotificationWithPush(ownerUid, {
+        title: '📩 New Application Received',
+        body: `${applicantName} applied to join "${projectTitle}". Review their application now.`,
+        type: 'info',
+        url: `/project/${projectId}`,
+        projectId,
+        data: {
+            fromUserName: applicantName,
+        },
+    })
+    console.log('[NotifTrigger] New applicant notification sent to owner:', ownerUid)
+}
+
+/**
+ * Alert both the project owner and the applicant when an application
+ * has been in applied/viewed/shortlisted state for more than 5 days.
+ *
+ * Cost: 2 batch commits (4 Firestore writes total)
+ */
+export async function triggerStaleApplicationAlert(
+    ownerUid: string,
+    applicantUid: string,
+    projectId: string,
+    applicationId: string
+): Promise<void> {
+    // Notify owner to review
+    await sendNotificationWithPush(ownerUid, {
+        title: '🔔 Application Awaiting Review',
+        body: 'An application on your project has been pending for over 5 days. Please review it.',
+        type: 'warning',
+        url: `/project/${projectId}`,
+        projectId,
+        data: { applicationId },
+    })
+
+    // Notify applicant to follow up
+    await sendNotificationWithPush(applicantUid, {
+        title: '📬 Follow Up on Your Application',
+        body: 'Your application has been pending for 5+ days. Consider messaging the project owner to follow up.',
+        type: 'info',
+        url: `/applications`,
+        projectId,
+        data: { applicationId },
+    })
+
+    console.log('[NotifTrigger] Stale application alerts sent for application:', applicationId)
+}

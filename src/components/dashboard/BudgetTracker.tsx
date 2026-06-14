@@ -158,9 +158,9 @@ export function BudgetTracker({ readOnly = false }: BudgetTrackerProps) {
             })
             setIsEditingBudget(false)
             toast({
-                title: 'Budget updated', description: `Budget set to 
-$$
-{parsed.toLocaleString()}` })
+                title: 'Budget updated',
+                description: `Budget set to ₹${parsed.toLocaleString()}`,
+            })
         } catch (err) {
             console.error('Failed to save budget:', err)
             toast({ title: 'Error', description: 'Could not save budget.', variant: 'destructive' })
@@ -324,9 +324,7 @@ $$
                         ) : (
                             <>
                                 <div className="text-2xl font-bold">
-                                    {budget > 0 ? `
-$$
-{budget.toLocaleString()}` : 'Not Set'}
+                                    {budget > 0 ? `₹${budget.toLocaleString()}` : 'Not Set'}
                                 </div>
                                 <p className="text-xs text-muted-foreground mt-1">Monthly Budget</p>
                             </>
@@ -341,7 +339,7 @@ $$
                         <TrendingUp className="h-4 w-4 text-muted-foreground" />
                     </CardHeader>
                     <CardContent>
-                        <div className="text-2xl font-bold">${totalSpent.toLocaleString()}</div>
+                        <div className="text-2xl font-bold">₹{totalSpent.toLocaleString()}</div>
                         {budget > 0 && (
                             <>
                                 <Progress
@@ -369,7 +367,7 @@ $$
                     </CardHeader>
                     <CardContent>
                         <div className={`text-2xl font-bold ${remainingBudget < 0 ? 'text-destructive' : 'text-green-600'}`}>
-                            ${remainingBudget.toLocaleString()}
+                            ₹{remainingBudget.toLocaleString()}
                         </div>
                         <p className="text-xs text-muted-foreground mt-1">
                             {budget > 0 ? 'Available for allocation' : 'Set budget to track'}
@@ -417,7 +415,7 @@ $$
                                         </div>
                                         <div className="grid grid-cols-2 gap-4">
                                             <div className="space-y-2">
-                                                <Label htmlFor="amount">Amount ($)</Label>
+                                                <Label htmlFor="amount">Amount (₹)</Label>
                                                 <Input
                                                     id="amount"
                                                     type="number"
@@ -558,7 +556,7 @@ $$
                                                 )}
                                             </TableCell>
                                             <TableCell className="text-right font-medium">
-                                                ${expense.amount.toLocaleString()}
+                                                ₹{expense.amount.toLocaleString()}
                                             </TableCell>
                                             {!readOnly && (
                                                 <TableCell className="text-right">
@@ -607,7 +605,7 @@ $$
                                             ))}
                                         </Pie>
                                         <Tooltip
-                                            formatter={(value: number) => `$${value.toLocaleString()}`}
+                                            formatter={(value: any) => `₹${Number(value || 0).toLocaleString()}`}
                                         />
                                     </RechartsPieChart>
                                 </ResponsiveContainer>
@@ -625,7 +623,7 @@ $$
                                                 <span>{entry.name}</span>
                                             </div>
                                             <span className="font-medium">
-                                                ${entry.value.toLocaleString()}
+                                                ₹{entry.value.toLocaleString()}
                                             </span>
                                         </div>
                                     ))}

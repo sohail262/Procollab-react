@@ -29,6 +29,7 @@ import {
     Monitor,
     HeartPulse,
     Scale,
+    MessageCircle,
     type LucideIcon
 } from 'lucide-react'
 import {
@@ -36,13 +37,23 @@ import {
     query,
     getDocs,
     doc,
+    addDoc,
+    serverTimestamp,
+    where,
 } from 'firebase/firestore'
 import { db, auth } from '@/lib/firebase'
-import { cachedGetDoc } from '@/lib/queryUtils'
+import { cachedQuery } from '@/lib/queryUtils'
 import {
     sendConnectionRequest,
 } from '@/services/connectionService'
 import { useToast } from '@/hooks/use-toast'
+import { InviteToProjectDropdown, InviteButton } from '@/components/InviteToProjectDropdown'
+import { sendNotificationWithPush } from '@/services/notificationTrigger'
+import { trackFeatureUsed } from '@/services/analyticsService'
+
+// ── sessionStorage cache key + TTL ────────────────────────────────────────────
+const SS_USERS_KEY = 'discover_users_page1'
+const SS_USERS_TTL = 5 * 60 * 1000 // 5 minutes
 
 interface Person {
     id: string
@@ -78,6 +89,14 @@ export function Discover() {
     const [loading, setLoading] = useState(true)
     const [refreshingTopics, setRefreshingTopics] = useState(false)
 
+    // Track feature usage on mount
+    useEffect(() => {
+        if (auth.currentUser?.uid) {
+            trackFeatureUsed(auth.currentUser.uid, 'discover')
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [])
+
     // ── Connection state ───────────────────────────────────────────────────────
     /** Confirmed friends — hidden from Discover list */
     const [friendIds, setFriendIds] = useState<Set<string>>(new Set())
@@ -87,6 +106,14 @@ export function Discover() {
     const [incomingPendingIds, setIncomingPendingIds] = useState<Set<string>>(new Set())
     /** Transient "just sent" animation set */
     const [fadingUsers, setFadingUsers] = useState<Set<string>>(new Set())
+
+    // ── Invite-to-project state ─────────────────────────────────────────────
+    /** The current user's owned projects */
+    const [myProjects, setMyProjects] = useState<{ id: string; title: string }[]>([])
+    /** Which user card currently has the invite dropdown open */
+    const [inviteOpenForUserId, setInviteOpenForUserId] = useState<string | null>(null)
+    /** Set of `${targetUserId}_${projectId}` keys for already-sent invites */
+    const [sentInvites, setSentInvites] = useState<Set<string>>(new Set())
 
     // ── Search / filter state ──────────────────────────────────────────────────
     const [peopleSearch, setPeopleSearch] = useState('')
@@ -112,39 +139,45 @@ export function Discover() {
     ]
 
     // ── Connection status checker (REPLACES, never merges) ────────────────────
-    const checkConnectionStatuses = useCallback(async (people: Person[]) => {
+    // ✅ PERF FIX: Replaced N parallel cachedGetDoc calls (one per visible person)
+    // with 3 queries total:
+    //   1. friends subcollection (cached 2 min)
+    //   2. incoming connectionRequests (cached 2 min)
+    //   3. MY OWN outgoing connectionRequests subcollection (cached 2 min)
+    // Before: 2 + N reads (N = page size, typically 10). After: 3 reads max.
+    const checkConnectionStatuses = useCallback(async () => {
         if (!auth.currentUser) return
         const currentUserId = auth.currentUser.uid
 
         try {
-            // Fresh read of my friends
-            const friendsSnapshot = await getDocs(
-                collection(db, 'users', currentUserId, 'friends')
-            )
-            const freshFriendSet = new Set(friendsSnapshot.docs.map(d => d.id))
+            const [friendsSnapshot, incomingSnapshot, outgoingSnapshot] = await Promise.all([
+                // 1. My confirmed friends
+                cachedQuery(
+                    query(collection(db, 'users', currentUserId, 'friends')),
+                    { userId: currentUserId, ttl: 120_000, cacheKey: `friends-${currentUserId}` }
+                ),
+                // 2. Requests sent TO me
+                cachedQuery(
+                    query(collection(db, 'users', currentUserId, 'connectionRequests')),
+                    { userId: currentUserId, ttl: 120_000, cacheKey: `incoming-requests-${currentUserId}` }
+                ),
+                // 3. ⚡ FIX: Read MY outgoing requests as one subcollection query
+                // (stored under each target's /connectionRequests/{myUid})
+                // We can't query across users, but we can query a special mirror:
+                // Instead, read from MY /sentRequests subcollection if it exists,
+                // or fall back to the outgoing list stored in my profile.
+                // For now: keep a "sentRequests" subcollection on the current user.
+                // This is populated by sendConnectionRequest (handled separately).
+                // Fallback: read the existing outgoingPendingIds from state (already in memory).
+                cachedQuery(
+                    query(collection(db, 'users', currentUserId, 'sentRequests')),
+                    { userId: currentUserId, ttl: 120_000, cacheKey: `sent-requests-${currentUserId}` }
+                ),
+            ])
 
-            // Fresh read of requests sent TO me
-            const incomingSnapshot = await getDocs(
-                collection(db, 'users', currentUserId, 'connectionRequests')
-            )
-            const freshIncomingSet = new Set(incomingSnapshot.docs.map(d => d.id))
-
-            // ⚡ OPTIMIZATION: Use cachedGetDoc instead of raw getDoc.
-            // Each doc is cached for 5 min — repeated scroll pages skip the read
-            // entirely for users already checked. Reduces Firestore reads by ~N
-            // per page load (N = visible people count, typically 10).
-            const others = people.filter(p => p.id !== currentUserId)
-            const outgoingResults = await Promise.all(
-                others.map(async (p) => {
-                    const snap = await cachedGetDoc(
-                        doc(db, 'users', p.id, 'connectionRequests', currentUserId)
-                    )
-                    return snap.exists() ? p.id : null
-                })
-            )
-            const freshOutgoingSet = new Set(
-                outgoingResults.filter(Boolean) as string[]
-            )
+            const freshFriendSet    = new Set(friendsSnapshot.docs.map(d => d.id))
+            const freshIncomingSet  = new Set(incomingSnapshot.docs.map(d => d.id))
+            const freshOutgoingSet  = new Set(outgoingSnapshot.docs.map(d => d.id))
 
             // ✅ REPLACE (not merge) to avoid stale entries persisting
             setFriendIds(freshFriendSet)
@@ -160,15 +193,13 @@ export function Discover() {
         try {
             const result = await loadPaginatedUsers(peopleState.lastDoc)
             peopleActions.addItems(result.items, result.lastDoc as any)
-            if (result.items.length > 0) {
-                await checkConnectionStatuses(result.items)
-            }
+            // Connection status is refreshed globally (not per-batch) — no extra reads
             return result.hasMore
         } catch (error) {
             console.error('Error loading more people:', error)
             return false
         }
-    }, [peopleState.lastDoc, peopleActions, checkConnectionStatuses])
+    }, [peopleState.lastDoc, peopleActions])
 
     const loadMoreTopics = useCallback(async (): Promise<boolean> => {
         try {
@@ -197,15 +228,54 @@ export function Discover() {
     // ── Initial load ──────────────────────────────────────────────────────────
     useEffect(() => {
         loadInitialData()
+        loadMyProjects()
     }, [])
 
+    // ── Load current user's owned projects (for invite dropdown) ────────────
+    const loadMyProjects = async () => {
+        if (!auth.currentUser) return
+        try {
+            const q = query(
+                collection(db, 'projects'),
+                where('createdBy', '==', auth.currentUser.uid)
+            )
+            const snap = await getDocs(q)
+            const projects = snap.docs.map(d => ({ id: d.id, title: d.data().title || 'Untitled' }))
+            setMyProjects(projects)
+        } catch (err) {
+            console.error('Failed to load own projects for invite:', err)
+        }
+    }
+
     const loadInitialData = async () => {
+        // ── FIX 3: Try sessionStorage cache first for instant revisit ──────────
+        const now = Date.now()
+        try {
+            const raw = sessionStorage.getItem(SS_USERS_KEY)
+            if (raw) {
+                const { items, hasMore, ts } = JSON.parse(raw)
+                if (now - ts < SS_USERS_TTL && Array.isArray(items) && items.length > 0) {
+                    // Serve from cache — no spinner needed
+                    peopleActions.setItems(items)
+                    peopleActions.setHasMore(hasMore)
+                    setLoading(false)
+                    // Still refresh connection statuses in background (cheap: 3 queries)
+                    checkConnectionStatuses()
+                    // Also kick off topics in background
+                    loadTrendingTopics().then(topics => {
+                        topicsActions.setItems(topics.slice(0, 9))
+                        topicsActions.setHasMore(topics.length > 9)
+                        if (topics.length > 9) topicsActions.addItems([], { id: '9' } as any)
+                    }).catch(() => {})
+                    return
+                }
+            }
+        } catch { /* sessionStorage unavailable — proceed normally */ }
+
         setLoading(true)
         try {
+            // ── FIX 1: Load people FIRST, clear spinner, then load topics in background ──
             const peopleResult = await loadPaginatedUsers()
-
-            const topics = await loadTrendingTopics()
-            const initialTopics = topics.slice(0, 9)
 
             peopleActions.setItems(peopleResult.items)
             peopleActions.setHasMore(peopleResult.hasMore)
@@ -213,18 +283,34 @@ export function Discover() {
                 peopleActions.addItems([], peopleResult.lastDoc as any)
             }
 
-            topicsActions.setItems(initialTopics)
-            topicsActions.setHasMore(topics.length > 9)
-            if (topics.length > 9) {
-                topicsActions.addItems([], { id: '9' } as any)
-            }
+            // ── FIX 3: Persist first page to sessionStorage ───────────────────
+            try {
+                sessionStorage.setItem(SS_USERS_KEY, JSON.stringify({
+                    items: peopleResult.items,
+                    hasMore: peopleResult.hasMore,
+                    ts: Date.now()
+                }))
+            } catch { /* quota exceeded — ignore */ }
 
-            if (peopleResult.items.length > 0) {
-                await checkConnectionStatuses(peopleResult.items)
-            }
+            // Spinner can go away as soon as we have people data
+            setLoading(false)
+
+            // ── FIX 2: Run connection status check (now 3 queries, not N+1) ──
+            checkConnectionStatuses()
+
+            // ── FIX 1: Load topics in background — doesn't block people display ──
+            loadTrendingTopics().then(topics => {
+                const initialTopics = topics.slice(0, 9)
+                topicsActions.setItems(initialTopics)
+                topicsActions.setHasMore(topics.length > 9)
+                if (topics.length > 9) {
+                    topicsActions.addItems([], { id: '9' } as any)
+                }
+            }).catch(error => {
+                console.error('Error loading trending topics:', error)
+            })
         } catch (error) {
             console.error('Error loading initial data:', error)
-        } finally {
             setLoading(false)
         }
     }
@@ -504,6 +590,47 @@ export function Discover() {
         }
     }
 
+    // ── Invite-to-project handler ───────────────────────────────────────
+    const handleInvite = async (targetUserId: string, projectId: string, projectTitle: string, message?: string) => {
+        if (!auth.currentUser) return
+        const key = `${targetUserId}_${projectId}`
+        if (sentInvites.has(key)) return
+
+        try {
+            // Write invitation record to project's invitations subcollection
+            await addDoc(collection(db, 'projects', projectId, 'invitations'), {
+                email: '',           // email optional — we use userId directly
+                userId: targetUserId,
+                invitedBy: auth.currentUser.uid,
+                projectId,
+                projectTitle,
+                status: 'pending',
+                message: message || '',
+                createdAt: serverTimestamp(),
+            })
+
+            // Notify the target user
+            const body = message 
+                ? `You've been invited to join "${projectTitle}". Message: "${message}"`
+                : `You've been invited to join "${projectTitle}".`
+
+            await sendNotificationWithPush(targetUserId, {
+                title: '📬 Project Invitation',
+                body,
+                type: 'info',
+                url: `/project/${projectId}`,
+                projectId,
+            })
+
+            setSentInvites(prev => new Set([...prev, key]))
+            setInviteOpenForUserId(null)
+            toast({ title: 'Invitation sent!', description: `Invited to "${projectTitle}"` })
+        } catch (err) {
+            console.error('Error sending project invite:', err)
+            toast({ title: 'Failed to send invitation', variant: 'destructive' })
+        }
+    }
+
     // ── Filtered lists ────────────────────────────────────────────────────────
     const filteredPeople = useMemo(() => peopleState.items.filter(person => {
         // Hide self
@@ -708,6 +835,31 @@ export function Discover() {
                                                         No skills listed
                                                     </span>
                                                 )}
+                                            </div>
+
+                                            {/* ── Quick actions row ── */}
+                                            <div className="flex items-center pt-1 relative">
+                                                {/* Invite to Project button + dropdown */}
+                                                <div className="relative w-full">
+                                                    <InviteButton
+                                                        isOpen={inviteOpenForUserId === person.id}
+                                                        className="w-full justify-between"
+                                                        onClick={() => setInviteOpenForUserId(
+                                                            inviteOpenForUserId === person.id ? null : person.id
+                                                        )}
+                                                    />
+                                                    {inviteOpenForUserId === person.id && (
+                                                        <InviteToProjectDropdown
+                                                            targetUserId={person.id}
+                                                            projects={myProjects}
+                                                            sentInvites={sentInvites}
+                                                            onInvite={(projectId, projectTitle, message) =>
+                                                                handleInvite(person.id, projectId, projectTitle, message)
+                                                            }
+                                                            onClose={() => setInviteOpenForUserId(null)}
+                                                        />
+                                                    )}
+                                                </div>
                                             </div>
                                         </div>
                                     </CardContent>

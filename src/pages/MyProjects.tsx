@@ -3,10 +3,15 @@ import { useAuth } from '@/contexts/AuthContext'
 import { DashboardLayout } from '@/components/layout/DashboardLayout'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
-import { Plus, Loader2, FolderKanban, Eye, Edit, Users, LayoutDashboard } from 'lucide-react'
-import { collection, query, where, getDocs, orderBy } from 'firebase/firestore'
+import { Plus, Loader2, FolderKanban, Eye, Edit, Users, LayoutDashboard, Trash2 } from 'lucide-react'
+import { collection, query, where, orderBy, deleteDoc, doc, getDocs } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
+import { cachedQuery } from '@/lib/queryUtils'
+
+// ── sessionStorage cache ────────────────────────────────────────────────────────────────
+const SS_MY_PROJECTS_TTL = 3 * 60 * 1000 // 3 minutes
 import { useNavigate } from 'react-router-dom'
+import { useToast } from '@/hooks/use-toast'
 
 interface Project {
     id: string
@@ -27,10 +32,12 @@ interface Project {
 export default function MyProjects() {
     const { user } = useAuth()
     const navigate = useNavigate()
+    const { toast } = useToast()
     const [createdProjects, setCreatedProjects] = useState<Project[]>([])
     const [joinedProjects, setJoinedProjects] = useState<Project[]>([])
+    const [pastProjects, setPastProjects] = useState<Project[]>([])
     const [loading, setLoading] = useState(true)
-    const [activeTab, setActiveTab] = useState<'created' | 'joined' | 'applications'>('created')
+    const [activeTab, setActiveTab] = useState<'created' | 'joined' | 'past' | 'applications'>('created')
 
     useEffect(() => {
         if (user) {
@@ -38,41 +45,111 @@ export default function MyProjects() {
         }
     }, [user])
 
-    const loadProjects = async () => {
+    const loadProjects = async (skipCache = false) => {
         if (!user) return
+
+        // ── FIX: Try sessionStorage for instant revisit ────────────────────────────
+        const ssKey = `my_projects_${user.uid}`
+        if (!skipCache) {
+            try {
+                const raw = sessionStorage.getItem(ssKey)
+                if (raw) {
+                    const { created, joined, past, ts } = JSON.parse(raw)
+                    if (Date.now() - ts < SS_MY_PROJECTS_TTL) {
+                        setCreatedProjects(created)
+                        setJoinedProjects(joined)
+                        setPastProjects(past)
+                        setLoading(false)
+                        return
+                    }
+                }
+            } catch { /* ignore */ }
+        }
+
         setLoading(true)
         try {
-            // Load created projects
-            const createdQuery = query(
-                collection(db, 'projects'),
-                where('createdBy', '==', user.uid),
-                orderBy('createdAt', 'desc')
-            )
-            const createdSnapshot = await getDocs(createdQuery)
-            const created = createdSnapshot.docs.map(doc => ({
-                id: doc.id,
-                ...doc.data(),
-                createdAt: doc.data().createdAt?.toDate() || new Date()
-            })) as Project[]
-            setCreatedProjects(created)
+            // ── FIX: Two targeted queries instead of scanning ALL projects ──
+            // 1. Projects this user created
+            const [createdSnapshot, joinedSnapshot] = await Promise.all([
+                cachedQuery(
+                    query(
+                        collection(db, 'projects'),
+                        where('createdBy', '==', user.uid),
+                        orderBy('createdAt', 'desc')
+                    ),
+                    { ttl: 300_000, cacheKey: `my-created-projects-${user.uid}` }
+                ),
+                // 2. Projects where user is a member (array-contains replaces full scan)
+                cachedQuery(
+                    query(
+                        collection(db, 'projects'),
+                        where('members', 'array-contains', user.uid)
+                    ),
+                    { ttl: 300_000, cacheKey: `my-joined-projects-${user.uid}` }
+                )
+            ])
 
-            // Load joined projects (where user is a member but not creator)
-            const allProjectsQuery = query(collection(db, 'projects'))
-            const allSnapshot = await getDocs(allProjectsQuery)
-            const joined = allSnapshot.docs
-                .map(doc => ({
-                    id: doc.id,
-                    ...doc.data(),
-                    createdAt: doc.data().createdAt?.toDate() || new Date()
+            const created = createdSnapshot.docs.map(d => ({
+                id: d.id,
+                ...d.data(),
+                createdAt: d.data().createdAt?.toDate() || new Date()
+            })) as Project[]
+
+            // Joined = member but not creator
+            const joined = joinedSnapshot.docs
+                .filter(d => d.data().createdBy !== user.uid)
+                .map(d => ({
+                    id: d.id,
+                    ...d.data(),
+                    createdAt: d.data().createdAt?.toDate() || new Date()
+                })) as Project[]
+
+            // Split active vs completed
+            const activeCreated = created.filter(p => p.status !== 'completed')
+            const activeJoined  = joined.filter(p => p.status !== 'completed')
+            const completedAll  = [
+                ...created.filter(p => p.status === 'completed'),
+                ...joined.filter(p => p.status === 'completed'),
+            ].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+
+            setCreatedProjects(activeCreated)
+            setJoinedProjects(activeJoined)
+            setPastProjects(completedAll)
+
+            // Persist to sessionStorage for instant revisit
+            try {
+                sessionStorage.setItem(ssKey, JSON.stringify({
+                    created: activeCreated, joined: activeJoined, past: completedAll,
+                    ts: Date.now()
                 }))
-                .filter((project: any) =>
-                    project.members?.includes(user.uid) && project.createdBy !== user.uid
-                ) as Project[]
-            setJoinedProjects(joined)
+            } catch { /* quota exceeded */ }
         } catch (error) {
             console.error('Error loading projects:', error)
         } finally {
             setLoading(false)
+        }
+    }
+
+    const handleDeleteProject = async (projectId: string) => {
+        if (!confirm("Are you sure you want to delete this project? This action is permanent and cannot be undone.")) return
+        try {
+            await deleteDoc(doc(db, 'projects', projectId))
+            // Bust caches so the list refreshes
+            if (user) {
+                try { sessionStorage.removeItem(`my_projects_${user.uid}`) } catch { /* ignore */ }
+            }
+            toast({
+                title: "Project Deleted",
+                description: "The project has been permanently deleted.",
+            })
+            loadProjects(true) // skipCache=true forces fresh fetch
+        } catch (error) {
+            console.error("Error deleting project:", error)
+            toast({
+                title: "Deletion Failed",
+                description: "Failed to delete project. Please check your permissions.",
+                variant: "destructive"
+            })
         }
     }
 
@@ -89,9 +166,10 @@ export default function MyProjects() {
         return `${Math.floor(diffDays / 365)} years ago`
     }
 
-    const ProjectCard = ({ project, type }: { project: Project; type: 'created' | 'joined' }) => {
+    const ProjectCard = ({ project, type }: { project: Project; type: 'created' | 'joined' | 'past' }) => {
         const currentMembers = project.currentMembers || 1
         const maxMembers = project.maxMembers || project.teamSize || 5
+        const isOwner = project.createdBy === user?.uid
 
         const statusConfig: Record<string, { dot: string; text: string; bg: string }> = {
             recruiting: { dot: 'bg-amber-400', text: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-50 dark:bg-amber-900/20' },
@@ -170,7 +248,7 @@ export default function MyProjects() {
                             <Eye className="h-3 w-3" />
                         </Button>
 
-                        {type === 'created' && (
+                        {isOwner && (
                             <>
                                 <Button
                                     size="sm"
@@ -189,6 +267,15 @@ export default function MyProjects() {
                                     onClick={() => navigate(`/manage-team/${project.id}`)}
                                 >
                                     <Users className="h-3 w-3" />
+                                </Button>
+                                <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-7 w-7 p-0 shrink-0 text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/20"
+                                    title="Delete project"
+                                    onClick={() => handleDeleteProject(project.id)}
+                                >
+                                    <Trash2 className="h-3 w-3" />
                                 </Button>
                             </>
                         )}
@@ -235,6 +322,15 @@ export default function MyProjects() {
                     onClick={() => setActiveTab('joined')}
                 >
                     Joined Projects
+                </button>
+                <button
+                    className={`px-3 sm:px-4 py-2 font-medium transition-colors border-b-2 whitespace-nowrap text-sm sm:text-base ${activeTab === 'past'
+                        ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
+                        : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                        }`}
+                    onClick={() => setActiveTab('past')}
+                >
+                    Past Projects / History
                 </button>
                 <button
                     className={`px-3 sm:px-4 py-2 font-medium transition-colors border-b-2 whitespace-nowrap text-sm sm:text-base ${activeTab === 'applications'
@@ -299,6 +395,29 @@ export default function MyProjects() {
                                 <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
                                     {joinedProjects.map((project) => (
                                         <ProjectCard key={project.id} project={project} type="joined" />
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* Past Projects Tab */}
+                    {activeTab === 'past' && (
+                        <div>
+                            {pastProjects.length === 0 ? (
+                                <div className="text-center py-12 bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800">
+                                    <FolderKanban className="h-12 w-12 mx-auto text-gray-400 mb-4" />
+                                    <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
+                                        No past projects in history
+                                    </h3>
+                                    <p className="text-gray-500 dark:text-gray-400 mb-6">
+                                        Completed projects will be displayed here
+                                    </p>
+                                </div>
+                            ) : (
+                                <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+                                    {pastProjects.map((project) => (
+                                        <ProjectCard key={project.id} project={project} type="past" />
                                     ))}
                                 </div>
                             )}

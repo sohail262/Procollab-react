@@ -5,6 +5,7 @@ import { ProtectedRoute } from '@/components/ProtectedRoute'
 import { AdminRoute } from '@/components/AdminRoute'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { Toaster } from '@/components/ui/toaster'
+import { usePageTracking } from '@/hooks/usePageTracking'
 const InviteAccept = lazy(() => import('@/pages/InviteAccept'))
 // Lazy load components to reduce initial bundle size
 const Landing = lazy(() => import('@/pages/Landing').then(module => ({ default: module.Landing })))
@@ -26,6 +27,7 @@ const Applications = lazy(() => import('@/pages/Applications').then(module => ({
 const AdminDashboard = lazy(() => import('@/pages/AdminDashboard').then(module => ({ default: module.AdminDashboard })))
 const Notifications = lazy(() => import('@/pages/Notifications').then(module => ({ default: module.Notifications })))
 const ProfileRedesignTest = lazy(() => import('@/pages/ProfileRedesignTest'))
+const PublicProjectShowcase = lazy(() => import('@/pages/PublicProjectShowcase'))
 const LoadingScreen = lazy(() => import('@/components/LoadingScreen').then(m => ({ default: m.LoadingScreen })))
 
 // Loading component — quote-driven splash with animated progress bar
@@ -35,17 +37,17 @@ const PageLoader = () => (
   </Suspense>
 )
 
-function App() {
+// Inner component that can use Router hooks
+function AppRoutes() {
+  usePageTracking()
   return (
-    <ErrorBoundary>
-      <Router>
-        <AuthProvider>
-          <Suspense fallback={<PageLoader />}>
+    <Suspense fallback={<PageLoader />}>
             <Routes>
               <Route path="/" element={<Landing />} />
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Register />} />
               <Route path="/invite" element={<InviteAccept />} />
+              <Route path="/project/public/:projectId" element={<PublicProjectShowcase />} />
               {/* Test Route for Profile Redesign */}
               <Route 
                 path="/test/profile-redesign" 
@@ -227,6 +229,15 @@ function App() {
           </Routes>
           <Toaster />
         </Suspense>
+  )
+}
+
+function App() {
+  return (
+    <ErrorBoundary>
+      <Router>
+        <AuthProvider>
+          <AppRoutes />
         </AuthProvider>
       </Router>
     </ErrorBoundary>

@@ -8,18 +8,20 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Label } from '@/components/ui/label'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
-import { ArrowLeft, Loader2, ShieldAlert, CheckCircle, Info, Shield, XCircle } from 'lucide-react'
+import { ArrowLeft, Loader2, ShieldAlert, CheckCircle, Info, Shield, XCircle, Check } from 'lucide-react'
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore'
 import { db, auth } from '@/lib/firebase'
 import { useToast } from '@/hooks/use-toast'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { validateFormData, projectValidationSchema } from '@/lib/validation'
+import { invalidateMyProjectsCache } from '@/services/dashboardService'
 import {
     analyzeProjectContent,
     getModerationStatus,
     getFlagMessage,
     type ModerationAnalysis
 } from '@/services/contentModerationService'
+import { trackProjectCreated, trackFeatureUsed } from '@/services/analyticsService'
 
 export function CreateProject() {
     const navigate = useNavigate()
@@ -29,6 +31,8 @@ export function CreateProject() {
     const [showWarnings, setShowWarnings] = useState(false)
     const [showGuidelinesDialog, setShowGuidelinesDialog] = useState(true)
     const [validationErrors, setValidationErrors] = useState<Record<string, string>>({})
+    const [currentStep, setCurrentStep] = useState(1)
+    const TOTAL_STEPS = 3
 
     const [formData, setFormData] = useState({
         title: '',
@@ -223,6 +227,17 @@ export function CreateProject() {
 
             const docRef = await addDoc(collection(db, 'projects'), projectData)
 
+            // ✅ Track project creation analytics
+            trackProjectCreated(auth.currentUser.uid, docRef.id, {
+                discipline: formData.primaryDiscipline,
+                moderation_status: moderationStatus,
+            })
+            trackFeatureUsed(auth.currentUser.uid, 'project_creation')
+
+            // ✅ Invalidate cached project list so dashboard reflects new project immediately
+            if (auth.currentUser) {
+                invalidateMyProjectsCache(auth.currentUser.uid)
+            }
             // Add to moderation queue if needed
             if (moderationStatus === 'review') {
                 try {
@@ -264,10 +279,41 @@ export function CreateProject() {
         }
     }
 
+    // Validate step 1 fields before advancing
+    const canAdvanceStep1 = (): boolean => {
+        const errs: Record<string, string> = {}
+        if (!formData.title.trim()) errs.title = 'Title is required'
+        if (!formData.summary.trim() || formData.summary.length < 10) errs.summary = 'Summary must be at least 10 characters'
+        if (!formData.description.trim() || formData.description.length < 50) errs.description = 'Description must be at least 50 characters'
+        if (!formData.primaryDiscipline) errs.primaryDiscipline = 'Please select a discipline'
+        setValidationErrors(errs)
+        return Object.keys(errs).length === 0
+    }
+
+    const canAdvanceStep2 = (): boolean => {
+        const errs: Record<string, string> = {}
+        if (!formData.duration) errs.duration = 'Duration is required'
+        if (!formData.teamSize || formData.teamSize < 1) errs.teamSize = 'Team size must be at least 1'
+        setValidationErrors(errs)
+        return Object.keys(errs).length === 0
+    }
+
+    const handleNext = () => {
+        if (currentStep === 1 && !canAdvanceStep1()) return
+        if (currentStep === 2 && !canAdvanceStep2()) return
+        setCurrentStep(s => Math.min(s + 1, TOTAL_STEPS))
+        window.scrollTo({ top: 0, behavior: 'smooth' })
+    }
+
+    const handleBack = () => {
+        setCurrentStep(s => Math.max(s - 1, 1))
+        window.scrollTo({ top: 0, behavior: 'smooth' })
+    }
+
     return (
         <ErrorBoundary>
             <DashboardLayout>
-                <div className="max-w-4xl mx-auto space-y-6">
+                <div className="max-w-2xl mx-auto space-y-6">
                     {/* Header */}
                     <div className="flex flex-wrap items-start justify-between gap-3">
                         <div>
@@ -278,6 +324,33 @@ export function CreateProject() {
                             <ArrowLeft className="h-4 w-4 mr-2" />
                             Back
                         </Button>
+                    </div>
+
+                    {/* Step progress bar */}
+                    <div className="flex items-center gap-2">
+                        {Array.from({ length: TOTAL_STEPS }, (_, i) => i + 1).map(step => (
+                            <div key={step} className="flex items-center gap-2 flex-1">
+                                <div className={`flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold border-2 transition-all ${
+                                    step < currentStep
+                                        ? 'bg-green-500 border-green-500 text-white'
+                                        : step === currentStep
+                                            ? 'bg-primary border-primary text-primary-foreground'
+                                            : 'bg-background border-muted-foreground/30 text-muted-foreground'
+                                }`}>
+                                    {step < currentStep ? <Check className="h-3.5 w-3.5" /> : step}
+                                </div>
+                                <span className={`text-xs font-medium hidden sm:block ${
+                                    step === currentStep ? 'text-foreground' : 'text-muted-foreground'
+                                }`}>
+                                    {step === 1 ? 'Basics' : step === 2 ? 'Roles & Stack' : 'Details'}
+                                </span>
+                                {step < TOTAL_STEPS && (
+                                    <div className={`h-0.5 flex-1 rounded-full transition-all ${
+                                        step < currentStep ? 'bg-green-400' : 'bg-muted'
+                                    }`} />
+                                )}
+                            </div>
+                        ))}
                     </div>
 
                     {/* Moderation Warnings */}
@@ -312,13 +385,17 @@ export function CreateProject() {
                     )}
 
                     <form onSubmit={handleSubmit} className="space-y-6">
-                        {/* Basic Information */}
-                        <Card>
-                            <CardHeader>
-                                <CardTitle>Basic Information</CardTitle>
-                                <CardDescription>Provide the essential details about your project</CardDescription>
-                            </CardHeader>
-                            <CardContent className="space-y-4">
+
+                        {/* ───────────────────────────────────────────────────
+                            STEP 1 — Basics
+                        ─────────────────────────────────────────────────── */}
+                        {currentStep === 1 && (
+                            <Card>
+                                <CardHeader>
+                                    <CardTitle>Step 1 — Basic Information</CardTitle>
+                                    <CardDescription>Tell us what your project is about</CardDescription>
+                                </CardHeader>
+                                <CardContent className="space-y-4">
                                 <div className="space-y-2">
                                     <Label htmlFor="title">Project Title *</Label>
                                     <Input
@@ -404,19 +481,25 @@ export function CreateProject() {
                                             <option value="other">Other</option>
                                         </select>
                                         {validationErrors.primaryDiscipline && (
-                                            <p className="text-sm text-red-500">{validationErrors.primaryDiscipline}</p>
-                                        )}
+                                        <p className="text-sm text-red-500">{validationErrors.primaryDiscipline}</p>
+                                    )}
                                     </div>
                                 </div>
-                            </CardContent>
-                        </Card>
+                                </CardContent>
+                            </Card>
+                        )}
 
-                        {/* Team & Timeline */}
-                        <Card>
-                            <CardHeader>
-                                <CardTitle>Team & Timeline</CardTitle>
-                                <CardDescription>Define your team requirements and project duration</CardDescription>
-                            </CardHeader>
+                        {/* ───────────────────────────────────────────────────
+                            STEP 2 — Roles & Stack
+                        ─────────────────────────────────────────────────── */}
+                        {currentStep === 2 && (
+                            <>
+                            {/* Team & Timeline */}
+                            <Card>
+                                <CardHeader>
+                                    <CardTitle>Step 2 — Team & Timeline</CardTitle>
+                                    <CardDescription>Define your team requirements and project duration</CardDescription>
+                                </CardHeader>
                             <CardContent className="space-y-4">
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                     <div className="space-y-2">
@@ -483,14 +566,14 @@ export function CreateProject() {
                                     </select>
                                 </div>
                             </CardContent>
-                        </Card>
+                            </Card>
 
-                        {/* Skills & Roles */}
-                        <Card>
-                            <CardHeader>
-                                <CardTitle>Skills & Roles</CardTitle>
-                                <CardDescription>Specify required skills and open positions</CardDescription>
-                            </CardHeader>
+                            {/* Skills & Roles */}
+                            <Card>
+                                <CardHeader>
+                                    <CardTitle>Skills & Roles</CardTitle>
+                                    <CardDescription>Specify required skills and open positions</CardDescription>
+                                </CardHeader>
                             <CardContent className="space-y-4">
                                 <div className="space-y-2">
                                     <Label htmlFor="skills">Required Skills</Label>
@@ -524,14 +607,21 @@ export function CreateProject() {
                                     <p className="text-xs text-gray-500">One role per line</p>
                                 </div>
                             </CardContent>
-                        </Card>
+                            </Card>
+                            </>
+                        )}
 
-                        {/* Goals & Timeline */}
-                        <Card>
-                            <CardHeader>
-                                <CardTitle>Goals & Timeline</CardTitle>
-                                <CardDescription>Define your project objectives and milestones</CardDescription>
-                            </CardHeader>
+                        {/* ───────────────────────────────────────────────────
+                            STEP 3 — Details (optional)
+                        ─────────────────────────────────────────────────── */}
+                        {currentStep === 3 && (
+                            <>
+                            {/* Goals & Timeline */}
+                            <Card>
+                                <CardHeader>
+                                    <CardTitle>Step 3 — Goals & Timeline</CardTitle>
+                                    <CardDescription>Define your project objectives and milestones</CardDescription>
+                                </CardHeader>
                             <CardContent className="space-y-4">
                                 <div className="space-y-2">
                                     <Label htmlFor="goals">Project Goals</Label>
@@ -556,14 +646,14 @@ export function CreateProject() {
                                     />
                                 </div>
                             </CardContent>
-                        </Card>
+                            </Card>
 
-                        {/* Location */}
-                        <Card>
-                            <CardHeader>
-                                <CardTitle>Location</CardTitle>
-                                <CardDescription>Specify where the project will take place</CardDescription>
-                            </CardHeader>
+                            {/* Location */}
+                            <Card>
+                                <CardHeader>
+                                    <CardTitle>Location</CardTitle>
+                                    <CardDescription>Specify where the project will take place</CardDescription>
+                                </CardHeader>
                             <CardContent className="space-y-4">
                                 <div className="space-y-2">
                                     <Label htmlFor="location">Project Location *</Label>
@@ -602,26 +692,43 @@ export function CreateProject() {
                                     />
                                 </div>
                             </CardContent>
-                        </Card>
+                            </Card>
+                            </>
+                        )}
 
-                        {/* Actions */}
-                        <div className="flex justify-end gap-3">
-                            <Button type="button" variant="outline" onClick={() => navigate('/dashboard/projects')}>
-                                Cancel
-                            </Button>
-                            <Button 
-                                type="submit" 
-                                disabled={loading || Object.keys(validationErrors).length > 0}
+                        {/* ── Navigation Buttons ── */}
+                        <div className="flex justify-between items-center gap-3 pt-2">
+                            <Button
+                                type="button"
+                                variant="outline"
+                                onClick={currentStep === 1 ? () => navigate('/dashboard/projects') : handleBack}
                             >
-                                {loading ? (
-                                    <>
-                                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                                        Creating...
-                                    </>
-                                ) : (
-                                    'Create Project'
-                                )}
+                                {currentStep === 1 ? 'Cancel' : <><ArrowLeft className="h-4 w-4 mr-1" /> Back</>}
                             </Button>
+
+                            <div className="text-xs text-muted-foreground">
+                                Step {currentStep} of {TOTAL_STEPS}
+                            </div>
+
+                            {currentStep < TOTAL_STEPS ? (
+                                <Button type="button" onClick={handleNext}>
+                                    Next →
+                                </Button>
+                            ) : (
+                                <Button
+                                    type="submit"
+                                    disabled={loading || Object.keys(validationErrors).length > 0}
+                                >
+                                    {loading ? (
+                                        <>
+                                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                            Creating...
+                                        </>
+                                    ) : (
+                                        'Create Project'
+                                    )}
+                                </Button>
+                            )}
                         </div>
                     </form>
                 </div>

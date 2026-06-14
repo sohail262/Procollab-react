@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, lazy, Suspense } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom'
 import { DashboardLayout } from '@/components/layout/DashboardLayout'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
@@ -14,20 +14,32 @@ import {
     CalendarDays, Users, BarChart3, Settings,
     Plus, ArrowLeft, Loader2, Pencil, FileText, FolderOpen,
     DollarSign, Image, Lock, AlertTriangle, Video,
-    Activity, CheckCircle2, XCircle, ChevronRight,
+    Activity, CheckCircle2, XCircle, ChevronRight, MessageSquare, RefreshCw, Share2
 } from 'lucide-react'
 import {
-    doc, getDoc, updateDoc,
+    doc, getDoc, getDocs, updateDoc,
     collection, query, onSnapshot,
     addDoc, serverTimestamp, orderBy, limit,
 } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
+import { cachedGetDoc } from '@/lib/queryUtils'
+import {
+    ref as rtdbRef,
+    onValue as rtdbOnValue,
+    off as rtdbOff,
+    query as rtdbQuery,
+    limitToLast as rtdbLimitToLast
+} from 'firebase/database'
+import { database } from '@/lib/firebase'
 import type { Task } from '@/types/project'
 import { useAuth } from '@/hooks/use-auth'
 import { useProjectRole } from '@/hooks/use-project-role'
 import { ClipboardList, Star } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import { formatDistanceToNow } from 'date-fns'
+import { ProjectGuide } from '@/components/dashboard/ProjectGuide'
+import { ProjectOnboardingModal, type OnboardingDecision } from '@/components/dashboard/ProjectOnboardingModal'
+import { trackFeatureUsed, type FeatureName } from '@/services/analyticsService'
 
 // ⚡ OPTIMIZATION: Lazy-load all dashboard tab components.
 // Previously all 13 tabs (including tldraw ~2MB, recharts ~400KB) were bundled
@@ -49,6 +61,8 @@ const MeetingRoom      = lazy(() => import('@/components/dashboard/MeetingRoom')
 const MyTasksPanel     = lazy(() => import('@/components/dashboard/MyTasksPanel').then(m => ({ default: m.MyTasksPanel })))
 const TaskReviewPanel  = lazy(() => import('@/components/dashboard/TaskReviewPanel').then(m => ({ default: m.TaskReviewPanel })))
 const TemplateGallery  = lazy(() => import('@/components/dashboard/TemplateGallery').then(m => ({ default: m.TemplateGallery })))
+const TeamChat         = lazy(() => import('@/components/dashboard/TeamChat').then(m => ({ default: m.TeamChat })))
+import { ProjectCompletionModal } from '@/components/dashboard/ProjectCompletionModal'
 
 // Shared tab loading placeholder
 const TabLoader = () => (
@@ -85,6 +99,8 @@ function ReadOnlyNotice() {
     )
 }
 
+
+
 // ─── Tab permission map ───────────────────────────────────────────────────────
 const TAB_PERMISSION_MAP: Record<string, keyof MemberPermissions> = {
     overview:   'dashboard',
@@ -100,6 +116,7 @@ const TAB_PERMISSION_MAP: Record<string, keyof MemberPermissions> = {
     gallery:    'files',
     mytasks:    'tasks',    // ← new
     reviews:    'tasks',    // ← new
+    chat:       'chat',
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -126,34 +143,172 @@ const [teamMembers, setTeamMembers] = useState<
     const [activities,       setActivities]       = useState<any[]>([])
     const [showAllActivity,  setShowAllActivity]  = useState(false)
     const [allActivities,    setAllActivities]    = useState<any[]>([])
-    const [activeTab,        setActiveTab]        = useState('overview')
-    const [showTemplates,    setShowTemplates]    = useState(false)
-    const [isTaskDialogOpen, setIsTaskDialogOpen] = useState(false)
-    const [editingTask,      setEditingTask]      = useState<Task | null>(null)
+
+    // ── Tab state synced with URL ──────────────────────────────────────────────
+    const [searchParams, setSearchParams] = useSearchParams()
+    const activeTab = searchParams.get('tab') || 'overview'
+
+    // Tab → analytics feature name mapping
+    const TAB_FEATURE_MAP: Record<string, FeatureName> = {
+        kanban:     'kanban',
+        gantt:      'gantt',
+        calendar:   'calendar',
+        whiteboard: 'whiteboard',
+        documents:  'documents',
+        analytics:  'analytics',
+        chat:       'chat',
+    }
+
+    const setActiveTab = (tab: string) => {
+        setSearchParams(prev => {
+            const next = new URLSearchParams(prev)
+            next.set('tab', tab)
+            return next
+        }, { replace: true })
+        // Fire feature_used for meaningful tabs
+        const feature = TAB_FEATURE_MAP[tab]
+        if (feature && user?.uid) {
+            trackFeatureUsed(user.uid, feature, { project_id: id })
+        }
+    }
+
+    const [showTemplates,       setShowTemplates]       = useState(false)
+    const [isTaskDialogOpen,    setIsTaskDialogOpen]    = useState(false)
+    const [editingTask,         setEditingTask]         = useState<Task | null>(null)
+    const [onboardingDecision,  setOnboardingDecision]  = useState<OnboardingDecision | null | 'loading'>('loading')
+    const [showOnboarding,      setShowOnboarding]      = useState(false)
+    const [unreadCount,         setUnreadCount]         = useState(0)
+
+    const [updatingStatus, setUpdatingStatus] = useState(false)
+    const [isCompletionModalOpen, setIsCompletionModalOpen] = useState(false)
+
+    const completionVotes = project?.completionVotes || {}
+    const teamSize = teamMembers.length || 1
+    const requiredVotes = teamSize <= 1 ? 1 : (teamSize <= 3 ? 2 : 3)
+    const voteCount = Object.keys(completionVotes).filter(k => completionVotes[k] === true).length
+    const hasVoted = user?.uid ? !!completionVotes[user.uid] : false
+    const isMember = project?.teamMembers && user?.uid ? (user.uid in project.teamMembers) : false
+
+    const handleCompleteProject = async () => {
+        if (!id || !user?.uid) return
+        if (hasVoted) {
+            toast({
+                title: 'Already Voted',
+                description: 'You have already voted to complete this project.',
+            })
+            return
+        }
+
+        setUpdatingStatus(true)
+        try {
+            const updatedVotes = { ...completionVotes, [user.uid]: true }
+            const newVoteCount = Object.keys(updatedVotes).filter(k => updatedVotes[k] === true).length
+
+            if (newVoteCount >= requiredVotes) {
+                await updateDoc(doc(db, 'projects', id), {
+                    status: 'completed',
+                    completedAt: serverTimestamp(),
+                    completionVotes: updatedVotes,
+                })
+                setProject((prev: any) => prev ? { ...prev, status: 'completed', completionVotes: updatedVotes } : prev)
+                setIsCompletionModalOpen(true)
+                toast({
+                    title: 'Project Completed!',
+                    description: `Threshold reached (${newVoteCount}/${requiredVotes}). Resume and showcase materials generated.`,
+                })
+            } else {
+                await updateDoc(doc(db, 'projects', id), {
+                    completionVotes: updatedVotes,
+                })
+                setProject((prev: any) => prev ? { ...prev, completionVotes: updatedVotes } : prev)
+                toast({
+                    title: 'Vote Cast!',
+                    description: `Your vote is saved. Currently at ${newVoteCount}/${requiredVotes} votes. ${requiredVotes - newVoteCount} more required.`,
+                })
+            }
+        } catch (err) {
+            console.error('Error in project completion vote:', err)
+            toast({
+                title: 'Error',
+                description: 'Failed to record completion vote.',
+                variant: 'destructive',
+            })
+        } finally {
+            setUpdatingStatus(false)
+        }
+    }
 
     // Track active listener for cleanup
     const unsubscribeTasksRef = useRef<(() => void) | null>(null)
 
     // ── Effect 1: Load project doc ────────────────────────────────────────────
-    // Runs once when we have a stable userId — project doc is public read
+    // ✅ P1 FIX: Routes through cachedGetDoc (5-min TTL).
+    // Before: raw getDoc() on every navigation to a project dashboard page.
+    // After:  cache hit for 5 minutes = 0 Firestore reads per revisit.
     useEffect(() => {
         if (!id || !user?.uid) return
 
         const loadProject = async () => {
             try {
-                const docSnap = await getDoc(doc(db, 'projects', id))
+                // Use cachedGetDoc — same project doc is re-used within 5 minutes.
+                // Cache key is derived automatically from the document reference.
+                const docSnap = await cachedGetDoc(
+                    doc(db, 'projects', id),
+                    { userId: user.uid, ttl: 300_000 }
+                )
                 if (docSnap.exists()) {
                     const data = docSnap.data()
                     setProject({ id: docSnap.id, ...data })
+
+                    // ── Onboarding decision ───────────────────────────────
+                    const decision = data.onboardingDecision as OnboardingDecision | undefined
+                    if (decision) {
+                        setOnboardingDecision(decision)
+                    } else {
+                        setOnboardingDecision(null)
+                    }
                     
-                    // Load team members
-                    const memberEntries = Object.entries(data.teamMembers ?? {})
-                    const members = memberEntries.map(([uid, entry]: [string, any]) => ({
-                        uid,
-                        name:   entry.name   ?? entry.displayName ?? uid,
-                        avatar: entry.avatar ?? entry.photoURL    ?? '',
-                    }))
-                    setTeamMembers(members)
+                    // Load team members from subcollection
+                    try {
+                        const membersSnap = await getDocs(collection(db, 'projects', id, 'members'))
+                        const members = membersSnap.docs.map(docSnap => {
+                            const m = docSnap.data()
+                            return {
+                                uid:     docSnap.id,
+                                name:    m.name || m.displayName || docSnap.id,
+                                avatar:  m.avatar || m.photoURL || '',
+                            }
+                        })
+                        if (members.length === 0) {
+                            // Fallback to map if subcollection is empty
+                            const memberEntries = Object.entries(data.teamMembers ?? {})
+                            const fallbackMembers = memberEntries.map(([uid, entry]: [string, any]) => ({
+                                uid,
+                                name:   entry.name   ?? entry.displayName ?? uid,
+                                avatar: entry.avatar ?? entry.photoURL    ?? '',
+                            }))
+                            setTeamMembers(fallbackMembers)
+                        } else {
+                            setTeamMembers(members)
+                        }
+                    } catch (mErr) {
+                        console.error('Error fetching members subcollection:', mErr)
+                        // Fallback
+                        const memberEntries = Object.entries(data.teamMembers ?? {})
+                        const fallbackMembers = memberEntries.map(([uid, entry]: [string, any]) => ({
+                            uid,
+                            name:   entry.name   ?? entry.displayName ?? uid,
+                            avatar: entry.avatar ?? entry.photoURL    ?? '',
+                        }))
+                        setTeamMembers(fallbackMembers)
+                    }
+
+                    // Show onboarding modal if not yet decided
+                    // (evaluated after the state sets above settle — but safe to
+                    //  compute from local `data` which is synchronous here)
+                    if (!data.onboardingDecision) {
+                        setShowOnboarding(true)
+                    }
                 } else {
                     navigate('/dashboard/projects')
                 }
@@ -167,6 +322,69 @@ const [teamMembers, setTeamMembers] = useState<
         loadProject()
     }, [id, user?.uid])
     //       ^^^^^^^^ stable primitive — not the whole user object
+
+    // ── Effect 1.5: Unread Chat Messages Listener ─────────────────────────────
+    useEffect(() => {
+        if (!id || !user || !permissions) {
+            setUnreadCount(0)
+            return
+        }
+
+        const canReadChat = () => {
+            if (isOwner || isAdmin) return true
+            const permKey = TAB_PERMISSION_MAP['chat']
+            if (!permKey || !permissions) return false
+            return permissions[permKey]?.read ?? false
+        }
+
+        if (!canReadChat()) {
+            setUnreadCount(0)
+            return
+        }
+
+        const memberRef = rtdbRef(database, `projectMembers/${id}/${user.uid}`)
+        let lastRead = 0
+
+        const unsubMember = rtdbOnValue(memberRef, (snap) => {
+            const val = snap.val()
+            if (val && typeof val === 'object') {
+                lastRead = val.lastReadTimestamp || 0
+            } else if (typeof val === 'number') {
+                lastRead = val
+            }
+            updateUnreadCount()
+        })
+
+        const chatsRef = rtdbQuery(rtdbRef(database, `chats/${id}`), rtdbLimitToLast(100))
+        let chatMsgs: any[] = []
+
+        const unsubChats = rtdbOnValue(chatsRef, (snap) => {
+            const data = snap.val()
+            if (data) {
+                chatMsgs = Object.keys(data).map(k => ({
+                    id: k,
+                    ...data[k]
+                }))
+            } else {
+                chatMsgs = []
+            }
+            updateUnreadCount()
+        })
+
+        const updateUnreadCount = () => {
+            if (!user) return
+            const count = chatMsgs.filter(m => 
+                m.senderId !== user.uid && 
+                m.timestamp > lastRead
+            ).length
+            setUnreadCount(count)
+        }
+
+        return () => {
+            rtdbOff(memberRef)
+            rtdbOff(chatsRef)
+        }
+    }, [id, user?.uid, permissions, isOwner, isAdmin])
 
     // ── Effect 2: Tasks listener ──────────────────────────────────────────────
     // CRITICAL: Only start AFTER permissions have resolved AND user is confirmed
@@ -334,32 +552,53 @@ const [teamMembers, setTeamMembers] = useState<
 
                 {/* ── Header ── */}
                 <div className="flex flex-col gap-3">
-                    <div className="flex items-start gap-2">
-                        <Button
-                            variant="ghost" size="sm"
-                            className="h-6 w-6 p-0 mt-1 shrink-0"
-                            onClick={() => navigate('/dashboard/projects')}
-                        >
-                            <ArrowLeft className="h-4 w-4" />
-                        </Button>
-                        <div className="min-w-0">
-                            <div className="flex flex-wrap items-center gap-2">
-                                <h1 className="text-xl sm:text-2xl font-bold tracking-tight truncate">
-                                    {project?.title}
-                                </h1>
-                                <span className={`px-2 py-0.5 rounded-full text-xs font-medium shrink-0 ${
-                                    project?.status === 'active'
-                                        ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100'
-                                        : project?.status === 'completed'
-                                            ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100'
-                                            : 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-100'
-                                }`}>
-                                    {project?.status}
-                                </span>
+                    <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+                        <div className="flex items-start gap-2 min-w-0">
+                            <Button
+                                variant="ghost" size="sm"
+                                className="h-6 w-6 p-0 mt-1 shrink-0"
+                                onClick={() => navigate('/dashboard/projects')}
+                            >
+                                <ArrowLeft className="h-4 w-4" />
+                            </Button>
+                            <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                    <h1 className="text-xl sm:text-2xl font-bold tracking-tight truncate">
+                                        {project?.title}
+                                    </h1>
+                                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium shrink-0 ${
+                                        project?.status === 'active'
+                                            ? 'bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-100'
+                                            : project?.status === 'completed'
+                                                ? 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-100'
+                                                : 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-100'
+                                    }`}>
+                                        {project?.status}
+                                    </span>
+                                </div>
+                                <p className="text-muted-foreground text-sm mt-0.5">
+                                    {project?.summary || 'Manage your project tasks, team, and timeline.'}
+                                </p>
                             </div>
-                            <p className="text-muted-foreground text-sm mt-0.5">
-                                {project?.summary || 'Manage your project tasks, team, and timeline.'}
-                            </p>
+                        </div>
+                        <div className="shrink-0 sm:self-center flex items-center gap-2">
+                            {canViewTab('chat') && (
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setActiveTab('chat')}
+                                    className="border-primary/30 hover:border-primary/70 bg-primary/5 hover:bg-primary/10 transition-all font-medium text-xs py-1 h-8 flex items-center gap-1.5 relative"
+                                >
+                                    <MessageSquare className="h-3.5 w-3.5 text-primary" />
+                                    <span>Team Chat</span>
+                                    {activeTab !== 'chat' && unreadCount > 0 && (
+                                        <span className="ml-1 px-1.5 py-0.5 bg-red-500 text-white text-[10px] font-bold rounded-full min-w-[16px] h-4 flex items-center justify-center animate-pulse">
+                                            {unreadCount}
+                                        </span>
+                                    )}
+                                </Button>
+                            )}
+                            <ProjectGuide />
                         </div>
                     </div>
 
@@ -372,13 +611,53 @@ const [teamMembers, setTeamMembers] = useState<
                             </Button>
                         )}
 
-                        {(isOwner || isAdmin) && (
+
+                        {/* Templates button: shown only if owner chose template AND hasn't applied yet */}
+                        {(isOwner || isAdmin) &&
+                         onboardingDecision === 'template' &&
+                         !project?.templateAppliedAt && (
                             <Button
                                 variant="outline"
                                 size="sm"
                                 onClick={() => setShowTemplates(true)}
                             >
-                                📦 <span className="hidden sm:inline ml-1">Templates</span>
+                                <span className="hidden sm:inline">Apply Template</span>
+                                <span className="sm:hidden">Template</span>
+                            </Button>
+                        )}
+
+                        {(isOwner || isAdmin || isMember) && project?.status !== 'completed' && (
+                            <Button
+                                size="sm"
+                                variant="outline"
+                                className={`h-8 ${
+                                    hasVoted 
+                                        ? 'border-zinc-300 dark:border-zinc-700 text-zinc-500 cursor-not-allowed bg-zinc-50 dark:bg-zinc-900/50' 
+                                        : 'border-green-300 dark:border-green-700 bg-green-50/50 dark:bg-green-950/20 text-green-700 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-900/50'
+                                }`}
+                                onClick={handleCompleteProject}
+                                disabled={updatingStatus || hasVoted}
+                            >
+                                {updatingStatus ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                    <>
+                                        <CheckCircle2 className="h-4 w-4 mr-2" />
+                                        {hasVoted ? `Voted (${voteCount}/${requiredVotes})` : `Complete Project (${voteCount}/${requiredVotes})`}
+                                    </>
+                                )}
+                            </Button>
+                        )}
+
+                        {project?.status === 'completed' && (
+                            <Button
+                                size="sm"
+                                variant="outline"
+                                className="border-blue-300 dark:border-blue-700 bg-blue-50/50 dark:bg-blue-950/20 text-blue-700 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 h-8"
+                                onClick={() => setIsCompletionModalOpen(true)}
+                            >
+                                <Share2 className="h-4 w-4 mr-2" />
+                                Showcase & Resume
                             </Button>
                         )}
 
@@ -386,6 +665,7 @@ const [teamMembers, setTeamMembers] = useState<
                             <Button
                                 variant="outline"
                                 size="icon"
+                                className="h-8 w-8"
                                 onClick={() => navigate(`/project/${id}/manage-team`)}
                             >
                                 <Settings className="h-4 w-4" />
@@ -511,6 +791,8 @@ const [teamMembers, setTeamMembers] = useState<
                                 </TabsTrigger>
                             )}
 
+
+
                             {canViewTab('budget') && (
                                 <TabsTrigger value="budget"
                                     className="data-[state=active]:bg-transparent
@@ -518,7 +800,7 @@ const [teamMembers, setTeamMembers] = useState<
                                                data-[state=active]:border-primary
                                                data-[state=active]:shadow-none
                                                rounded-none h-full px-3 sm:px-4">
-                                    <DollarSign className="h-4 w-4 sm:mr-2" />
+                                    <BarChart3 className="h-4 w-4 sm:mr-2" />
                                     <span className="hidden sm:inline">Budget</span>
                                 </TabsTrigger>
                             )}
@@ -683,28 +965,48 @@ const [teamMembers, setTeamMembers] = useState<
                                                         Latest 10 updates from your team
                                                     </CardDescription>
                                                 </div>
-                                                <Button
-                                                    variant="outline"
-                                                    size="sm"
-                                                    className="shrink-0 gap-1.5"
-                                                    onClick={() => {
-                                                        // Load all activities when sheet opens
-                                                        if (!id || !user?.uid) return
-                                                        const q = query(
-                                                            collection(db, 'projects', id, 'activities'),
-                                                            orderBy('timestamp', 'desc')
-                                                        )
-                                                        onSnapshot(q, snap => {
-                                                            setAllActivities(
-                                                                snap.docs.map(d => ({ id: d.id, ...d.data() }))
+                                                <div className="flex items-center gap-1.5 shrink-0">
+                                                    <button
+                                                        onClick={() => {
+                                                            if (!id || !user?.uid) return
+                                                            const q = query(
+                                                                collection(db, 'projects', id, 'activities'),
+                                                                orderBy('timestamp', 'desc'),
+                                                                limit(10)
                                                             )
-                                                        })
-                                                        setShowAllActivity(true)
-                                                    }}
-                                                >
-                                                    View All
-                                                    <ChevronRight className="h-3.5 w-3.5" />
-                                                </Button>
+                                                            onSnapshot(q, snap =>
+                                                                setActivities(snap.docs.map(d => ({ id: d.id, ...d.data() })))
+                                                            )
+                                                        }}
+                                                        title="Refresh activity"
+                                                        className="h-7 w-7 flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors active:scale-95"
+                                                    >
+                                                        <RefreshCw className="h-3.5 w-3.5" />
+                                                    </button>
+                                                    <Button
+                                                        variant="outline"
+                                                        size="sm"
+                                                        className="shrink-0 gap-1.5 h-7 text-xs"
+                                                        onClick={() => {
+                                                            // Load all activities when sheet opens
+                                                            if (!id || !user?.uid) return
+                                                            const q = query(
+                                                                collection(db, 'projects', id, 'activities'),
+                                                                orderBy('timestamp', 'desc')
+                                                            )
+                                                            onSnapshot(q, snap => {
+                                                                setAllActivities(
+                                                                    snap.docs.map(d => ({ id: d.id, ...d.data() }))
+                                                                )
+                                                            })
+                                                            setShowAllActivity(true)
+                                                        }}
+                                                    >
+                                                        View All
+                                                        <ChevronRight className="h-3.5 w-3.5" />
+                                                    </Button>
+                                                </div>
+
                                             </CardHeader>
                                             <CardContent>
                                                 {activities.length === 0 ? (
@@ -826,7 +1128,10 @@ const [teamMembers, setTeamMembers] = useState<
                                             </SheetContent>
                                         </Sheet>
 
-                                        <AIInsights tasks={tasks} />
+                                        {/* ── Project Info sidebar ── */}
+                                        <div className="flex flex-col gap-4">
+                                            <AIInsights tasks={tasks} />
+                                        </div>
                                     </div>
                                 </>
                             )}
@@ -921,6 +1226,17 @@ const [teamMembers, setTeamMembers] = useState<
                             )}
                         </TabsContent>
 
+                        {/* Team Chat */}
+                        <TabsContent value="chat" className="h-[calc(100vh-200px)] overflow-hidden">
+                            {!canViewTab('chat') ? (
+                                <AccessDenied feature="Team Chat" />
+                            ) : (
+                                <Suspense fallback={<TabLoader />}>
+                                    <TeamChat />
+                                </Suspense>
+                            )}
+                        </TabsContent>
+
                         {/* Budget */}
                         <TabsContent value="budget">
                             {!canViewTab('budget') ? (
@@ -967,8 +1283,32 @@ const [teamMembers, setTeamMembers] = useState<
                 </Tabs>
             </div>
 
+            {/* ── One-time project onboarding decision modal (owner only) ── */}
+            {isOwner && showOnboarding && onboardingDecision === null && (
+                <ProjectOnboardingModal
+                    projectName={project?.title ?? 'this project'}
+                    onDecide={async (decision) => {
+                        setShowOnboarding(false)
+                        setOnboardingDecision(decision)
+                        // Persist to Firestore
+                        try {
+                            await updateDoc(doc(db, 'projects', id!), {
+                                onboardingDecision: decision,
+                                updatedAt: serverTimestamp(),
+                            })
+                        } catch (err) {
+                            console.error('Failed to save onboarding decision:', err)
+                        }
+                        // If they chose template, open the gallery immediately
+                        if (decision === 'template') {
+                            setShowTemplates(true)
+                        }
+                    }}
+                />
+            )}
+
             {/* Templates */}
-            {(isOwner || isAdmin) && (
+            {(isOwner || isAdmin) && onboardingDecision === 'template' && (
                 <Suspense fallback={null}>
                     <TemplateGallery
                         open={showTemplates}
@@ -976,7 +1316,11 @@ const [teamMembers, setTeamMembers] = useState<
                         projectId={id!}
                         projectName={project?.title ?? ''}
                         onApplied={(updatedName: string) => {
-                            setProject((prev: any) => ({ ...prev, title: updatedName }))
+                            setProject((prev: any) => ({
+                                ...prev,
+                                title: updatedName,
+                                templateAppliedAt: new Date(), // mark locally so button hides
+                            }))
                             setShowTemplates(false)
                             setActiveTab('kanban')
                         }}
@@ -993,6 +1337,21 @@ const [teamMembers, setTeamMembers] = useState<
                     onSave={handleSaveTask}
                 />
             </Suspense>
+
+            {/* Project Completion Modal */}
+            <ProjectCompletionModal
+                open={isCompletionModalOpen}
+                onOpenChange={setIsCompletionModalOpen}
+                projectId={id!}
+                projectTitle={project?.title || ''}
+                projectSummary={project?.summary || ''}
+                completedTaskCount={tasks.filter(t => t.status === 'done').length}
+                teamMemberCount={teamMembers.length}
+                onNavigateToReviews={() => setActiveTab('team')}
+                completedTasksList={tasks.filter(t => t.status === 'done' && t.assigneeId === user?.uid).map(t => t.title)}
+                primaryDiscipline={project?.primaryDiscipline || 'Software Development'}
+                tags={project?.tags || []}
+            />
         </DashboardLayout>
     )
 }

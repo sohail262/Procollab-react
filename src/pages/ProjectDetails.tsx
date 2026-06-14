@@ -8,8 +8,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { ApplicationModal } from '@/components/ApplicationModal'
 import {
     Calendar, Users, Clock, MapPin, CheckCircle,
-    MessageSquare, Share2, Flag, ChevronLeft, Loader2,
-    Check, X, FileText, Info, Copy, Twitter, Link
+    MessageSquare, MessageCircle, Share2, Flag, ChevronLeft, Loader2,
+    Check, X, FileText, Info, Copy, Twitter, Link, Mail
 } from 'lucide-react'
 import {
     Dialog, DialogContent, DialogHeader, DialogTitle,
@@ -21,7 +21,7 @@ import {
     doc, getDoc, collection, query, where, limit,
     getDocs, addDoc, deleteDoc, serverTimestamp,
     updateDoc, increment, Timestamp, writeBatch,
-    onSnapshot,
+    onSnapshot, arrayUnion,
 } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
 import { sendNotificationWithPush } from '@/services/notificationTrigger'
@@ -32,6 +32,8 @@ import {
     buildWithdrawOwnerNotif,
 } from '@/services/notificationService'
 import { useToast } from '@/hooks/use-toast'
+import { EMPTY_MEMBER_PERMISSIONS } from '@/hooks/use-permissions'
+import { trackProjectViewed, trackProjectApplied, trackTeamFormed } from '@/services/analyticsService'
 
 // ─────────────────────────────────────────────────────────
 // Label maps
@@ -90,7 +92,7 @@ interface Project {
 
 interface ApplicationStatus {
     hasApplied:        boolean
-    status:            'pending' | 'accepted' | 'rejected' | null
+    status:            string | null
     applicationId:     string | null
     userApplicationId: string | null
 }
@@ -141,6 +143,13 @@ export function ProjectDetails() {
     const [reportReason,     setReportReason]     = useState('')
     const [reportDetails,    setReportDetails]    = useState('')
     const [submittingReport, setSubmittingReport] = useState(false)
+
+    // Invitation Accept Flow States
+    const [pendingInvitation, setPendingInvitation] = useState<any | null>(null)
+    const [processingInvitation, setProcessingInvitation] = useState(false)
+
+    // Active applications count state (for owner/creator view)
+    const [activeApplicationsCount, setActiveApplicationsCount] = useState(0)
 
     // ── Load project + creator + similar ─────────────────
     useEffect(() => {
@@ -218,8 +227,58 @@ export function ProjectDetails() {
     // ✅ Decoupled from membership — only shows pending/rejected states
     // 'accepted' + !isMember = "removed after acceptance" state
     useEffect(() => {
-        if (id && currentUser) checkApplicationStatus()
+        if (id && currentUser) {
+            checkApplicationStatus()
+            trackProjectViewed(currentUser.uid, id)
+        }
     }, [id, currentUser])
+
+
+    // Load active applications count and user pending invitation
+    useEffect(() => {
+        if (!id || !currentUser) return
+        
+        // Listen to pending invitations for current user
+        const qInvite = query(
+            collection(db, 'projects', id, 'invitations'),
+            where('userId', '==', currentUser.uid),
+            where('status', '==', 'pending'),
+            limit(1)
+        )
+        const unsubInvite = onSnapshot(qInvite, (snap) => {
+            if (!snap.empty) {
+                setPendingInvitation({ id: snap.docs[0].id, ...snap.docs[0].data() })
+            } else {
+                setPendingInvitation(null)
+            }
+        })
+
+        return () => {
+            unsubInvite()
+        }
+    }, [id, currentUser])
+
+    // Load active applications count for owner
+    useEffect(() => {
+        if (!id || !currentUser || !project || project.createdBy !== currentUser.uid) {
+            setActiveApplicationsCount(0)
+            return
+        }
+
+        const qApps = query(
+            collection(db, 'projects', id, 'applications'),
+            where('status', 'in', ['pending', 'applied', 'viewed', 'shortlisted', 'interviewing'])
+        )
+        const unsubApps = onSnapshot(qApps, (snap) => {
+            setActiveApplicationsCount(snap.size)
+        }, (err) => {
+            console.error('Error fetching applications count:', err)
+        })
+
+        return () => {
+            unsubApps()
+        }
+    }, [id, currentUser, project])
 
     const checkApplicationStatus = async () => {
         if (!id || !currentUser) return
@@ -258,6 +317,146 @@ export function ProjectDetails() {
             })
         } catch (error) {
             console.error('Error checking application status:', error)
+        }
+    }
+
+    const handleAcceptInvitation = async () => {
+        if (!id || !currentUser || !pendingInvitation || !project) return
+        setProcessingInvitation(true)
+        try {
+            const displayName = currentUser.displayName || currentUser.email || 'Team Member'
+            const role = pendingInvitation.role || 'member'
+            
+            const batch = writeBatch(db)
+            
+            // 1. Write member document
+            batch.set(doc(db, 'projects', id, 'members', currentUser.uid), {
+                uid:       currentUser.uid,
+                name:      displayName,
+                email:     currentUser.email ?? '',
+                avatar:    currentUser.photoURL ?? '',
+                role,
+                permissions: EMPTY_MEMBER_PERMISSIONS,
+                joinedAt:  serverTimestamp(),
+                joinedVia: 'invitation',
+            })
+
+            // 2. Add uid to project.members array
+            batch.update(doc(db, 'projects', id), {
+                members: arrayUnion(currentUser.uid),
+                [`teamMembers.${currentUser.uid}`]: {
+                    role,
+                    joinedAt: serverTimestamp(),
+                    permissions: EMPTY_MEMBER_PERMISSIONS
+                },
+                currentMembers: increment(1)
+            })
+
+            // 3. Mark invitation doc in project sub-collection
+            batch.update(
+                doc(db, 'projects', id, 'invitations', pendingInvitation.id),
+                {
+                    status:     'accepted',
+                    acceptedBy: currentUser.uid,
+                    acceptedAt: serverTimestamp(),
+                }
+            )
+
+            // 4. Mark invitation doc in global inviteTokens collection if token exists
+            if (pendingInvitation.token) {
+                batch.update(doc(db, 'inviteTokens', pendingInvitation.token), {
+                    status:     'accepted',
+                    acceptedBy: currentUser.uid,
+                    acceptedAt: serverTimestamp(),
+                })
+            }
+
+            // 5. Write to user's joinedProjects sub-collection
+            batch.set(
+                doc(db, 'users', currentUser.uid, 'joinedProjects', id),
+                {
+                    projectId: id,
+                    role,
+                    joinedAt:  serverTimestamp(),
+                    joinedVia: 'invitation',
+                }
+            )
+
+            await batch.commit()
+
+            const newTeamSize = (project?.currentMembers || 1) + 1
+            if (newTeamSize >= 2) {
+                trackTeamFormed(currentUser.uid, id, newTeamSize)
+                
+                // Set functionalDuoAt if not set yet
+                const projectRef = doc(db, 'projects', id)
+                await updateDoc(projectRef, {
+                    functionalDuoAt: serverTimestamp()
+                }).catch(() => {})
+            }
+
+
+
+            // 6. Notify the project owner
+            if (project.createdBy && project.createdBy !== currentUser.uid) {
+                await sendNotificationWithPush(project.createdBy, {
+                    type:      'success',
+                    title:     'Invitation Accepted',
+                    body:      `${displayName} accepted your invitation to join "${project.title}".`,
+                    url:       `/project/${id}/manage-team`,
+                    projectId: id,
+                })
+            }
+
+            toast({
+                title: 'Welcome to the team!',
+                description: `You have successfully joined "${project.title}".`
+            })
+            
+            setIsMember(true)
+            setMemberRole(role)
+            setPendingInvitation(null)
+        } catch (err) {
+            console.error('Error accepting invitation:', err)
+            toast({
+                title: 'Error',
+                description: 'Failed to accept the invitation. Please try again.',
+                variant: 'destructive'
+            })
+        } finally {
+            setProcessingInvitation(false)
+        }
+    }
+
+    const handleDeclineInvitation = async () => {
+        if (!id || !currentUser || !pendingInvitation) return
+        setProcessingInvitation(true)
+        try {
+            const batch = writeBatch(db)
+
+            batch.update(
+                doc(db, 'projects', id, 'invitations', pendingInvitation.id),
+                { status: 'declined' }
+            )
+
+            if (pendingInvitation.token) {
+                batch.update(doc(db, 'inviteTokens', pendingInvitation.token), {
+                    status: 'declined'
+                })
+            }
+
+            await batch.commit()
+            toast({ title: 'Invitation declined' })
+            setPendingInvitation(null)
+        } catch (err) {
+            console.error('Error declining invitation:', err)
+            toast({
+                title: 'Error',
+                description: 'Failed to decline the invitation.',
+                variant: 'destructive'
+            })
+        } finally {
+            setProcessingInvitation(false)
         }
     }
 
@@ -352,7 +551,11 @@ export function ProjectDetails() {
     const handleApplicationSuccess = () => {
         setIsModalOpen(false)
         checkApplicationStatus()
+        if (currentUser && id) {
+            trackProjectApplied(currentUser.uid, id)
+        }
     }
+
 
     // ── Share handlers ────────────────────────────────────
     const handleCopyLink = async () => {
@@ -534,6 +737,17 @@ export function ProjectDetails() {
                     >
                         Manage Team
                     </Button>
+                    {activeApplicationsCount > 0 && (
+                        <Button
+                            className="w-full bg-amber-500 hover:bg-amber-600 text-white gap-2 font-semibold"
+                            onClick={() => navigate(`/project/${id}/manage-team?tab=applications`)}
+                        >
+                            Review Applications
+                            <Badge variant="secondary" className="bg-white/20 hover:bg-white/35 border-none text-white text-xs font-bold px-1.5 h-5 min-w-5 justify-center flex items-center">
+                                {activeApplicationsCount}
+                            </Badge>
+                        </Button>
+                    )}
                     <Button
                         variant="outline"
                         className="w-full"
@@ -593,13 +807,36 @@ export function ProjectDetails() {
                 )
             }
 
-            if (applicationStatus.status === 'pending') {
+            const activeStatuses = ['pending', 'applied', 'viewed', 'shortlisted', 'interviewing']
+            if (activeStatuses.includes(applicationStatus.status || '')) {
+                let statusLabel = 'Application Pending'
+                let bgClass = 'bg-yellow-100 dark:bg-yellow-900/30'
+                let textClass = 'text-yellow-700 dark:text-yellow-400'
+                let iconColor = 'text-yellow-600'
+
+                if (applicationStatus.status === 'viewed') {
+                    statusLabel = 'Application Under Review'
+                    bgClass = 'bg-purple-100 dark:bg-purple-900/30'
+                    textClass = 'text-purple-700 dark:text-purple-400'
+                    iconColor = 'text-purple-600'
+                } else if (applicationStatus.status === 'shortlisted') {
+                    statusLabel = 'Shortlisted'
+                    bgClass = 'bg-amber-100 dark:bg-amber-900/30'
+                    textClass = 'text-amber-700 dark:text-amber-400'
+                    iconColor = 'text-amber-600'
+                } else if (applicationStatus.status === 'interviewing') {
+                    statusLabel = 'Interview Stage'
+                    bgClass = 'bg-cyan-100 dark:bg-cyan-900/30'
+                    textClass = 'text-cyan-700 dark:text-cyan-400'
+                    iconColor = 'text-cyan-600'
+                }
+
                 return (
                     <div className="space-y-3">
-                        <div className="flex items-center justify-center gap-2 py-3 px-4 bg-yellow-100 dark:bg-yellow-900/30 rounded-lg">
-                            <Clock className="h-5 w-5 text-yellow-600" />
-                            <p className="text-sm font-medium text-yellow-700 dark:text-yellow-400">
-                                Application Pending
+                        <div className={`flex items-center justify-center gap-2 py-3 px-4 ${bgClass} rounded-lg`}>
+                            <Clock className={`h-5 w-5 ${iconColor}`} />
+                            <p className={`text-sm font-medium ${textClass}`}>
+                                {statusLabel}
                             </p>
                         </div>
                         <Button
@@ -660,6 +897,50 @@ export function ProjectDetails() {
                 <ChevronLeft className="h-4 w-4 mr-2" />
                 Back
             </Button>
+
+            {pendingInvitation && (
+                <div className="mb-6 p-4 rounded-xl border border-blue-200 dark:border-blue-800 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/20 dark:to-indigo-950/20 flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-in fade-in slide-in-from-top-4 duration-300">
+                    <div className="flex items-center gap-3">
+                        <div className="h-10 w-10 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0">
+                            <Mail className="h-5 w-5 animate-pulse" />
+                        </div>
+                        <div className="min-w-0">
+                            <h4 className="font-bold text-sm text-gray-900 dark:text-white">Project Invitation</h4>
+                            <div className="text-xs text-gray-600 dark:text-gray-400 mt-0.5 leading-relaxed">
+                                You have been invited to join this project as a <strong className="capitalize">{pendingInvitation.role || 'member'}</strong>!
+                                {pendingInvitation.message && (
+                                    <div className="mt-2 text-xs italic text-blue-700 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/40 border border-blue-100 dark:border-blue-900/60 rounded p-2 max-w-lg font-medium">
+                                        Message: "{pendingInvitation.message}"
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <Button 
+                            size="sm" 
+                            className="bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs h-8 px-4 shadow-sm"
+                            onClick={handleAcceptInvitation}
+                            disabled={processingInvitation}
+                        >
+                            {processingInvitation ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                                'Accept'
+                            )}
+                        </Button>
+                        <Button 
+                            size="sm" 
+                            variant="outline" 
+                            className="border-gray-300 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800 font-medium text-xs h-8 px-4"
+                            onClick={handleDeclineInvitation}
+                            disabled={processingInvitation}
+                        >
+                            Decline
+                        </Button>
+                    </div>
+                </div>
+            )}
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                 {/* ── Main Content ── */}
@@ -1016,7 +1297,7 @@ export function ProjectDetails() {
                                 Twitter / X
                             </Button>
                             <Button variant="outline" className="w-full" onClick={handleShareWhatsApp}>
-                                <span className="mr-2 text-green-500 text-base leading-none">💬</span>
+                                <MessageCircle className="h-4 w-4 mr-2 text-green-500" />
                                 WhatsApp
                             </Button>
                         </div>

@@ -24,12 +24,14 @@ import { Plus, AlertTriangle, Lock, ChevronLeft, ChevronRight, Send } from 'luci
 import {
     collection, query, onSnapshot,
     addDoc, updateDoc, doc, serverTimestamp,
+    getDoc, increment,
 } from 'firebase/firestore'
 import { db, auth } from '@/lib/firebase'
 import { useParams } from 'react-router-dom'
 import { useAuth } from '@/hooks/use-auth'
 import { usePermissions } from '@/hooks/use-permissions'
 import { useToast } from '@/hooks/use-toast'
+import { updateCollaborativeActivity } from '@/services/analyticsService'
 import { isPast } from 'date-fns'
 import { Skeleton } from '@/components/ui/skeleton'
 
@@ -495,13 +497,63 @@ export function KanbanBoard({ readOnly = false, tasks: injectedTasks }: KanbanBo
     // ─────────────────────────────────────────────────────────────────────────
     const writeStatusDirectly = async (taskId: string, newStatus: TaskStatus) => {
         if (!projectId) return
-        await updateDoc(
-            doc(db, 'projects', projectId, 'tasks', taskId),
-            {
+        try {
+            const taskRef = doc(db, 'projects', projectId, 'tasks', taskId)
+            const taskSnap = await getDoc(taskRef)
+            if (!taskSnap.exists()) return
+
+            const taskData = taskSnap.data()
+            const prevStatus = taskData.status as TaskStatus
+
+            if (prevStatus === newStatus) return
+
+            await updateDoc(taskRef, {
                 status:    newStatus,
                 updatedAt: serverTimestamp(),
+            })
+
+            if (user) {
+                updateCollaborativeActivity(user.uid, projectId)
             }
-        )
+
+            const projectRef = doc(db, 'projects', projectId)
+            if (newStatus === 'done' && prevStatus !== 'done') {
+                await updateDoc(projectRef, {
+                    completedTasksCount: increment(1)
+                }).catch(() => {})
+            } else if (prevStatus === 'done' && newStatus !== 'done') {
+                await updateDoc(projectRef, {
+                    completedTasksCount: increment(-1)
+                }).catch(() => {})
+            }
+
+            if (newStatus === 'done') {
+                const assigneeId = taskData.assigneeId
+                if (assigneeId) {
+                    const projSnap = await getDoc(projectRef)
+                    if (projSnap.exists()) {
+                        const projData = projSnap.data()
+                        const ownerId = projData.createdBy
+                        if (ownerId && assigneeId !== ownerId) {
+                            const assigneeRef = doc(db, 'users', assigneeId)
+                            const assigneeSnap = await getDoc(assigneeRef)
+                            if (assigneeSnap.exists()) {
+                                const assigneeData = assigneeSnap.data()
+                                if (!assigneeData.activated) {
+                                    await updateDoc(assigneeRef, {
+                                        activated: true,
+                                        activatedAt: serverTimestamp(),
+                                        activationPath: 'contributor'
+                                    })
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        } catch (err) {
+            console.error('Error writing status directly:', err)
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -538,8 +590,10 @@ export function KanbanBoard({ readOnly = false, tasks: injectedTasks }: KanbanBo
             }
         )
 
+        updateCollaborativeActivity(user.uid, projectId)
+
         toast({
-            title:       '📬 Submitted for review!',
+            title:       'Submitted for review!',
             description: 'The project owner will review your work.',
         })
     }
@@ -647,6 +701,21 @@ export function KanbanBoard({ readOnly = false, tasks: injectedTasks }: KanbanBo
         try {
             if (projectId) {
                 await writeStatusDirectly(active.id as string, newStatus)
+
+                // ── Log activity ─────────────────────────────────────────────
+                const colLabel = COLUMNS.find(c => c.id === newStatus)?.title ?? newStatus
+                const prevLabel = COLUMNS.find(c => c.id === originalStatus)?.title ?? originalStatus
+                await addDoc(
+                    collection(db, 'projects', projectId, 'activities'),
+                    {
+                        userId:      user?.uid,
+                        type:        'task_moved',
+                        description: `${user?.displayName || 'Someone'} moved "${activeTask.title}" from ${prevLabel} → ${colLabel}`,
+                        timestamp:   serverTimestamp(),
+                        targetId:    active.id as string,
+                        targetType:  'task',
+                    }
+                )
             }
         } catch (err) {
             console.error('Failed to update task status:', err)
@@ -683,25 +752,79 @@ export function KanbanBoard({ readOnly = false, tasks: injectedTasks }: KanbanBo
                     : null,
             }
 
+            const projectRef = doc(db, 'projects', projectId)
+
             if (editingTask) {
+                const prevStatus = editingTask.status
+                const newStatus = firestorePayload.status || prevStatus
+
                 await updateDoc(
                     doc(db, 'projects', projectId, 'tasks', editingTask.id),
                     { ...firestorePayload, updatedAt: serverTimestamp() }
                 )
-                toast({ title: 'Task updated ✅' })
+                toast({ title: 'Task updated' })
+
+                updateCollaborativeActivity(auth.currentUser.uid, projectId)
+
+                if (newStatus === 'done' && prevStatus !== 'done') {
+                    await updateDoc(projectRef, {
+                        completedTasksCount: increment(1)
+                    }).catch(() => {})
+
+                    // Activation check
+                    try {
+                        const targetAssigneeId = firestorePayload.assigneeId || editingTask.assigneeId
+                        if (targetAssigneeId) {
+                            const projSnap = await getDoc(projectRef)
+                            if (projSnap.exists()) {
+                                const projData = projSnap.data()
+                                const ownerId = projData.createdBy
+                                if (ownerId && targetAssigneeId !== ownerId) {
+                                    const assigneeRef = doc(db, 'users', targetAssigneeId)
+                                    const assigneeSnap = await getDoc(assigneeRef)
+                                    if (assigneeSnap.exists()) {
+                                        const assigneeData = assigneeSnap.data()
+                                        if (!assigneeData.activated) {
+                                            await updateDoc(assigneeRef, {
+                                                activated: true,
+                                                activatedAt: serverTimestamp(),
+                                                activationPath: 'contributor'
+                                            })
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } catch (err) {
+                        console.error('Activation check in handleSaveTask failed:', err)
+                    }
+                } else if (prevStatus === 'done' && newStatus !== 'done') {
+                    await updateDoc(projectRef, {
+                        completedTasksCount: increment(-1)
+                    }).catch(() => {})
+                }
             } else {
+                const newStatus = firestorePayload.status || newTaskStatus
                 await addDoc(
                     collection(db, 'projects', projectId, 'tasks'),
                     {
                         ...firestorePayload,
                         projectId,
-                        status:    newTaskStatus,
+                        status:    newStatus,
                         createdBy: auth.currentUser.uid,
                         createdAt: serverTimestamp(),
                         updatedAt: serverTimestamp(),
                     }
                 )
-                toast({ title: 'Task created 🎉' })
+                toast({ title: 'Task created' })
+
+                updateCollaborativeActivity(auth.currentUser.uid, projectId)
+
+                if (newStatus === 'done') {
+                    await updateDoc(projectRef, {
+                        completedTasksCount: increment(1)
+                    }).catch(() => {})
+                }
             }
 
             setEditingTask(null)
@@ -770,6 +893,21 @@ export function KanbanBoard({ readOnly = false, tasks: injectedTasks }: KanbanBo
         try {
             if (projectId) {
                 await writeStatusDirectly(task.id, newStatus)
+
+                // ── Log activity ─────────────────────────────────────────────
+                const colLabel  = COLUMNS.find(c => c.id === newStatus)?.title ?? newStatus
+                const prevLabel = COLUMNS.find(c => c.id === task.status)?.title ?? task.status
+                await addDoc(
+                    collection(db, 'projects', projectId, 'activities'),
+                    {
+                        userId:      user?.uid,
+                        type:        'task_moved',
+                        description: `${user?.displayName || 'Someone'} moved "${task.title}" from ${prevLabel} → ${colLabel}`,
+                        timestamp:   serverTimestamp(),
+                        targetId:    task.id,
+                        targetType:  'task',
+                    }
+                )
             }
         } catch (err) {
             console.error('Failed to move task:', err)

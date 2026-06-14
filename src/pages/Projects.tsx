@@ -14,7 +14,7 @@ import {
 } from 'lucide-react'
 import {
     collection, query, getDocs,
-    orderBy, doc, getDoc
+    orderBy, doc, getDoc, where
 } from 'firebase/firestore'
 import { db, auth } from '@/lib/firebase'
 import { useAuth } from '@/hooks/use-auth'
@@ -66,6 +66,7 @@ export function Projects() {
     const [projects,          setProjects]          = useState<Project[]>([])
     const [loading,           setLoading]           = useState(true)
     const [joinedProjectIds,  setJoinedProjectIds]  = useState<Set<string>>(new Set())
+    const [appliedProjectIds, setAppliedProjectIds] = useState<Set<string>>(new Set())
 
     const [searchQuery,       setSearchQuery]       = useState('')
     const [statusFilter,      setStatusFilter]      = useState('all')
@@ -103,6 +104,7 @@ export function Projects() {
             //    so we can hide "Apply to Join" on those cards
             if (user) {
                 await loadJoinedProjectIds(projectsData)
+                await loadAppliedProjectIds()
             }
         } catch (error) {
             console.error('Error loading projects:', error)
@@ -156,6 +158,27 @@ export function Projects() {
         )
 
         setJoinedProjectIds(joined)
+    }
+
+
+    const loadAppliedProjectIds = async () => {
+        if (!user) return
+        const applied = new Set<string>()
+        try {
+            const appsSnap = await getDocs(
+                query(
+                    collection(db, 'users', user.uid, 'applications'),
+                    where('status', 'in', ['pending', 'applied', 'viewed', 'shortlisted', 'interviewing'])
+                )
+            )
+            appsSnap.docs.forEach(d => {
+                const projectId = d.data().projectId
+                if (projectId) applied.add(projectId)
+            })
+        } catch (error) {
+            console.error('Error loading applied project IDs:', error)
+        }
+        setAppliedProjectIds(applied)
     }
 
     // ── Apply handler ─────────────────────────────────────────────────────
@@ -343,6 +366,7 @@ export function Projects() {
                                 key={project.id}
                                 project={project}
                                 isAlreadyMember={joinedProjectIds.has(project.id)}
+                                hasApplied={appliedProjectIds.has(project.id)}
                                 onApply={() => handleApply(project)}
                             />
                         ))
@@ -413,6 +437,7 @@ export function Projects() {
             <ApplicationModal
                 isOpen={isModalOpen}
                 onClose={() => setIsModalOpen(false)}
+                onSuccess={loadAppliedProjectIds}
                 project={selectedProject}
             />
         </DashboardLayout>

@@ -55,6 +55,34 @@ interface TokenResult {
     tokens: string[]
 }
 
+/**
+ * Get tailored notification actions based on notification type.
+ */
+function getNotificationActions(type: string): Array<{ action: string; title: string }> {
+    switch (type) {
+        case 'connection_request':
+            return [
+                { action: 'accept', title: 'Accept' },
+                { action: 'view', title: 'View Profile' }
+            ];
+        case 'warning':
+            return [
+                { action: 'view', title: 'View' },
+                { action: 'dismiss', title: 'Dismiss' }
+            ];
+        case 'info':
+            return [
+                { action: 'view', title: 'View Details' },
+                { action: 'dismiss', title: 'Dismiss' }
+            ];
+        default:
+            return [
+                { action: 'view', title: 'Open' },
+                { action: 'dismiss', title: 'Dismiss' }
+            ];
+    }
+}
+
 // ─────────────────────────────────────────────────────────
 // Main Queue Processor
 // ─────────────────────────────────────────────────────────
@@ -204,12 +232,13 @@ export const processFCMQueue = onDocumentCreated(
                 notification: {
                     title: data.notification.title,
                     body: data.notification.body,
-                    icon: data.data?.icon || '/icons/icon-192x192.png',
-                    badge: '/icons/badge-72x72.png',
+                    icon: data.data?.icon || '/images/logoo_procollab.png',
+                    badge: '/images/logoo_procollab.png',
                     // ✅ tag deduplicates at browser level
                     tag: notificationId,
                     renotify: false,
                     requireInteraction: false,
+                    actions: getNotificationActions(String(data.data?.type ?? 'info')),
                     data: {
                         url: data.data?.url ?? '/',
                         notificationId,

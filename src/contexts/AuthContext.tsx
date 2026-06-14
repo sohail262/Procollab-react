@@ -35,6 +35,7 @@ import {
     unregisterFCMToken,
     cleanupForegroundMessaging,
 } from '@/services/fcmService'
+import { trackSessionStart } from '@/services/analyticsService'
 
 // ─────────────────────────────────────────────────────────
 // Types
@@ -170,6 +171,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
                     if (!userDoc.exists()) {
                         // Create minimal user document for OAuth users
+                        const isSohail = firebaseUser.email?.toLowerCase() === 'mohd26sohail@gmail.com'
                         await setDoc(userDocRef, {
                             uid: firebaseUser.uid,
                             email: firebaseUser.email,
@@ -182,22 +184,29 @@ export function AuthProvider({ children }: AuthProviderProps) {
                             firstName: '',
                             lastName: '',
                             discipline: '',
-                            role: '',
+                            role: isSohail ? 'admin' : '',
                             skills: [],
                             bio: '',
+                            activated: false,
+                            lastCollaboratedAt: null,
                         })
                     } else {
+                        const isSohail = firebaseUser.email?.toLowerCase() === 'mohd26sohail@gmail.com'
                         await setDoc(
                             userDocRef,
                             {
                                 lastLogin: serverTimestamp(),
                                 lastActivity: serverTimestamp(),
                                 sessionExtended: serverTimestamp(),
+                                ...(isSohail && userDoc.data()?.role !== 'admin' ? { role: 'admin' } : {})
                             },
                             { merge: true }
                         )
                     }
 
+
+                    // Track session start for retention analytics
+                    trackSessionStart(firebaseUser.uid)
                     resetSessionTimer(firebaseUser.uid)
                 } else {
                     clearSessionTimer()
@@ -250,7 +259,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
         userData: UserData
     ) => {
         try {
-            setLoading(true)
+            // NOTE: do NOT call setLoading(true) here — it unmounts children
+            // and destroys component state (e.g. showWelcome in Register.tsx).
+            // Loading state is managed solely by onAuthStateChanged.
 
             const validation = validateFormData(
                 { ...userData, email },
@@ -286,8 +297,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
                 lastName: validation.sanitizedData.lastName,
                 displayName: `${validation.sanitizedData.firstName} ${validation.sanitizedData.lastName}`,
                 discipline: validation.sanitizedData.discipline,
-                role: validation.sanitizedData.role,
+                role: email?.toLowerCase() === 'mohd26sohail@gmail.com' ? 'admin' : validation.sanitizedData.role,
                 skills: validation.sanitizedData.skills
+
                     ? validation.sanitizedData.skills
                           .split(',')
                           .map((s: string) => s.trim())
@@ -303,20 +315,21 @@ export function AuthProvider({ children }: AuthProviderProps) {
                 disabled: false,
                 loginAttempts: 0,
                 lastLoginAttempt: null,
+                activated: false,
+                lastCollaboratedAt: null,
             })
 
             console.log('✅ User registered successfully:', newUser.uid)
         } catch (error: any) {
             console.error('❌ Registration error:', error)
             throw new Error(getAuthErrorMessage(error.code || error.message))
-        } finally {
-            setLoading(false)
         }
     }
 
     const login = async (email: string, password: string) => {
         try {
-            setLoading(true)
+            // NOTE: do NOT call setLoading(true) here — it unmounts children.
+            // Loading state is managed solely by onAuthStateChanged.
 
             if (!email || !password) {
                 throw new Error('Email and password are required')
@@ -353,14 +366,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
         } catch (error: any) {
             console.error('❌ Login error:', error)
             throw new Error(getAuthErrorMessage(error.code))
-        } finally {
-            setLoading(false)
         }
     }
 
     const loginWithGoogle = async () => {
         try {
-            setLoading(true)
+            // NOTE: do NOT call setLoading(true) here — it unmounts children.
             const provider = new GoogleAuthProvider()
             provider.setCustomParameters({ prompt: 'select_account' })
 
@@ -370,6 +381,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
             const userDoc = await getDoc(doc(db, 'users', oauthUser.uid))
             if (!userDoc.exists()) {
                 const nameParts = oauthUser.displayName?.split(' ') || ['', '']
+                const isSohail = oauthUser.email?.toLowerCase() === 'mohd26sohail@gmail.com'
                 await setDoc(doc(db, 'users', oauthUser.uid), {
                     uid: oauthUser.uid,
                     email: oauthUser.email,
@@ -382,12 +394,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
                     lastActivity: serverTimestamp(),
                     sessionExtended: serverTimestamp(),
                     discipline: '',
-                    role: '',
+                    role: isSohail ? 'admin' : '',
                     skills: [],
                     bio: '',
                     emailVerified: oauthUser.emailVerified,
                     disabled: false,
                     loginAttempts: 0,
+                    activated: false,
+                    lastCollaboratedAt: null,
                 })
             } else {
                 if (userDoc.data().disabled) {
@@ -412,14 +426,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
         } catch (error: any) {
             console.error('❌ Google login error:', error)
             throw new Error(getAuthErrorMessage(error.code))
-        } finally {
-            setLoading(false)
         }
     }
 
     const loginWithGithub = async () => {
         try {
-            setLoading(true)
+            // NOTE: do NOT call setLoading(true) here — it unmounts children.
             const provider = new GithubAuthProvider()
             provider.setCustomParameters({ allow_signup: 'true' })
 
@@ -429,6 +441,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
             const userDoc = await getDoc(doc(db, 'users', oauthUser.uid))
             if (!userDoc.exists()) {
                 const nameParts = oauthUser.displayName?.split(' ') || ['', '']
+                const isSohail = oauthUser.email?.toLowerCase() === 'mohd26sohail@gmail.com'
                 await setDoc(doc(db, 'users', oauthUser.uid), {
                     uid: oauthUser.uid,
                     email: oauthUser.email,
@@ -441,12 +454,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
                     lastActivity: serverTimestamp(),
                     sessionExtended: serverTimestamp(),
                     discipline: '',
-                    role: '',
+                    role: isSohail ? 'admin' : '',
                     skills: [],
                     bio: '',
                     emailVerified: oauthUser.emailVerified,
                     disabled: false,
                     loginAttempts: 0,
+                    activated: false,
+                    lastCollaboratedAt: null,
                 })
             } else {
                 if (userDoc.data().disabled) {
@@ -471,8 +486,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
         } catch (error: any) {
             console.error('❌ GitHub login error:', error)
             throw new Error(getAuthErrorMessage(error.code))
-        } finally {
-            setLoading(false)
         }
     }
 

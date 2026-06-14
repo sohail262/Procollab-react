@@ -52,6 +52,7 @@ import {
 } from 'lucide-react'
 import { format, formatDistanceToNow, differenceInDays } from 'date-fns'
 import type { Task } from '@/types/project'
+import { ProjectReviews } from './ProjectReviews'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -381,6 +382,8 @@ function MemberCard({
 function MemberDetailDialog({
     member, tasks, open, onClose,
     canEditRoles, projectId, onRoleChange,
+    currentUserUid,
+    onOpenReview,
 }: {
     member:         UserProfile | null
     tasks:          Task[]
@@ -390,6 +393,8 @@ function MemberDetailDialog({
     canEditRoles:   boolean
     projectId:      string
     onRoleChange:   (uid: string, role: string) => void
+    currentUserUid?: string
+    onOpenReview?:  () => void
 }) {
     const [activeTab, setActiveTab] = useState('overview')
 
@@ -540,6 +545,18 @@ function MemberDetailDialog({
                                     <Badge variant="outline" className="text-xs">
                                         {member.discipline}
                                     </Badge>
+                                )}
+
+                                {member.uid !== currentUserUid && (
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-7 text-xs flex items-center gap-1 border-amber-250 dark:border-amber-800 bg-amber-50/50 dark:bg-amber-955/20 text-amber-700 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/50"
+                                        onClick={onOpenReview}
+                                    >
+                                        <Star className="h-3 w-3 fill-amber-400 text-amber-400" />
+                                        Rate Teammate
+                                    </Button>
                                 )}
                             </div>
                         </div>
@@ -1063,6 +1080,18 @@ export function ResourceManagement({ readOnly = false }: ResourceManagementProps
     const [filterRole,  setFilterRole]  = useState('all')
     const [filterHealth,setFilterHealth]= useState('all')
     const [selectedMember, setSelectedMember] = useState<UserProfile | null>(null)
+
+    const [reviewOpen, setReviewOpen] = useState(false)
+    const [projectTitle, setProjectTitle] = useState('')
+
+    useEffect(() => {
+        if (!projectId) return
+        getDoc(doc(db, 'projects', projectId)).then(snap => {
+            if (snap.exists()) {
+                setProjectTitle(snap.data().title || '')
+            }
+        })
+    }, [projectId])
 
   useEffect(() => {
     if (!projectId || !user) return
@@ -1948,7 +1977,20 @@ export function ResourceManagement({ readOnly = false }: ResourceManagementProps
                 canEditRoles={canEditRoles}
                 projectId={projectId!}
                 onRoleChange={handleRoleChange}
+                currentUserUid={user?.uid}
+                onOpenReview={() => setReviewOpen(true)}
             />
+
+            {selectedMember && (
+                <ProjectReviews
+                    open={reviewOpen}
+                    onOpenChange={setReviewOpen}
+                    projectId={projectId!}
+                    projectName={projectTitle || 'this project'}
+                    targetUserId={selectedMember.uid}
+                    targetUserName={selectedMember.displayName}
+                />
+            )}
         </div>
         </TooltipProvider>
     )

@@ -24,11 +24,6 @@ export interface TemplateMilestone {
     daysFromStart: number // relative due date
 }
 
-export interface TemplateDocument {
-    title:   string
-    content: string // HTML
-}
-
 export interface TemplateSprint {
     name:   string
     goals:  string[]
@@ -47,12 +42,10 @@ export interface ProjectTemplate {
     tags:        string[]
     tasks:       TemplateTask[]
     milestones:  TemplateMilestone[]
-    documents:   TemplateDocument[]
     sprints:     TemplateSprint[]
     preview: {
         taskCount:      number
         milestoneCount: number
-        docCount:       number
     }
 }
 
@@ -172,50 +165,6 @@ export const PROJECT_TEMPLATES: ProjectTemplate[] = [
                 daysFromStart: 56,
             },
         ],
-        documents: [
-            {
-                title: '📋 Project Requirements',
-                content: `
-                    <h2>Project Overview</h2>
-                    <p>Describe your web application here.</p>
-                    <h2>Functional Requirements</h2>
-                    <ul>
-                        <li>User authentication and authorization</li>
-                        <li>Core feature 1</li>
-                        <li>Core feature 2</li>
-                    </ul>
-                    <h2>Non-Functional Requirements</h2>
-                    <ul>
-                        <li>Response time &lt; 200ms for API calls</li>
-                        <li>Mobile responsive design</li>
-                        <li>99.9% uptime SLA</li>
-                    </ul>
-                    <h2>Tech Stack</h2>
-                    <ul>
-                        <li><strong>Frontend:</strong> </li>
-                        <li><strong>Backend:</strong> </li>
-                        <li><strong>Database:</strong> </li>
-                        <li><strong>Hosting:</strong> </li>
-                    </ul>
-                `,
-            },
-            {
-                title: '🏗 Architecture Overview',
-                content: `
-                    <h2>System Architecture</h2>
-                    <p>Describe the high-level architecture here.</p>
-                    <h2>Components</h2>
-                    <ul>
-                        <li><strong>Frontend:</strong> SPA communicating with REST API</li>
-                        <li><strong>Backend:</strong> REST API server</li>
-                        <li><strong>Database:</strong> Relational/NoSQL</li>
-                        <li><strong>CDN:</strong> Static asset delivery</li>
-                    </ul>
-                    <h2>Data Flow</h2>
-                    <p>Client → API Gateway → Backend → Database</p>
-                `,
-            },
-        ],
         sprints: [
             {
                 name:         'Sprint 1 — Foundation',
@@ -238,7 +187,7 @@ export const PROJECT_TEMPLATES: ProjectTemplate[] = [
                 durationDays: 14,
             },
         ],
-        preview: { taskCount: 12, milestoneCount: 4, docCount: 2 },
+        preview: { taskCount: 12, milestoneCount: 4 },
     },
 
     // ── Mobile App (Scrum) ───────────────────────────────────────────────────
@@ -290,19 +239,6 @@ export const PROJECT_TEMPLATES: ProjectTemplate[] = [
             { title: 'Store Submission', description: 'Submitted to app stores.',       daysFromStart: 63  },
             { title: 'Public Launch',    description: 'App live on stores.',            daysFromStart: 70  },
         ],
-        documents: [
-            {
-                title: '📱 App Specification',
-                content: `
-                    <h2>App Overview</h2>
-                    <p>Describe your mobile app here.</p>
-                    <h2>Target Platforms</h2>
-                    <ul><li>iOS (minimum version: )</li><li>Android (minimum API: )</li></ul>
-                    <h2>Key Features</h2>
-                    <ul><li>Feature 1</li><li>Feature 2</li><li>Feature 3</li></ul>
-                `,
-            },
-        ],
         sprints: [
             { name: 'Sprint 1 — Core Screens', goals: ['Navigation', 'Auth screens', 'Home screen'], durationDays: 14 },
             { name: 'Sprint 2 — Data Layer',   goals: ['API integration', 'State management'],       durationDays: 14 },
@@ -310,7 +246,7 @@ export const PROJECT_TEMPLATES: ProjectTemplate[] = [
             { name: 'Sprint 4 — Polish',        goals: ['Animations', 'Performance', 'Accessibility'],durationDays: 14 },
             { name: 'Sprint 5 — Launch',        goals: ['Store assets', 'Submission'],               durationDays: 14 },
         ],
-        preview: { taskCount: 5, milestoneCount: 4, docCount: 1 },
+        preview: { taskCount: 5, milestoneCount: 4 },
     },
 
     // ── Research Project (Waterfall) ─────────────────────────────────────────
@@ -368,36 +304,8 @@ export const PROJECT_TEMPLATES: ProjectTemplate[] = [
             { title: 'Analysis Complete',          description: 'Results analyzed and validated.',       daysFromStart: 70  },
             { title: 'Final Report Submitted',     description: 'Report delivered.',                     daysFromStart: 84  },
         ],
-        documents: [
-            {
-                title: '📄 Research Proposal',
-                content: `
-                    <h2>Research Title</h2>
-                    <p>[Title here]</p>
-                    <h2>Problem Statement</h2>
-                    <p>Describe the problem being investigated.</p>
-                    <h2>Research Questions</h2>
-                    <ol><li>Question 1</li><li>Question 2</li></ol>
-                    <h2>Methodology</h2>
-                    <p>Describe your research approach.</p>
-                    <h2>Expected Outcomes</h2>
-                    <p>What do you expect to find?</p>
-                `,
-            },
-            {
-                title: '📊 Data Collection Plan',
-                content: `
-                    <h2>Data Sources</h2>
-                    <p>List your data sources.</p>
-                    <h2>Collection Methods</h2>
-                    <ul><li>Surveys</li><li>Interviews</li><li>Observations</li></ul>
-                    <h2>Sample Size</h2>
-                    <p>Define your sample size and selection criteria.</p>
-                `,
-            },
-        ],
         sprints: [],
-        preview: { taskCount: 6, milestoneCount: 4, docCount: 2 },
+        preview: { taskCount: 6, milestoneCount: 4 },
     },
 
     // ── Marketing Campaign (Kanban) ───────────────────────────────────────────
@@ -454,25 +362,8 @@ export const PROJECT_TEMPLATES: ProjectTemplate[] = [
             { title: 'Assets Ready',            description: 'All creative assets completed.',  daysFromStart: 21 },
             { title: 'Campaign Live',           description: 'All channels active.',            daysFromStart: 28 },
         ],
-        documents: [
-            {
-                title: '📣 Campaign Brief',
-                content: `
-                    <h2>Campaign Objective</h2>
-                    <p>Describe what this campaign aims to achieve.</p>
-                    <h2>Target Audience</h2>
-                    <p>Who are we targeting?</p>
-                    <h2>Key Messages</h2>
-                    <ul><li>Message 1</li><li>Message 2</li></ul>
-                    <h2>Channels</h2>
-                    <ul><li>Social Media</li><li>Email</li><li>Blog</li></ul>
-                    <h2>Success Metrics (KPIs)</h2>
-                    <ul><li>Impressions: </li><li>Conversions: </li><li>ROI: </li></ul>
-                `,
-            },
-        ],
         sprints: [],
-        preview: { taskCount: 6, milestoneCount: 3, docCount: 1 },
+        preview: { taskCount: 6, milestoneCount: 3 },
     },
 
     // ── Student Capstone Project (Hybrid) ────────────────────────────────────
@@ -549,60 +440,13 @@ export const PROJECT_TEMPLATES: ProjectTemplate[] = [
             { title: 'Feature Freeze',         description: 'No new features, only fixes.',    daysFromStart: 98  },
             { title: 'Final Submission',       description: 'Report and code submitted.',      daysFromStart: 112 },
         ],
-        documents: [
-            {
-                title: '🎓 Project Proposal',
-                content: `
-                    <h2>Project Title</h2>
-                    <p>[Your project title here]</p>
-                    <h2>Problem Statement</h2>
-                    <p>What problem are you solving?</p>
-                    <h2>Proposed Solution</h2>
-                    <p>How will your project solve it?</p>
-                    <h2>Objectives</h2>
-                    <ol>
-                        <li>Objective 1</li>
-                        <li>Objective 2</li>
-                        <li>Objective 3</li>
-                    </ol>
-                    <h2>Scope</h2>
-                    <p>Define the boundaries of your project.</p>
-                    <h2>Timeline Overview</h2>
-                    <ul>
-                        <li>Weeks 1-2: Research and Planning</li>
-                        <li>Weeks 3-6: Design</li>
-                        <li>Weeks 7-12: Development</li>
-                        <li>Weeks 13-14: Testing</li>
-                        <li>Weeks 15-16: Write-up</li>
-                    </ul>
-                `,
-            },
-            {
-                title: '📝 Meeting Notes Template',
-                content: `
-                    <h2>Supervisor Meeting — [Date]</h2>
-                    <h3>Attendees</h3>
-                    <ul><li>Student: </li><li>Supervisor: </li></ul>
-                    <h3>Progress Since Last Meeting</h3>
-                    <ul><li>Completed: </li></ul>
-                    <h3>Issues / Blockers</h3>
-                    <ul><li></li></ul>
-                    <h3>Feedback Received</h3>
-                    <p></p>
-                    <h3>Action Items</h3>
-                    <ul><li> — Due: </li></ul>
-                    <h3>Next Meeting</h3>
-                    <p>Date: </p>
-                `,
-            },
-        ],
         sprints: [
             { name: 'Phase 1 — Research & Planning', goals: ['Proposal', 'Literature review', 'SRS'], durationDays: 21 },
             { name: 'Phase 2 — Design',              goals: ['Architecture', 'Wireframes', 'Prototype'], durationDays: 21 },
             { name: 'Phase 3 — Development',         goals: ['Core system', 'Integrations'], durationDays: 42 },
             { name: 'Phase 4 — Testing & Write-up',  goals: ['User testing', 'Dissertation'], durationDays: 28 },
         ],
-        preview: { taskCount: 9, milestoneCount: 5, docCount: 2 },
+        preview: { taskCount: 9, milestoneCount: 5 },
     },
 
     // ── Design System (Agile) ─────────────────────────────────────────────────
@@ -653,29 +497,12 @@ export const PROJECT_TEMPLATES: ProjectTemplate[] = [
             { title: 'Core Components',     description: 'Essential components built.',  daysFromStart: 28 },
             { title: 'System Published',    description: 'NPM package or Figma published.', daysFromStart: 42 },
         ],
-        documents: [
-            {
-                title: '🎨 Design System Guidelines',
-                content: `
-                    <h2>Brand Values</h2>
-                    <p>What principles guide your design decisions?</p>
-                    <h2>Colour Palette</h2>
-                    <ul><li>Primary: </li><li>Secondary: </li><li>Neutral: </li></ul>
-                    <h2>Typography Scale</h2>
-                    <ul><li>Heading 1: </li><li>Body: </li><li>Caption: </li></ul>
-                    <h2>Spacing System</h2>
-                    <p>Base unit: 4px. Scale: 4, 8, 12, 16, 24, 32, 48, 64...</p>
-                    <h2>Component Naming Convention</h2>
-                    <p>PascalCase for components, kebab-case for CSS classes.</p>
-                `,
-            },
-        ],
         sprints: [
             { name: 'Sprint 1 — Foundation',   goals: ['Tokens', 'Core components'], durationDays: 14 },
             { name: 'Sprint 2 — Components',   goals: ['Forms', 'Navigation', 'Layout'], durationDays: 14 },
             { name: 'Sprint 3 — Polish & Docs', goals: ['Storybook', 'Accessibility', 'Publish'], durationDays: 14 },
         ],
-        preview: { taskCount: 5, milestoneCount: 3, docCount: 1 },
+        preview: { taskCount: 5, milestoneCount: 3 },
     },
 ]
 

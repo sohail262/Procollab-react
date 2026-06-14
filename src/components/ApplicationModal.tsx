@@ -1,10 +1,11 @@
 import { useState } from 'react'
-import { X } from 'lucide-react'
+import { X, FileText, MessageSquare } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore'
+import { collection, addDoc, serverTimestamp, getDoc, doc } from 'firebase/firestore'
 import { db, auth } from '@/lib/firebase'
 import { useToast } from '@/hooks/use-toast'
+import { triggerNewApplicantNotification } from '@/services/notificationTrigger'
 
 interface ApplicationModalProps {
     isOpen: boolean
@@ -26,7 +27,9 @@ export function ApplicationModal({ isOpen, onClose, onSuccess, project }: Applic
         skills: '',
         experience: '',
         motivation: '',
-        timeCommitment: ''
+        timeCommitment: '',
+        coverLetter: '',
+        customMessage: '',
     })
 
     if (!isOpen || !project) return null
@@ -59,6 +62,12 @@ export function ApplicationModal({ isOpen, onClose, onSuccess, project }: Applic
 
         setLoading(true)
         try {
+            const statusHistory = [{
+                status: 'applied',
+                timestamp: new Date(),
+                changedBy: auth.currentUser.uid,
+            }]
+
             // ✅ Create application in project's subcollection
             await addDoc(collection(db, 'projects', project.id, 'applications'), {
                 userId: auth.currentUser.uid,
@@ -68,7 +77,10 @@ export function ApplicationModal({ isOpen, onClose, onSuccess, project }: Applic
                 experience: formData.experience,
                 motivation: formData.motivation,
                 timeCommitment: formData.timeCommitment,
-                status: 'pending',
+                coverLetter: formData.coverLetter || '',
+                customMessage: formData.customMessage || '',
+                status: 'applied',
+                statusHistory,
                 appliedAt: serverTimestamp()
             })
 
@@ -77,9 +89,30 @@ export function ApplicationModal({ isOpen, onClose, onSuccess, project }: Applic
                 projectId: project.id,
                 projectTitle: project.title,
                 position: formData.position,
-                status: 'pending',
+                status: 'applied',
+                statusHistory,
+                coverLetter: formData.coverLetter || '',
+                customMessage: formData.customMessage || '',
                 appliedAt: serverTimestamp()
             })
+
+            // ✅ Notify project owner about new applicant
+            try {
+                const applicantDoc = await getDoc(doc(db, 'users', auth.currentUser.uid))
+                const applicantData = applicantDoc.data()
+                const applicantName = applicantData
+                    ? `${applicantData.firstName || ''} ${applicantData.lastName || ''}`.trim() || auth.currentUser.email || 'Someone'
+                    : auth.currentUser.email || 'Someone'
+                await triggerNewApplicantNotification(
+                    project.createdBy,
+                    applicantName,
+                    project.id,
+                    project.title
+                )
+            } catch (notifErr) {
+                // Don't block application submission if notification fails
+                console.warn('Failed to send owner notification:', notifErr)
+            }
 
             // Reset form
             setFormData({
@@ -87,7 +120,9 @@ export function ApplicationModal({ isOpen, onClose, onSuccess, project }: Applic
                 skills: '',
                 experience: '',
                 motivation: '',
-                timeCommitment: ''
+                timeCommitment: '',
+                coverLetter: '',
+                customMessage: '',
             })
 
             toast({
@@ -239,6 +274,39 @@ export function ApplicationModal({ isOpen, onClose, onSuccess, project }: Applic
                                 <option value="20+ hours/week">20+ hours/week</option>
                                 <option value="Flexible">Flexible</option>
                             </select>
+                        </div>
+
+                        {/* Cover Letter */}
+                        <div>
+                            <label className="block text-sm font-medium mb-1.5 flex items-center gap-1.5">
+                                <FileText className="h-3.5 w-3.5 text-gray-400" />
+                                Cover Letter
+                                <span className="text-xs text-gray-400 font-normal">(optional)</span>
+                            </label>
+                            <Textarea
+                                rows={4}
+                                placeholder="Tell us about yourself, your background, and why you're a great fit for this project..."
+                                value={formData.coverLetter}
+                                onChange={e => setFormData({ ...formData, coverLetter: e.target.value })}
+                                className="resize-none text-sm"
+                            />
+                            <p className="text-xs text-gray-400 mt-1">{formData.coverLetter.length}/1000 characters</p>
+                        </div>
+
+                        {/* Custom Message to Team */}
+                        <div>
+                            <label className="block text-sm font-medium mb-1.5 flex items-center gap-1.5">
+                                <MessageSquare className="h-3.5 w-3.5 text-gray-400" />
+                                Message to the Team
+                                <span className="text-xs text-gray-400 font-normal">(optional)</span>
+                            </label>
+                            <Textarea
+                                rows={2}
+                                placeholder="Any quick message for the team? e.g. availability, timezone, questions..."
+                                value={formData.customMessage}
+                                onChange={e => setFormData({ ...formData, customMessage: e.target.value })}
+                                className="resize-none text-sm"
+                            />
                         </div>
 
                         {/* Actions */}

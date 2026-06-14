@@ -69,6 +69,7 @@ export function TaskDialog({
         dueDate:      undefined,
         assigneeId:   '',
         assignee:     undefined,
+        linkedTools:  [],
     })
 
     const [formData, setFormData] = useState<Partial<Task>>(blankForm())
@@ -88,6 +89,7 @@ export function TaskDialog({
                         dueDate:      toDate(task.dueDate),
                         assigneeId:   task.assigneeId   || '',
                         assignee:     task.assignee     || undefined,
+                        linkedTools:  task.linkedTools  || [],
                     }
                     : blankForm()
             )
@@ -208,6 +210,7 @@ export function TaskDialog({
                 priority:     formData.priority || 'medium',
                 timeEstimate: formData.timeEstimate || 0,
                 tags:         formData.tags || [],
+                linkedTools:  formData.linkedTools || [],
                 ...(formData.assigneeId
                     ? { assigneeId: formData.assigneeId, assignee: formData.assignee }
                     : { assigneeId: undefined, assignee: undefined }
@@ -492,6 +495,49 @@ export function TaskDialog({
                                 readOnly={readOnly}
                                 className={readOnly ? 'opacity-70 cursor-not-allowed' : ''}
                             />
+                        </div>
+                    </div>
+
+                    {/* Linked Tools */}
+                    <div className="space-y-2">
+                        <Label>Link to Project Tools</Label>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                            {[
+                                { id: 'whiteboard', label: 'Whiteboard' },
+                                { id: 'docs', label: 'Documents' },
+                                { id: 'calendar', label: 'Calendar' },
+                                { id: 'chat', label: 'Team Chat' },
+                                { id: 'gantt', label: 'Gantt Chart' },
+                                { id: 'budget', label: 'Budget Tracker' },
+                            ].map(tool => {
+                                const isLinked = (formData.linkedTools ?? []).includes(tool.id)
+                                return (
+                                    <label
+                                        key={tool.id}
+                                        className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-semibold cursor-pointer transition-colors ${
+                                            isLinked
+                                                ? 'bg-zinc-900 border-zinc-900 text-white dark:bg-zinc-100 dark:border-zinc-100 dark:text-zinc-900'
+                                                : 'bg-transparent border-zinc-200 text-zinc-600 hover:bg-zinc-50 dark:border-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-900'
+                                        }`}
+                                    >
+                                        <input
+                                            type="checkbox"
+                                            checked={isLinked}
+                                            disabled={readOnly}
+                                            onChange={() => {
+                                                if (readOnly) return
+                                                const current = formData.linkedTools ?? []
+                                                const next = current.includes(tool.id)
+                                                    ? current.filter(t => t !== tool.id)
+                                                    : [...current, tool.id]
+                                                setFormData(prev => ({ ...prev, linkedTools: next }))
+                                            }}
+                                            className="sr-only"
+                                        />
+                                        {tool.label}
+                                    </label>
+                                )
+                            })}
                         </div>
                     </div>
 

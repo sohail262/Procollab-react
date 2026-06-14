@@ -41,6 +41,18 @@ import {
     doc, updateDoc, serverTimestamp
 } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
+import {
+    getActivationFunnel,
+    getWeeklyCollaboratingProjectsCount,
+    getFirstValueExchangeRate,
+    getWeeklyValueRetention,
+    getMarketplaceHealthStats,
+    getProjectSuccessMetrics,
+    type FunnelStep,
+    type WeeklyValueRetentionStats,
+    type MarketplaceHealthStats,
+    type ProjectSuccessMetrics,
+} from '@/services/analyticsService'
 
 // ─── Types ───────────────────────────────────────────────
 interface Report {
@@ -75,6 +87,15 @@ export function AdminDashboard() {
     const [moderationQueue, setModerationQueue] = useState<ModerationItem[]>([])
     const [reports, setReports] = useState<Report[]>([])
     const [reviewNotes, setReviewNotes] = useState('')
+
+    // Analytics states
+    const [analyticsLoading, setAnalyticsLoading] = useState(false)
+    const [funnelData, setFunnelData] = useState<FunnelStep[]>([])
+    const [wcpCount, setWcpCount] = useState<number>(0)
+    const [fveRate, setFveRate] = useState<number>(0)
+    const [wvrStats, setWvrStats] = useState<WeeklyValueRetentionStats | null>(null)
+    const [marketplaceHealth, setMarketplaceHealth] = useState<MarketplaceHealthStats | null>(null)
+    const [projectSuccess, setProjectSuccess] = useState<ProjectSuccessMetrics | null>(null)
 
     // Filter states
     const [userSearch, setUserSearch] = useState('')
@@ -146,6 +167,30 @@ export function AdminDashboard() {
             console.error('Error loading admin data:', error)
         } finally {
             setLoading(false)
+        }
+    }
+
+    const loadAnalyticsData = async () => {
+        setAnalyticsLoading(true)
+        try {
+            const [funnel, wcp, fve, wvr, health, success] = await Promise.all([
+                getActivationFunnel(),
+                getWeeklyCollaboratingProjectsCount(),
+                getFirstValueExchangeRate(),
+                getWeeklyValueRetention(),
+                getMarketplaceHealthStats(),
+                getProjectSuccessMetrics(),
+            ])
+            setFunnelData(funnel)
+            setWcpCount(wcp)
+            setFveRate(fve)
+            setWvrStats(wvr)
+            setMarketplaceHealth(health)
+            setProjectSuccess(success)
+        } catch (error) {
+            console.error('Error loading analytics:', error)
+        } finally {
+            setAnalyticsLoading(false)
         }
     }
 
@@ -553,6 +598,15 @@ export function AdminDashboard() {
                     <TabsTrigger value="activity">
                         <Activity className="h-4 w-4 mr-2" />
                         Activity
+                    </TabsTrigger>
+
+                    {/* Analytics */}
+                    <TabsTrigger
+                        value="product-analytics"
+                        onClick={() => { if (!funnelData.length) loadAnalyticsData() }}
+                    >
+                        <TrendingUp className="h-4 w-4 mr-2" />
+                        Product Analytics
                     </TabsTrigger>
                 </TabsList>
 
@@ -1403,6 +1457,239 @@ export function AdminDashboard() {
                             </ScrollArea>
                         </CardContent>
                     </Card>
+                </TabsContent>
+
+                {/* ══════════════════════════════════════════
+                    PRODUCT ANALYTICS TAB
+                ══════════════════════════════════════════ */}
+                <TabsContent value="product-analytics" className="space-y-6">
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <h2 className="text-xl font-bold">Product Analytics</h2>
+                            <p className="text-muted-foreground text-sm">Real-time activation, retention, and marketplace health KPIs</p>
+                        </div>
+                        <Button onClick={loadAnalyticsData} variant="outline" disabled={analyticsLoading} size="sm">
+                            <RefreshCw className={`h-4 w-4 mr-2 ${analyticsLoading ? 'animate-spin' : ''}`} />
+                            {analyticsLoading ? 'Loading...' : 'Refresh'}
+                        </Button>
+                    </div>
+
+                    {analyticsLoading ? (
+                        <div className="flex items-center justify-center h-64">
+                            <div className="text-center">
+                                <RefreshCw className="h-8 w-8 animate-spin text-primary mx-auto mb-3" />
+                                <p className="text-muted-foreground text-sm">Computing analytics...</p>
+                            </div>
+                        </div>
+                    ) : (
+                        <>
+                        {/* SECTION 1: BUSINESS KPIS */}
+                        <div>
+                            <h3 className="font-semibold text-base mb-3">Core Business KPIs</h3>
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
+                                {/* WCP */}
+                                <Card>
+                                    <CardContent className="p-4 flex flex-col justify-between h-full">
+                                        <div>
+                                            <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Weekly Collab Projects</p>
+                                            <p className="text-3xl font-bold mt-2 text-indigo-650">{wcpCount}</p>
+                                        </div>
+                                        <p className="text-xs text-muted-foreground mt-2">Projects with &gt;= 2 members active last 7d (North Star)</p>
+                                    </CardContent>
+                                </Card>
+
+                                {/* FVE */}
+                                <Card>
+                                    <CardContent className="p-4 flex flex-col justify-between h-full">
+                                        <div>
+                                            <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">First Value Exchange</p>
+                                            <p className="text-3xl font-bold mt-2 text-emerald-600">{fveRate}%</p>
+                                        </div>
+                                        <p className="text-xs text-muted-foreground mt-2">% of members activated through team collaboration</p>
+                                    </CardContent>
+                                </Card>
+
+                                {/* WVR */}
+                                <Card className="lg:col-span-1">
+                                    <CardContent className="p-4 flex flex-col justify-between h-full">
+                                        <div>
+                                            <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Value Retention</p>
+                                            <div className="mt-2 space-y-1">
+                                                <div className="flex justify-between text-xs font-semibold">
+                                                    <span>D1:</span> <span>{wvrStats?.day1 || 0}%</span>
+                                                </div>
+                                                <div className="flex justify-between text-xs font-semibold">
+                                                    <span>D7:</span> <span>{wvrStats?.day7 || 0}%</span>
+                                                </div>
+                                                <div className="flex justify-between text-xs font-semibold">
+                                                    <span>D30:</span> <span>{wvrStats?.day30 || 0}%</span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <p className="text-xs text-muted-foreground mt-2">Retention cohorts based on value actions</p>
+                                    </CardContent>
+                                </Card>
+
+                                {/* PCR */}
+                                <Card>
+                                    <CardContent className="p-4 flex flex-col justify-between h-full">
+                                        <div>
+                                            <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Project Completion</p>
+                                            <p className="text-3xl font-bold mt-2 text-blue-600">{projectSuccess?.pcr || 0}%</p>
+                                        </div>
+                                        <p className="text-xs text-muted-foreground mt-2">Completed projects vs total projects created</p>
+                                    </CardContent>
+                                </Card>
+
+                                {/* Median TFD */}
+                                <Card>
+                                    <CardContent className="p-4 flex flex-col justify-between h-full">
+                                        <div>
+                                            <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Time to Duo (Median)</p>
+                                            <p className="text-3xl font-bold mt-2 text-amber-600">{projectSuccess?.medianTfdHours || 0}h</p>
+                                        </div>
+                                        <p className="text-xs text-muted-foreground mt-2">Hours for project to recruit & begin collaboration</p>
+                                    </CardContent>
+                                </Card>
+                            </div>
+                        </div>
+
+                        {/* SECTION 2: MARKETPLACE HEALTH */}
+                        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                            {/* Aggregates */}
+                            <Card className="lg:col-span-1">
+                                <CardHeader className="pb-3">
+                                    <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Marketplace Health Stats</CardTitle>
+                                </CardHeader>
+                                <CardContent className="space-y-4">
+                                    <div className="flex justify-between items-center py-2 border-b">
+                                        <span className="text-sm font-medium">Active Founders</span>
+                                        <Badge variant="secondary" className="font-semibold text-sm">{marketplaceHealth?.activeFounders || 0}</Badge>
+                                    </div>
+                                    <div className="flex justify-between items-center py-2 border-b">
+                                        <span className="text-sm font-medium">Applications Submitted</span>
+                                        <Badge variant="secondary" className="font-semibold text-sm">{marketplaceHealth?.applicationsCount || 0}</Badge>
+                                    </div>
+                                    <div className="flex justify-between items-center py-2 border-b">
+                                        <span className="text-sm font-medium">Application Acceptance Rate</span>
+                                        <span className="text-sm font-bold text-green-600">{marketplaceHealth?.acceptanceRate || 0}%</span>
+                                    </div>
+                                    <div className="flex justify-between items-center py-2 border-b">
+                                        <span className="text-sm font-medium">Invite Conversion Rate</span>
+                                        <span className="text-sm font-bold text-indigo-650">{marketplaceHealth?.inviteConversion || 0}%</span>
+                                    </div>
+                                </CardContent>
+                            </Card>
+
+                            {/* Discipline breakdown */}
+                            <Card className="lg:col-span-2">
+                                <CardHeader className="pb-3">
+                                    <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">Active Contributors by Discipline</CardTitle>
+                                </CardHeader>
+                                <CardContent>
+                                    {marketplaceHealth?.activeContributors && Object.keys(marketplaceHealth.activeContributors).length > 0 ? (
+                                        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                                            {Object.entries(marketplaceHealth.activeContributors).map(([discipline, count]) => (
+                                                <div key={discipline} className="p-3 border rounded-lg bg-muted/20 flex flex-col justify-center">
+                                                    <span className="text-xs text-muted-foreground font-medium truncate">{discipline}</span>
+                                                    <span className="text-xl font-bold mt-1">{count}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    ) : (
+                                        <p className="text-sm text-muted-foreground py-6 text-center">No active contributor discipline data available</p>
+                                    )}
+                                </CardContent>
+                            </Card>
+                        </div>
+
+                        {/* SECTION 3: ACTIVATION FUNNEL */}
+                        {funnelData.length > 0 && (
+                            <Card>
+                                <CardHeader>
+                                    <CardTitle>Activation Funnel</CardTitle>
+                                    <CardDescription>User progression through key activation milestones (unique users)</CardDescription>
+                                </CardHeader>
+                                <CardContent>
+                                    <div className="h-[320px]">
+                                        <ResponsiveContainer width="100%" height="100%">
+                                            <BarChart data={funnelData} layout="vertical">
+                                                <CartesianGrid strokeDasharray="3 3" />
+                                                <XAxis type="number" />
+                                                <YAxis dataKey="label" type="category" width={140} tick={{ fontSize: 12 }} />
+                                                <Tooltip
+                                                    formatter={(value, name) => [value, name === 'count' ? 'Users' : name]}
+                                                    labelFormatter={(label) => label}
+                                                    content={({ active, payload, label }) => {
+                                                        if (!active || !payload?.length) return null
+                                                        const step = funnelData.find(s => s.label === label)
+                                                        return (
+                                                            <div className="bg-background border rounded-lg p-3 shadow-lg text-sm">
+                                                                <p className="font-semibold mb-1">{label}</p>
+                                                                <p>Users: <span className="font-bold">{payload[0]?.value}</span></p>
+                                                                {step && step.conversion < 100 && (
+                                                                    <>
+                                                                        <p>Conversion: <span className="text-green-600 font-medium">{step.conversion}%</span></p>
+                                                                        <p>Drop-off: <span className="text-red-500 font-medium">{step.dropoff}%</span></p>
+                                                                    </>
+                                                                )}
+                                                            </div>
+                                                        )
+                                                    }}
+                                                />
+                                                <Bar dataKey="count" fill="#6366f1" radius={[0, 4, 4, 0]} />
+                                            </BarChart>
+                                        </ResponsiveContainer>
+                                    </div>
+
+                                    {/* Conversion table */}
+                                    <div className="mt-4 overflow-x-auto">
+                                        <Table>
+                                            <TableHeader>
+                                                <TableRow>
+                                                    <TableHead>Step</TableHead>
+                                                    <TableHead className="text-right">Users</TableHead>
+                                                    <TableHead className="text-right">Conversion</TableHead>
+                                                    <TableHead className="text-right">Drop-off</TableHead>
+                                                </TableRow>
+                                            </TableHeader>
+                                            <TableBody>
+                                                {funnelData.map((step, i) => (
+                                                    <TableRow key={i}>
+                                                        <TableCell className="font-medium">{step.label}</TableCell>
+                                                        <TableCell className="text-right">{step.count}</TableCell>
+                                                        <TableCell className="text-right">
+                                                            <span className={step.conversion >= 50 ? 'text-green-600' : 'text-amber-600'}>
+                                                                {step.conversion}%
+                                                            </span>
+                                                        </TableCell>
+                                                        <TableCell className="text-right">
+                                                            {step.dropoff > 0 && (
+                                                                <span className="text-red-500">-{step.dropoff}%</span>
+                                                            )}
+                                                        </TableCell>
+                                                    </TableRow>
+                                                ))}
+                                            </TableBody>
+                                        </Table>
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        )}
+
+                        {!funnelData.length && !wcpCount && (
+                            <div className="text-center py-16 text-muted-foreground">
+                                <TrendingUp className="h-12 w-12 mx-auto mb-3 opacity-30" />
+                                <p className="text-lg font-medium">No analytics data yet</p>
+                                <p className="text-sm mt-1">Analytics data will appear here as users interact with the platform.</p>
+                                <Button onClick={loadAnalyticsData} className="mt-4" variant="outline">
+                                    <RefreshCw className="h-4 w-4 mr-2" />
+                                    Load Analytics
+                                </Button>
+                            </div>
+                        )}
+                        </>
+                    )}
                 </TabsContent>
             </Tabs>
 
