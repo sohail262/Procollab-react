@@ -12,6 +12,7 @@ import { cachedQuery } from '@/lib/queryUtils'
 const SS_MY_PROJECTS_TTL = 3 * 60 * 1000 // 3 minutes
 import { useNavigate } from 'react-router-dom'
 import { useToast } from '@/hooks/use-toast'
+import { getTagColorClass } from '@/lib/utils'
 
 interface Project {
     id: string
@@ -132,9 +133,18 @@ export default function MyProjects() {
 
     const handleDeleteProject = async (projectId: string) => {
         if (!confirm("Are you sure you want to delete this project? This action is permanent and cannot be undone.")) return
+
+        // ── Optimistic update: remove card immediately ───────────────────────
+        const previousCreated = createdProjects
+        const previousJoined  = joinedProjects
+        const previousPast    = pastProjects
+        setCreatedProjects(prev => prev.filter(p => p.id !== projectId))
+        setJoinedProjects(prev => prev.filter(p => p.id !== projectId))
+        setPastProjects(prev => prev.filter(p => p.id !== projectId))
+
         try {
             await deleteDoc(doc(db, 'projects', projectId))
-            // Bust caches so the list refreshes
+            // Bust caches so re-visits don't show deleted project
             if (user) {
                 try { sessionStorage.removeItem(`my_projects_${user.uid}`) } catch { /* ignore */ }
             }
@@ -142,18 +152,32 @@ export default function MyProjects() {
                 title: "Project Deleted",
                 description: "The project has been permanently deleted.",
             })
-            loadProjects(true) // skipCache=true forces fresh fetch
         } catch (error) {
+            // ── Rollback: restore all project lists ──────────────────────────
+            setCreatedProjects(previousCreated)
+            setJoinedProjects(previousJoined)
+            setPastProjects(previousPast)
             console.error("Error deleting project:", error)
             toast({
-                title: "Deletion Failed",
+                title: "Changes couldn't be saved.",
                 description: "Failed to delete project. Please check your permissions.",
                 variant: "destructive"
             })
         }
     }
 
-    const formatDate = (date: Date) => {
+    const formatDate = (raw: any) => {
+        // Handle Firestore Timestamp, Date, number (ms), string
+        let date: Date
+        if (!raw) return ''
+        if (raw?.toDate) {
+            date = raw.toDate()
+        } else if (raw instanceof Date) {
+            date = raw
+        } else {
+            date = new Date(raw)
+        }
+        if (isNaN(date.getTime())) return ''
         const now = new Date()
         const diffTime = Math.abs(now.getTime() - date.getTime())
         const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24))
@@ -171,62 +195,70 @@ export default function MyProjects() {
         const maxMembers = project.maxMembers || project.teamSize || 5
         const isOwner = project.createdBy === user?.uid
 
-        const statusConfig: Record<string, { dot: string; text: string; bg: string }> = {
-            recruiting: { dot: 'bg-amber-400', text: 'text-amber-600 dark:text-amber-400', bg: 'bg-amber-50 dark:bg-amber-900/20' },
-            active:     { dot: 'bg-emerald-400', text: 'text-emerald-600 dark:text-emerald-400', bg: 'bg-emerald-50 dark:bg-emerald-900/20' },
-            completed:  { dot: 'bg-blue-400', text: 'text-blue-600 dark:text-blue-400', bg: 'bg-blue-50 dark:bg-blue-900/20' },
-            'on-hold':  { dot: 'bg-red-400', text: 'text-red-500 dark:text-red-400', bg: 'bg-red-50 dark:bg-red-900/20' },
+        const getStatusStyle = (status: string) => {
+            const s = status.toLowerCase()
+            if (s === 'recruiting') {
+                return 'border-emerald-500/20 bg-emerald-500/10 text-emerald-400 border'
+            }
+            if (s === 'active') {
+                return 'border-orange-500/30 bg-orange-500/15 text-orange-400 border'
+            }
+            if (s === 'planning' || s === 'completed') {
+                return 'border-primary/25 bg-primary/10 text-primary border'
+            }
+            return 'border-white/10 bg-white/5 text-white/70 border'
         }
-        const sc = statusConfig[project.status] || { dot: 'bg-gray-400', text: 'text-gray-500', bg: 'bg-gray-50 dark:bg-gray-800' }
 
         return (
-            <Card className="group bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-800 hover:border-gray-300 dark:hover:border-gray-700 hover:shadow-md transition-all duration-200">
-                <CardContent className="p-3">
+            <Card className="glass-card hover:border-white/25 transition-all duration-300 rounded-lg overflow-hidden h-full flex flex-col">
+                <CardContent className="p-4 relative z-10 flex flex-col flex-1 h-full">
                     {/* Top row: status pill + date */}
                     <div className="flex items-center justify-between mb-2">
-                        <span className={`inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full ${sc.bg} ${sc.text}`}>
-                            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${sc.dot}`} />
-                            <span className="truncate max-w-[60px]">{project.status.charAt(0).toUpperCase() + project.status.slice(1)}</span>
+                        <span className={`inline-flex items-center text-[9px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full ${getStatusStyle(project.status)}`}>
+                            {project.status}
                         </span>
-                        <span className="text-[10px] text-gray-400 dark:text-gray-500 shrink-0 ml-1">
+                        <span className="text-[10px] text-white/40 shrink-0 ml-1">
                             {formatDate(project.createdAt)}
                         </span>
                     </div>
 
-                    {/* Title */}
-                    <h3 className="font-semibold text-xs sm:text-sm text-gray-900 dark:text-white line-clamp-1 mb-1">
-                        {project.title}
-                    </h3>
+                    {/* Main Content Wrapper (title, description, tags) that will stretch */}
+                    <div className="flex-grow flex flex-col justify-start mb-2">
+                        {/* Title */}
+                        <h3 className="font-semibold text-xs sm:text-sm text-white line-clamp-1 mb-1 font-sans">
+                            {project.title}
+                        </h3>
 
-                    {/* Description */}
-                    <p className="text-[10px] sm:text-xs text-gray-500 dark:text-gray-400 line-clamp-2 mb-2">
-                        {project.summary || project.description}
-                    </p>
+                        {/* Description */}
+                        <p className="text-[10px] sm:text-xs text-white/60 line-clamp-2 mb-2">
+                            {project.summary || project.description}
+                        </p>
 
-                    {/* Tags */}
-                    {(project.primaryDiscipline || (project.tags?.length ?? 0) > 0) && (
-                        <div className="flex flex-wrap gap-1 mb-2">
-                            {project.primaryDiscipline && (
-                                <span className="text-[9px] sm:text-[10px] px-1 py-0.5 rounded bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-300 border border-indigo-100 dark:border-indigo-800 truncate max-w-full">
-                                    {project.primaryDiscipline}
-                                </span>
-                            )}
-                            {project.tags?.slice(0, 1).map((tag, i) => (
-                                <span key={i} className="text-[9px] sm:text-[10px] px-1 py-0.5 rounded bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-700 truncate max-w-full">
-                                    {tag}
-                                </span>
-                            ))}
-                        </div>
-                    )}
+                        {/* Tags */}
+                        {(project.primaryDiscipline || (project.tags?.length ?? 0) > 0) && (
+                            <div className="flex flex-wrap gap-1 mt-auto">
+                                {project.primaryDiscipline && (
+                                    <span className="text-[9px] sm:text-[10px] px-2 py-0.5 rounded-md bg-gradient-to-r from-primary/10 to-primary/20 text-primary truncate max-w-full font-medium">
+                                        {project.primaryDiscipline}
+                                    </span>
+                                )}
+                                {project.tags?.slice(0, 2).map((tag, i) => (
+                                    <span key={i} className={`text-[9px] sm:text-[10px] px-2 py-0.5 rounded-md truncate max-w-full font-semibold transition-all duration-300 ${getTagColorClass(tag)}`}>
+                                        {tag}
+                                    </span>
+                                ))}
+                            </div>
+                        )}
+                    </div>
 
                     {/* Members row */}
-                    <div className="flex items-center gap-1 text-[10px] text-gray-400 dark:text-gray-500 mb-3">
-                        <Users className="h-2.5 w-2.5 shrink-0" />
-                        <span>{currentMembers}/{maxMembers}</span>
+                    <div className="flex items-center gap-1.5 text-[10px] text-white/50 mb-3 mt-auto font-medium">
+                        <Users className="h-3 w-3 shrink-0" />
+                        <span>{currentMembers}/{maxMembers} Members</span>
                     </div>
 
                     {/* Actions */}
-                    <div className="flex items-center gap-1.5 pt-2.5 border-t border-gray-100 dark:border-gray-800">
+                    <div className="flex items-center gap-1.5 pt-2.5 border-t border-white/10 mt-auto">
                         {/* Primary: Dashboard */}
                         <Button
                             size="sm"
@@ -241,11 +273,11 @@ export default function MyProjects() {
                         <Button
                             size="sm"
                             variant="ghost"
-                            className="h-7 w-7 p-0 shrink-0 text-gray-400 hover:text-gray-900 dark:hover:text-white"
+                            className="h-7 w-7 p-0 shrink-0 text-white/50 hover:text-white"
                             title="View project"
                             onClick={() => navigate(`/project/${project.id}`)}
                         >
-                            <Eye className="h-3 w-3" />
+                            <Eye className="h-3.5 w-3.5" />
                         </Button>
 
                         {isOwner && (
@@ -253,29 +285,29 @@ export default function MyProjects() {
                                 <Button
                                     size="sm"
                                     variant="ghost"
-                                    className="h-7 w-7 p-0 shrink-0 text-gray-400 hover:text-gray-900 dark:hover:text-white"
+                                    className="h-7 w-7 p-0 shrink-0 text-white/50 hover:text-white"
                                     title="Edit project"
                                     onClick={() => navigate(`/edit-project/${project.id}`)}
                                 >
-                                    <Edit className="h-3 w-3" />
+                                    <Edit className="h-3.5 w-3.5" />
                                 </Button>
                                 <Button
                                     size="sm"
                                     variant="ghost"
-                                    className="h-7 w-7 p-0 shrink-0 text-gray-400 hover:text-gray-900 dark:hover:text-white"
+                                    className="h-7 w-7 p-0 shrink-0 text-white/50 hover:text-white"
                                     title="Manage team"
                                     onClick={() => navigate(`/manage-team/${project.id}`)}
                                 >
-                                    <Users className="h-3 w-3" />
+                                    <Users className="h-3.5 w-3.5" />
                                 </Button>
                                 <Button
                                     size="sm"
                                     variant="ghost"
-                                    className="h-7 w-7 p-0 shrink-0 text-red-500 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/20"
+                                    className="h-7 w-7 p-0 shrink-0 text-destructive hover:text-destructive/80 hover:bg-destructive/10"
                                     title="Delete project"
                                     onClick={() => handleDeleteProject(project.id)}
                                 >
-                                    <Trash2 className="h-3 w-3" />
+                                    <Trash2 className="h-3.5 w-3.5" />
                                 </Button>
                             </>
                         )}
@@ -304,11 +336,11 @@ export default function MyProjects() {
             </div>
 
             {/* Tabs */}
-            <div className="flex gap-1 sm:gap-2 mb-6 border-b border-gray-200 dark:border-gray-800 overflow-x-auto">
+            <div className="flex gap-1 sm:gap-2 mb-6 border-b border-white/10 overflow-x-auto">
                 <button
                     className={`px-3 sm:px-4 py-2 font-medium transition-colors border-b-2 whitespace-nowrap text-sm sm:text-base ${activeTab === 'created'
-                        ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
-                        : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                        ? 'border-primary text-primary'
+                        : 'border-transparent text-white/50 hover:text-white'
                         }`}
                     onClick={() => setActiveTab('created')}
                 >
@@ -316,8 +348,8 @@ export default function MyProjects() {
                 </button>
                 <button
                     className={`px-3 sm:px-4 py-2 font-medium transition-colors border-b-2 whitespace-nowrap text-sm sm:text-base ${activeTab === 'joined'
-                        ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
-                        : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                        ? 'border-primary text-primary'
+                        : 'border-transparent text-white/50 hover:text-white'
                         }`}
                     onClick={() => setActiveTab('joined')}
                 >
@@ -325,8 +357,8 @@ export default function MyProjects() {
                 </button>
                 <button
                     className={`px-3 sm:px-4 py-2 font-medium transition-colors border-b-2 whitespace-nowrap text-sm sm:text-base ${activeTab === 'past'
-                        ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
-                        : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                        ? 'border-primary text-primary'
+                        : 'border-transparent text-white/50 hover:text-white'
                         }`}
                     onClick={() => setActiveTab('past')}
                 >
@@ -334,8 +366,8 @@ export default function MyProjects() {
                 </button>
                 <button
                     className={`px-3 sm:px-4 py-2 font-medium transition-colors border-b-2 whitespace-nowrap text-sm sm:text-base ${activeTab === 'applications'
-                        ? 'border-indigo-600 text-indigo-600 dark:text-indigo-400'
-                        : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
+                        ? 'border-primary text-primary'
+                        : 'border-transparent text-white/50 hover:text-white'
                         }`}
                     onClick={() => setActiveTab('applications')}
                 >
@@ -345,7 +377,7 @@ export default function MyProjects() {
 
             {loading ? (
                 <div className="flex justify-center py-12">
-                    <Loader2 className="h-8 w-8 animate-spin text-blue-500" />
+                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
                 </div>
             ) : (
                 <>

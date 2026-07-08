@@ -304,8 +304,9 @@ function SortableColumn({
     return (
         <div
             ref={setNodeRef}
-            className={`flex flex-col h-full min-w-[300px] w-[300px] rounded-lg
+            className={`flex flex-col min-w-[260px] w-[260px] rounded-lg
                         bg-muted/40 border-t-4 ${accentClass}
+                        h-full
                         ${isOverWip ? 'ring-2 ring-destructive/40' : ''}`}
         >
             {/* ── Column header ── */}
@@ -348,7 +349,7 @@ function SortableColumn({
             )}
 
             {/* ── Task list ── */}
-            <div className="flex-1 overflow-y-auto px-3 pb-2 space-y-2.5 min-h-[80px]">
+            <div className="flex-1 overflow-y-auto px-3 pt-2 pb-2 space-y-2.5 min-h-[80px]">
                 <SortableContext
                     items={tasks.map(t => t.id)}
                     strategy={verticalListSortingStrategy}
@@ -965,7 +966,7 @@ export function KanbanBoard({ readOnly = false, tasks: injectedTasks }: KanbanBo
 
     // ─────────────────────────────────────────────────────────────────────────
     return (
-        <div className="h-full flex flex-col gap-3">
+        <div className="h-full flex flex-col gap-3 overflow-hidden">
 
             {/* ── Progress bar + stats ── */}
             <div className="flex items-center gap-4 px-1 flex-shrink-0 flex-wrap">
@@ -993,7 +994,7 @@ export function KanbanBoard({ readOnly = false, tasks: injectedTasks }: KanbanBo
             </div>
 
             {/* ── Board ── */}
-            <div className="flex-1 overflow-x-auto pb-4">
+            <div className="flex-1 overflow-x-auto overflow-y-hidden">
                 <DndContext
                     sensors={sensors}
                     collisionDetection={closestCorners}

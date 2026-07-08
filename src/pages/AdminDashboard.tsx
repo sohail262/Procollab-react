@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import { DashboardLayout } from '@/components/layout/DashboardLayout'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -18,7 +18,9 @@ import {
     Users, FolderKanban, TrendingUp, Bell, Star, Shield, Activity,
     Megaphone, Settings2, RefreshCw, Trash2, Edit, Eye, Search,
     UserCog, BarChart3, AlertCircle, CheckCircle2, Clock, Plus,
-    XCircle, Info, AlertTriangle, Flag
+    XCircle, Info, AlertTriangle, Flag, Award, BookOpen, Crown,
+    Heart, Code2, Compass, ShieldAlert, CheckCircle, HelpCircle, Zap,
+    ShieldCheck, GitBranch, Layers, Briefcase, FileText, ChevronDown
 } from 'lucide-react'
 import {
     LineChart, Line, XAxis, YAxis, CartesianGrid,
@@ -29,7 +31,8 @@ import {
     loadGrowthData, loadAdminLogs, updateUserRole, toggleUserDisabled,
     deleteUser, updateProjectStatus, toggleProjectFeatured, deleteProject,
     createAnnouncement, updateAnnouncement, deleteAnnouncement, logAdminAction,
-    loadModerationQueue, reviewModerationItem,
+    loadModerationQueue, reviewModerationItem, grantUserBadge,
+    getUserBadges, removeUserBadge,
     type PlatformStats, type UserData, type ProjectData,
     type Announcement, type GrowthDataPoint, type ActivityLog, type ModerationItem
 } from '@/services/adminService'
@@ -41,6 +44,7 @@ import {
     doc, updateDoc, serverTimestamp
 } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
+import { BADGE_IMAGES } from '@/lib/badgeImages'
 import {
     getActivationFunnel,
     getWeeklyCollaboratingProjectsCount,
@@ -53,6 +57,7 @@ import {
     type MarketplaceHealthStats,
     type ProjectSuccessMetrics,
 } from '@/services/analyticsService'
+import { runSchemaMigration, type MigrationProgress } from '@/services/migrationRunner'
 
 // ─── Types ───────────────────────────────────────────────
 interface Report {
@@ -68,6 +73,187 @@ interface Report {
     createdAt: any
     resolvedAt?: any
     resolvedBy?: string
+}
+
+const SHOWCASE_BADGES = [
+    {
+        type: 'verified_collaborator',
+        title: 'Verified Collaborator',
+        desc: 'Established complete profile setup to build community trust.',
+        icon: 'ShieldCheck',
+        color: 'text-zinc-650 bg-zinc-50 border-zinc-200 dark:text-zinc-400 dark:bg-zinc-900/50 dark:border-zinc-800',
+        bg: 'from-zinc-50 to-zinc-100/50 dark:from-zinc-900/40 dark:to-zinc-950/40',
+        border: 'border-zinc-200 dark:border-zinc-800'
+    },
+    {
+        type: 'trusted_teammate',
+        title: 'Trusted Teammate',
+        desc: 'Outstanding cooperation ratings across team deliverables.',
+        icon: 'Users',
+        color: 'text-cyan-600 bg-cyan-50 border-cyan-200 dark:text-cyan-400 dark:bg-cyan-950/20 dark:border-cyan-900',
+        bg: 'from-cyan-50 to-teal-50/50 dark:from-cyan-950/30 dark:to-teal-950/30',
+        border: 'border-cyan-200 dark:border-cyan-800'
+    },
+    {
+        type: 'reliable_contributor',
+        title: 'Reliable Contributor',
+        desc: 'Shipped 10+ tasks on or before schedule with high reliability.',
+        icon: 'Clock',
+        color: 'text-amber-650 bg-amber-50 border-amber-200 dark:text-amber-400 dark:bg-amber-950/20 dark:border-amber-900',
+        bg: 'from-amber-50 to-orange-50/50 dark:from-amber-950/30 dark:to-orange-950/30',
+        border: 'border-amber-200 dark:border-amber-800'
+    },
+    {
+        type: 'proven_professional',
+        title: 'Proven Professional',
+        desc: 'Exceptional reviews across a substantial project history.',
+        icon: 'Shield',
+        color: 'text-indigo-650 bg-indigo-50 border-indigo-200 dark:text-indigo-400 dark:bg-indigo-950/20 dark:border-indigo-900',
+        bg: 'from-indigo-50 to-purple-50/50 dark:from-indigo-950/25 dark:to-purple-950/25',
+        border: 'border-indigo-200 dark:border-indigo-800'
+    },
+    {
+        type: 'project_finisher',
+        title: 'Project Finisher',
+        desc: 'Completed project milestones and delivered assigned tasks.',
+        icon: 'CheckCircle',
+        color: 'text-green-600 bg-green-50 border-green-200 dark:text-green-400 dark:bg-green-950/20 dark:border-green-900',
+        bg: 'from-green-50 to-emerald-50/50 dark:from-green-950/30 dark:to-emerald-950/30',
+        border: 'border-green-200 dark:border-green-800'
+    },
+    {
+        type: 'project_veteran',
+        title: 'Project Veteran',
+        desc: 'Successfully completed 5 verified projects on the platform.',
+        icon: 'Award',
+        color: 'text-yellow-600 bg-yellow-50 border-yellow-200 dark:text-yellow-450 dark:bg-yellow-950/20 dark:border-yellow-900',
+        bg: 'from-yellow-50 to-amber-50/50 dark:from-yellow-950/30 dark:to-amber-950/30',
+        border: 'border-yellow-200 dark:border-yellow-800'
+    },
+    {
+        type: 'project_master',
+        title: 'Project Master',
+        desc: 'Completed 10 verified projects with outstanding completion rates.',
+        icon: 'Crown',
+        color: 'text-amber-650 bg-amber-50 border-amber-200 dark:text-amber-450 dark:bg-amber-950/20 dark:border-amber-900',
+        bg: 'from-amber-50 to-yellow-50/50 dark:from-amber-950/35 dark:to-yellow-950/35',
+        border: 'border-amber-200 dark:border-amber-800'
+    },
+    {
+        type: 'verified_deliverer',
+        title: 'Verified Deliverer',
+        desc: 'Completed projects with verified team activity levels.',
+        icon: 'GitBranch',
+        color: 'text-purple-600 bg-purple-50 border-purple-200 dark:text-purple-400 dark:bg-purple-950/20 dark:border-purple-900',
+        bg: 'from-purple-50 to-indigo-50/50 dark:from-purple-950/30 dark:to-indigo-950/30',
+        border: 'border-purple-200 dark:border-purple-800'
+    },
+    {
+        type: 'team_builder',
+        title: 'Team Builder',
+        desc: 'Exhibited exceptional team coordination and alignment.',
+        icon: 'Users',
+        color: 'text-sky-600 bg-sky-50 border-sky-200 dark:text-sky-400 dark:bg-sky-950/20 dark:border-sky-900',
+        bg: 'from-sky-50 to-cyan-50/50 dark:from-sky-950/30 dark:to-cyan-950/30',
+        border: 'border-sky-200 dark:border-sky-800'
+    },
+    {
+        type: 'outstanding_collaborator',
+        title: 'Outstanding Collaborator',
+        desc: 'Praised by teammates for cooperation and communication.',
+        icon: 'Heart',
+        color: 'text-rose-600 bg-rose-50 border-rose-200 dark:text-rose-450 dark:bg-rose-950/20 dark:border-rose-900',
+        bg: 'from-rose-50 to-pink-50/50 dark:from-rose-950/30 dark:to-pink-950/30',
+        border: 'border-rose-200 dark:border-rose-800'
+    },
+    {
+        type: 'cross_functional_dev',
+        title: 'Cross-Functional Contributor',
+        desc: 'Versatile capabilities across multiple project disciplines.',
+        icon: 'Layers',
+        color: 'text-emerald-600 bg-emerald-50 border-emerald-200 dark:text-emerald-450 dark:bg-emerald-950/20 dark:border-emerald-900',
+        bg: 'from-emerald-50 to-teal-50/50 dark:from-emerald-950/30 dark:to-teal-950/30',
+        border: 'border-emerald-200 dark:border-emerald-800'
+    },
+    {
+        type: 'project_leader',
+        title: 'Project Leader',
+        desc: 'Outstanding project leadership, coordination, and team direction.',
+        icon: 'Compass',
+        color: 'text-blue-600 bg-blue-50 border-blue-200 dark:text-blue-400 dark:bg-blue-950/20 dark:border-blue-900',
+        bg: 'from-blue-50 to-cyan-50/50 dark:from-blue-950/30 dark:to-cyan-950/30',
+        border: 'border-blue-200 dark:border-blue-800'
+    },
+    {
+        type: 'delivery_manager',
+        title: 'Delivery Manager',
+        desc: 'Delivered milestones and managed timeline goals for product teams.',
+        icon: 'Briefcase',
+        color: 'text-violet-650 bg-violet-50 border-violet-200 dark:text-violet-400 dark:bg-violet-950/20 dark:border-violet-900',
+        bg: 'from-violet-50 to-fuchsia-50/50 dark:from-violet-950/30 dark:to-fuchsia-950/30',
+        border: 'border-violet-200 dark:border-violet-850'
+    },
+    {
+        type: 'top_rated',
+        title: 'Top Rated',
+        desc: 'Overall peer rating of 4.8+ stars across minimum 10 reviews.',
+        icon: 'Star',
+        color: 'text-amber-500 bg-amber-50 border-amber-200 dark:text-amber-400 dark:bg-amber-950/20 dark:border-amber-900',
+        bg: 'from-amber-50 to-yellow-50/50 dark:from-amber-950/30 dark:to-yellow-950/30',
+        border: 'border-amber-200 dark:border-amber-800'
+    },
+    {
+        type: 'community_trusted',
+        title: 'Community Trusted',
+        desc: 'Exceptional ratings across 20+ peer evaluations.',
+        icon: 'ShieldAlert',
+        color: 'text-orange-600 bg-orange-50 border-orange-200 dark:text-orange-450 dark:bg-orange-950/20 dark:border-orange-900',
+        bg: 'from-orange-50 to-red-50/50 dark:from-orange-950/35 dark:to-red-950/35',
+        border: 'border-orange-200 dark:border-orange-800'
+    },
+    {
+        type: 'verified_mentor',
+        title: 'Verified Mentor',
+        desc: 'Exceptional guidance and mentorship of project teams.',
+        icon: 'BookOpen',
+        color: 'text-lime-650 bg-lime-50 border-lime-200 dark:text-lime-400 dark:bg-lime-950/20 dark:border-lime-900',
+        bg: 'from-lime-50 to-emerald-50/50 dark:from-lime-950/30 dark:to-lime-950/30',
+        border: 'border-lime-200 dark:border-lime-800'
+    },
+    {
+        type: 'knowledge_contributor',
+        title: 'Knowledge Contributor',
+        desc: 'Contributions to community documentation, wiki, or research.',
+        icon: 'FileText',
+        color: 'text-pink-650 bg-pink-50 border-pink-200 dark:text-pink-400 dark:bg-pink-950/20 dark:border-pink-900',
+        bg: 'from-pink-50 to-rose-50/50 dark:from-pink-950/30 dark:to-pink-950/30',
+        border: 'border-pink-200 dark:border-pink-800'
+    }
+]
+
+const renderBadgeIcon = (iconName: string, className = "h-5 w-5") => {
+    const IconComp = (
+        iconName === 'ShieldCheck' ? ShieldCheck :
+        iconName === 'Users' ? Users :
+        iconName === 'Clock' ? Clock :
+        iconName === 'Shield' ? Shield :
+        iconName === 'CheckCircle' ? CheckCircle :
+        iconName === 'Award' ? Award :
+        iconName === 'Crown' ? Crown :
+        iconName === 'GitBranch' ? GitBranch :
+        iconName === 'Heart' ? Heart :
+        iconName === 'Layers' ? Layers :
+        iconName === 'Compass' ? Compass :
+        iconName === 'Briefcase' ? Briefcase :
+        iconName === 'Code2' ? Code2 :
+        iconName === 'BarChart3' ? BarChart3 :
+        iconName === 'Star' ? Star :
+        iconName === 'ShieldAlert' ? ShieldAlert :
+        iconName === 'BookOpen' ? BookOpen :
+        iconName === 'FileText' ? FileText :
+        Award
+    )
+    return <IconComp className={className} />
 }
 
 export function AdminDashboard() {
@@ -97,6 +283,10 @@ export function AdminDashboard() {
     const [marketplaceHealth, setMarketplaceHealth] = useState<MarketplaceHealthStats | null>(null)
     const [projectSuccess, setProjectSuccess] = useState<ProjectSuccessMetrics | null>(null)
 
+    // Migration states
+    const [migrationLoading, setMigrationLoading] = useState(false)
+    const [migrationResult, setMigrationResult] = useState<MigrationProgress | null>(null)
+
     // Filter states
     const [userSearch, setUserSearch] = useState('')
     const [projectSearch, setProjectSearch] = useState('')
@@ -115,6 +305,281 @@ export function AdminDashboard() {
         message: '',
         type: 'info' as const
     })
+
+    // Badge Assignment States
+    const [selectedUserForBadge, setSelectedUserForBadge] = useState<string>('')
+    const [userDropdownSearch, setUserDropdownSearch] = useState('')
+    const [userSearchOpen, setUserSearchOpen] = useState(false)
+    const [badgeType, setBadgeType] = useState<string>('project_leader')
+    const [selectedBadges, setSelectedBadges] = useState<string[]>([])
+    const [badgeSearch, setBadgeSearch] = useState('')
+    const [grantMode, setGrantMode] = useState<'predefined' | 'custom'>('predefined')
+    const [customBadgeType, setCustomBadgeType] = useState<string>('')
+    const [badgeTitle, setBadgeTitle] = useState<string>('Project Leader')
+    const [badgeDescription, setBadgeDescription] = useState<string>('Demonstrated outstanding project leadership, coordination, and team direction.')
+    const [badgeIcon, setBadgeIcon] = useState<string>('Compass')
+    const [badgeEvidence, setBadgeEvidence] = useState<string>('')
+    const [submittingBadge, setSubmittingBadge] = useState<boolean>(false)
+    const [selectedUserBadges, setSelectedUserBadges] = useState<any[]>([])
+    const [loadingUserBadges, setLoadingUserBadges] = useState<boolean>(false)
+
+    const PREDEFINED_BADGES = [
+        // Trust
+        { type: 'verified_collaborator', title: 'Verified Collaborator', desc: 'Established complete profile setup to build community trust.', icon: 'ShieldCheck' },
+        { type: 'trusted_teammate', title: 'Trusted Teammate', desc: 'Maintained outstanding cooperation ratings across multiple team deliverables.', icon: 'Users' },
+        { type: 'reliable_contributor', title: 'Reliable Contributor', desc: 'Successfully shipped 10+ tasks on or before schedule with high reliability.', icon: 'Clock' },
+        { type: 'proven_professional', title: 'Proven Professional', desc: 'Maintained exceptional quality and reviews across a substantial project history.', icon: 'Shield' },
+        // Delivery
+        { type: 'project_finisher', title: 'Project Finisher', desc: 'Successfully completed project milestones and delivered assigned tasks.', icon: 'CheckCircle' },
+        { type: 'project_veteran', title: 'Project Veteran', desc: 'Successfully completed 5 verified projects on the platform.', icon: 'Award' },
+        { type: 'project_master', title: 'Project Master', desc: 'Successfully completed 10 verified projects with outstanding completion rates.', icon: 'Crown' },
+        { type: 'verified_deliverer', title: 'Verified Deliverer', desc: 'Completed projects with verified team activity levels.', icon: 'GitBranch' },
+        // Collaboration
+        { type: 'team_builder', title: 'Team Builder', desc: 'Exhibited exceptional team coordination and alignment on project deliverables.', icon: 'Users' },
+        { type: 'outstanding_collaborator', title: 'Outstanding Collaborator', desc: 'Consistently praised by teammates for cooperation and communication.', icon: 'Heart' },
+        { type: 'cross_functional_dev', title: 'Cross-Functional Contributor', desc: 'Demonstrated versatile capabilities across multiple project disciplines.', icon: 'Layers' },
+        // Leadership (Admin Granted)
+        { type: 'project_leader', title: 'Project Leader', desc: 'Demonstrated outstanding project leadership, coordination, and team direction.', icon: 'Compass' },
+        { type: 'delivery_manager', title: 'Delivery Manager', desc: 'Consistently delivered milestones and managed timeline goals for product teams.', icon: 'Briefcase' },
+        // Reputation
+        { type: 'top_rated', title: 'Top Rated', desc: 'Maintained an overall peer rating of 4.8+ stars across a large project history.', icon: 'Star' },
+        { type: 'community_trusted', title: 'Community Trusted', desc: 'Achieved legendary reputation with exceptional ratings across 20+ peer evaluations.', icon: 'ShieldAlert' },
+        // Community (Admin Granted)
+        { type: 'verified_mentor', title: 'Verified Mentor', desc: 'Recognized for exceptional guidance and mentorship of project teams.', icon: 'BookOpen' },
+        { type: 'knowledge_contributor', title: 'Knowledge Contributor', desc: 'Outstanding contributions to community documentation, wiki, or research.', icon: 'FileText' }
+    ]
+
+    const filteredUsersForBadge = users.filter(u => {
+        const fullName = `${u.firstName || ''} ${u.lastName || ''} ${u.displayName || ''}`.toLowerCase()
+        const email = (u.email || '').toLowerCase()
+        const query = userDropdownSearch.toLowerCase()
+        return fullName.includes(query) || email.includes(query)
+    })
+
+    const filteredBadges = PREDEFINED_BADGES.filter(b => {
+        const query = badgeSearch.toLowerCase()
+        return b.title.toLowerCase().includes(query) || b.desc.toLowerCase().includes(query) || b.type.toLowerCase().includes(query)
+    })
+
+    const handleBadgeTypeChange = (value: string) => {
+        setBadgeType(value)
+        if (value === 'custom') {
+            setCustomBadgeType('')
+            setBadgeTitle('')
+            setBadgeDescription('')
+            setBadgeIcon('Award')
+        } else {
+            const found = PREDEFINED_BADGES.find(b => b.type === value)
+            if (found) {
+                setBadgeTitle(found.title)
+                setBadgeDescription(found.desc)
+                setBadgeIcon(found.icon)
+            }
+        }
+    }
+
+    const handleGrantBadge = async () => {
+        if (!selectedUserForBadge) {
+            toast({
+                title: 'Error',
+                description: 'Please select a user to award the badge.',
+                variant: 'destructive'
+            })
+            return
+        }
+
+        setSubmittingBadge(true)
+        try {
+            const selectedUser = users.find(u => u.id === selectedUserForBadge)
+            const userName = selectedUser
+                ? (selectedUser.displayName || `${selectedUser.firstName} ${selectedUser.lastName}` || selectedUser.email || '')
+                : 'Unknown User'
+
+            if (grantMode === 'predefined') {
+                if (selectedBadges.length === 0) {
+                    toast({
+                        title: 'Error',
+                        description: 'Please select at least one badge.',
+                        variant: 'destructive'
+                    })
+                    setSubmittingBadge(false)
+                    return
+                }
+
+                // Grant each selected badge in parallel
+                await Promise.all(selectedBadges.map(async (type) => {
+                    const badgeInfo = PREDEFINED_BADGES.find(b => b.type === type)
+                    if (!badgeInfo) return
+
+                    await grantUserBadge(selectedUserForBadge, {
+                        badgeType: type,
+                        title: badgeInfo.title,
+                        description: badgeInfo.desc,
+                        icon: badgeInfo.icon,
+                        evidence: {
+                            assignedByAdmin: true,
+                            assignedAt: new Date().toISOString(),
+                            reason: badgeEvidence.trim() || 'Awarded by Administrator'
+                        }
+                    })
+
+                    await logAdminAction(
+                        'grant_badge',
+                        user!.uid,
+                        user!.displayName || user!.email || '',
+                        'user',
+                        selectedUserForBadge,
+                        userName,
+                        `Granted badge: ${badgeInfo.title} (${type})`
+                    )
+                }))
+
+                toast({
+                    title: 'Badges Granted Successfully',
+                    description: `Successfully awarded ${selectedBadges.length} badges to ${userName}.`,
+                    variant: 'success'
+                })
+                setSelectedBadges([])
+            } else {
+                // Custom badge mode
+                const finalBadgeType = customBadgeType.trim().toLowerCase().replace(/\s+/g, '_')
+                if (!finalBadgeType) {
+                    toast({
+                        title: 'Error',
+                        description: 'Please specify a badge ID/type.',
+                        variant: 'destructive'
+                    })
+                    setSubmittingBadge(false)
+                    return
+                }
+                if (!badgeTitle.trim()) {
+                    toast({
+                        title: 'Error',
+                        description: 'Please enter a badge title.',
+                        variant: 'destructive'
+                    })
+                    setSubmittingBadge(false)
+                    return
+                }
+                if (!badgeDescription.trim()) {
+                    toast({
+                        title: 'Error',
+                        description: 'Please enter a badge description.',
+                        variant: 'destructive'
+                    })
+                    setSubmittingBadge(false)
+                    return
+                }
+
+                await grantUserBadge(selectedUserForBadge, {
+                    badgeType: finalBadgeType,
+                    title: badgeTitle.trim(),
+                    description: badgeDescription.trim(),
+                    icon: badgeIcon,
+                    evidence: {
+                        assignedByAdmin: true,
+                        assignedAt: new Date().toISOString(),
+                        reason: badgeEvidence.trim() || 'Awarded by Administrator'
+                    }
+                })
+
+                await logAdminAction(
+                    'grant_badge',
+                    user!.uid,
+                    user!.displayName || user!.email || '',
+                    'user',
+                    selectedUserForBadge,
+                    userName,
+                    `Granted custom badge: ${badgeTitle.trim()} (${finalBadgeType})`
+                )
+
+                toast({
+                    title: 'Badge Granted Successfully',
+                    description: `Successfully awarded the "${badgeTitle.trim()}" custom badge to ${userName}.`,
+                    variant: 'success'
+                })
+                setCustomBadgeType('')
+                setBadgeTitle('')
+                setBadgeDescription('')
+            }
+
+            setBadgeEvidence('')
+            loadData() // Refresh data/badges lists
+            loadUserBadges(selectedUserForBadge) // Refresh current user's badges list
+        } catch (error) {
+            console.error('Error granting badge:', error)
+            toast({
+                title: 'Operation Failed',
+                description: 'Failed to assign badge(s). Please try again.',
+                variant: 'destructive'
+            })
+        } finally {
+            setSubmittingBadge(false)
+        }
+    }
+
+    const loadUserBadges = async (userId: string) => {
+        if (!userId) {
+            setSelectedUserBadges([])
+            return
+        }
+        setLoadingUserBadges(true)
+        try {
+            const badges = await getUserBadges(userId)
+            badges.sort((a, b) => {
+                const timeA = a.issuedAt?.toDate ? a.issuedAt.toDate().getTime() : new Date(a.issuedAt || 0).getTime()
+                const timeB = b.issuedAt?.toDate ? b.issuedAt.toDate().getTime() : new Date(b.issuedAt || 0).getTime()
+                return timeB - timeA
+            })
+            setSelectedUserBadges(badges)
+        } catch (error) {
+            console.error('Error loading user badges:', error)
+        } finally {
+            setLoadingUserBadges(false)
+        }
+    }
+
+    const handleRemoveBadge = async (badgeId: string, title: string) => {
+        if (!selectedUserForBadge) return
+        
+        const selectedUser = users.find(u => u.id === selectedUserForBadge)
+        const userName = selectedUser
+            ? (selectedUser.displayName || `${selectedUser.firstName} ${selectedUser.lastName}` || selectedUser.email || '')
+            : 'Unknown User'
+
+        try {
+            await removeUserBadge(selectedUserForBadge, badgeId)
+            
+            await logAdminAction(
+                'remove_badge',
+                user!.uid,
+                user!.displayName || user!.email || '',
+                'user',
+                selectedUserForBadge,
+                userName,
+                `Removed badge: ${title} (${badgeId})`
+            )
+
+            toast({
+                title: 'Badge Removed Successfully',
+                description: `Successfully removed the "${title}" badge from ${userName}.`,
+                variant: 'success'
+            })
+            
+            loadUserBadges(selectedUserForBadge)
+        } catch (error) {
+            console.error('Error removing badge:', error)
+            toast({
+                title: 'Operation Failed',
+                description: 'Failed to remove badge. Please try again.',
+                variant: 'destructive'
+            })
+        }
+    }
+
+    useEffect(() => {
+        loadUserBadges(selectedUserForBadge)
+    }, [selectedUserForBadge])
 
     useEffect(() => {
         loadData()
@@ -430,6 +895,42 @@ export function AdminDashboard() {
         }
     }
 
+    // ─── Migration Actions ────────────────────────────────
+    const handleRunMigration = async () => {
+        setMigrationLoading(true)
+        setMigrationResult(null)
+        try {
+            const res = await runSchemaMigration()
+            setMigrationResult(res)
+            toast({
+                title: 'Migration Completed',
+                description: `Successfully migrated ${res.usersUpdated} users and ${res.projectsUpdated} projects.`,
+                variant: 'success'
+            })
+            if (user) {
+                await logAdminAction(
+                    'run_schema_migration',
+                    user.uid,
+                    user.displayName || 'Admin',
+                    'system',
+                    'schema',
+                    'Firestore Schema',
+                    `Migrated ${res.usersUpdated} users and ${res.projectsUpdated} projects.`
+                )
+            }
+            handleRefresh()
+        } catch (error: any) {
+            console.error('Error running migration:', error)
+            toast({
+                title: 'Migration Failed',
+                description: error.message || 'An unexpected error occurred.',
+                variant: 'destructive'
+            })
+        } finally {
+            setMigrationLoading(false)
+        }
+    }
+
     // ─── Filtered data ────────────────────────────────────
     const filteredUsers = users.filter(u =>
         u.email?.toLowerCase().includes(userSearch.toLowerCase()) ||
@@ -607,6 +1108,18 @@ export function AdminDashboard() {
                     >
                         <TrendingUp className="h-4 w-4 mr-2" />
                         Product Analytics
+                    </TabsTrigger>
+
+                    {/* Badges & Reputation */}
+                    <TabsTrigger value="badges">
+                        <Award className="h-4 w-4 mr-2" />
+                        Badges & Reputation
+                    </TabsTrigger>
+
+                    {/* Migrations */}
+                    <TabsTrigger value="migrations">
+                        <ShieldAlert className="h-4 w-4 mr-2" />
+                        Migrations
                     </TabsTrigger>
                 </TabsList>
 
@@ -1690,6 +2203,571 @@ export function AdminDashboard() {
                         )}
                         </>
                     )}
+                </TabsContent>
+
+                {/* ══════════════════════════════════════════
+                    BADGES & REPUTATION TAB
+                ══════════════════════════════════════════ */}
+                <TabsContent value="badges" className="space-y-6">
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <h2 className="text-xl font-bold">Badges & Reputation Management</h2>
+                            <p className="text-muted-foreground text-sm">Assign badges, view reputational criteria, and examine visual credentials.</p>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        {/* LEFT COLUMN: ASSIGN BADGES */}
+                        <div className="lg:col-span-1 space-y-6">
+                            <Card className="border border-slate-200 dark:border-slate-800 shadow-md">
+                                <CardHeader>
+                                    <CardTitle className="flex items-center gap-2">
+                                        <Award className="h-5 w-5 text-indigo-500" />
+                                        Grant User Badge
+                                    </CardTitle>
+                                    <CardDescription>Manually award standard, honorary, or custom credentials to members.</CardDescription>
+                                </CardHeader>
+                                <CardContent className="space-y-4">
+                                    {/* User Selector */}
+                                    <div className="space-y-2 relative">
+                                        <Label htmlFor="user-select">Select User</Label>
+                                        <div className="relative">
+                                            <button
+                                                type="button"
+                                                onClick={() => setUserSearchOpen(!userSearchOpen)}
+                                                className="flex h-10 w-full items-center justify-between rounded-md border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 px-3 py-2 text-sm ring-offset-white placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-950 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:ring-offset-slate-950 dark:focus:ring-slate-300 text-left text-slate-900 dark:text-white"
+                                            >
+                                                <span className="truncate">
+                                                    {selectedUserForBadge ? (
+                                                        (() => {
+                                                            const u = users.find(usr => usr.id === selectedUserForBadge)
+                                                            return u ? `${u.displayName || `${u.firstName || ''} ${u.lastName || ''}`} (${u.email || u.id.slice(0, 8)})` : 'Select a user...'
+                                                        })()
+                                                    ) : (
+                                                        'Select a user...'
+                                                    )}
+                                                </span>
+                                                <ChevronDown className="h-4 w-4 opacity-50 shrink-0" />
+                                            </button>
+
+                                            {userSearchOpen && (
+                                                <>
+                                                    <div 
+                                                        className="fixed inset-0 z-40" 
+                                                        onClick={() => {
+                                                            setUserSearchOpen(false)
+                                                            setUserDropdownSearch('')
+                                                        }} 
+                                                    />
+                                                    <div className="absolute z-50 mt-1 max-h-60 w-full overflow-hidden rounded-md border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 text-slate-950 dark:text-slate-50 shadow-md animate-in fade-in-0 zoom-in-95">
+                                                        <div className="flex items-center border-b border-slate-200 dark:border-slate-800 px-3 py-2">
+                                                            <Search className="mr-2 h-4 w-4 shrink-0 opacity-50 text-slate-500" />
+                                                            <input
+                                                                type="text"
+                                                                placeholder="Search user by name or email..."
+                                                                value={userDropdownSearch}
+                                                                onChange={(e) => setUserDropdownSearch(e.target.value)}
+                                                                className="flex h-8 w-full rounded-md bg-transparent py-2 text-sm outline-none placeholder:text-slate-500 disabled:cursor-not-allowed disabled:opacity-50 text-slate-900 dark:text-white"
+                                                                autoFocus
+                                                            />
+                                                        </div>
+                                                        <ScrollArea className="h-[180px]">
+                                                            <div className="p-1">
+                                                                {filteredUsersForBadge.length === 0 ? (
+                                                                    <div className="py-6 text-center text-sm text-slate-500">
+                                                                        No users found.
+                                                                    </div>
+                                                                ) : (
+                                                                    filteredUsersForBadge.map((u) => (
+                                                                        <button
+                                                                            key={u.id}
+                                                                            type="button"
+                                                                            onClick={() => {
+                                                                                setSelectedUserForBadge(u.id)
+                                                                                setUserSearchOpen(false)
+                                                                                setUserDropdownSearch('')
+                                                                            }}
+                                                                            className={`flex w-full items-center justify-between rounded-sm px-2 py-1.5 text-sm outline-none transition-colors hover:bg-slate-100 dark:hover:bg-slate-900 cursor-pointer ${selectedUserForBadge === u.id ? 'bg-slate-100 dark:bg-slate-900 font-medium' : ''}`}
+                                                                        >
+                                                                            <div className="flex flex-col text-left min-w-0">
+                                                                                <span className="font-medium truncate text-slate-900 dark:text-white">{u.displayName || `${u.firstName || ''} ${u.lastName || ''}`}</span>
+                                                                                <span className="text-xs text-slate-500 dark:text-slate-400 truncate">{u.email}</span>
+                                                                            </div>
+                                                                            {selectedUserForBadge === u.id && (
+                                                                                <CheckCircle className="h-4 w-4 text-indigo-500 shrink-0 ml-2" />
+                                                                            )}
+                                                                        </button>
+                                                                    ))
+                                                                )}
+                                                            </div>
+                                                        </ScrollArea>
+                                                    </div>
+                                                </>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {selectedUserForBadge && (
+                                        <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                                            <Label className="text-xs font-semibold text-slate-500">Current Badges ({selectedUserBadges.length})</Label>
+                                            {loadingUserBadges ? (
+                                                <div className="flex items-center gap-2 text-xs text-slate-500 py-1">
+                                                    <RefreshCw className="h-3 w-3 animate-spin text-indigo-500" />
+                                                    <span>Loading credentials...</span>
+                                                </div>
+                                            ) : selectedUserBadges.length === 0 ? (
+                                                <p className="text-xs text-slate-400 italic py-1">No badges awarded yet.</p>
+                                            ) : (
+                                                <div className="grid grid-cols-1 gap-1.5 max-h-[160px] overflow-y-auto pr-1">
+                                                    {selectedUserBadges.map((ub) => (
+                                                        <div 
+                                                            key={ub.id} 
+                                                            className="flex items-center justify-between p-2 rounded-lg border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/40 text-xs"
+                                                        >
+                                                            <div className="flex items-center gap-2 min-w-0">
+                                                                <div className="flex-shrink-0 h-6 w-6 flex items-center justify-center rounded bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-850 overflow-hidden">
+                                                                    {BADGE_IMAGES[ub.badgeType] ? (
+                                                                        <img
+                                                                            src={BADGE_IMAGES[ub.badgeType]}
+                                                                            alt={ub.title}
+                                                                            className="h-6 w-6 object-contain"
+                                                                            draggable={false}
+                                                                        />
+                                                                    ) : (
+                                                                        <Award className="h-3.5 w-3.5 text-slate-400 dark:text-slate-500" />
+                                                                    )}
+                                                                </div>
+                                                                <div className="flex flex-col min-w-0">
+                                                                    <span className="font-bold truncate text-slate-800 dark:text-slate-200">{ub.title}</span>
+                                                                    {ub.evidence?.reason && (
+                                                                        <span className="text-[9px] text-slate-405 dark:text-slate-500 truncate">{ub.evidence.reason}</span>
+                                                                    )}
+                                                                </div>
+                                                            </div>
+                                                            <Button
+                                                                variant="ghost"
+                                                                size="icon"
+                                                                type="button"
+                                                                className="h-6 w-6 text-red-500 hover:text-red-750 hover:bg-red-50 dark:hover:bg-red-950/30 shrink-0"
+                                                                onClick={() => handleRemoveBadge(ub.id, ub.title)}
+                                                            >
+                                                                <Trash2 className="h-3.5 w-3.5" />
+                                                            </Button>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {/* Tabs Selector for Badge Type */}
+                                    <Tabs value={grantMode} onValueChange={(val) => setGrantMode(val as 'predefined' | 'custom')} className="w-full">
+                                        <TabsList className="grid w-full grid-cols-2 mb-4 bg-slate-100 dark:bg-slate-900">
+                                            <TabsTrigger value="predefined">Predefined Badges</TabsTrigger>
+                                            <TabsTrigger value="custom">Custom Badge</TabsTrigger>
+                                        </TabsList>
+                                        
+                                        <TabsContent value="predefined" className="space-y-4 mt-0">
+                                            {/* Search and Checkable Badge List */}
+                                            <div className="space-y-2">
+                                                <Label>Select Predefined Badges (Select multiple)</Label>
+                                                <div className="flex items-center gap-2 border border-slate-200 dark:border-slate-800 rounded-md px-3 py-2 bg-white dark:bg-slate-950">
+                                                    <Search className="h-4 w-4 opacity-50 shrink-0 text-slate-500" />
+                                                    <input
+                                                        type="text"
+                                                        placeholder="Search badges by title or description..."
+                                                        value={badgeSearch}
+                                                        onChange={(e) => setBadgeSearch(e.target.value)}
+                                                        className="flex h-6 w-full rounded-md bg-transparent text-sm outline-none placeholder:text-slate-500 text-slate-900 dark:text-white"
+                                                    />
+                                                    {badgeSearch && (
+                                                        <button 
+                                                            type="button" 
+                                                            onClick={() => setBadgeSearch('')}
+                                                            className="text-slate-400 hover:text-slate-200"
+                                                        >
+                                                            <XCircle className="h-4 w-4" />
+                                                        </button>
+                                                    )}
+                                                </div>
+                                                
+                                                <ScrollArea className="h-[240px] border border-slate-200 dark:border-slate-800 rounded-lg p-2 bg-slate-50 dark:bg-slate-950/40">
+                                                    <div className="space-y-1">
+                                                        {filteredBadges.length === 0 ? (
+                                                            <div className="py-8 text-center text-sm text-slate-500">
+                                                                No badges match search criteria.
+                                                            </div>
+                                                        ) : (
+                                                            filteredBadges.map((b) => {
+                                                                const isChecked = selectedBadges.includes(b.type)
+                                                                return (
+                                                                    <label
+                                                                        key={b.type}
+                                                                        className={`flex items-start gap-3 p-2 rounded-lg border transition-all cursor-pointer select-none ${isChecked ? 'bg-indigo-50/50 dark:bg-indigo-950/20 border-indigo-200 dark:border-indigo-800/80' : 'bg-transparent border-transparent hover:bg-slate-100 dark:hover:bg-slate-900'}`}
+                                                                    >
+                                                                        <input
+                                                                            type="checkbox"
+                                                                            checked={isChecked}
+                                                                            onChange={() => {
+                                                                                if (isChecked) {
+                                                                                    setSelectedBadges(selectedBadges.filter(t => t !== b.type))
+                                                                                } else {
+                                                                                    setSelectedBadges([...selectedBadges, b.type])
+                                                                                }
+                                                                            }}
+                                                                            className="mt-1 h-4 w-4 shrink-0 rounded border-slate-300 dark:border-slate-700 text-indigo-650 focus:ring-indigo-500 dark:bg-slate-950 dark:ring-offset-slate-950"
+                                                                        />
+                                                                        <div className="flex-shrink-0 h-8 w-8 flex items-center justify-center rounded bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 overflow-hidden">
+                                                                            {BADGE_IMAGES[b.type] ? (
+                                                                                <img
+                                                                                    src={BADGE_IMAGES[b.type]}
+                                                                                    alt={b.title}
+                                                                                    className="h-8 w-8 object-contain"
+                                                                                    draggable={false}
+                                                                                />
+                                                                            ) : (
+                                                                                <Award className="h-4 w-4 text-slate-400 dark:text-slate-500" />
+                                                                            )}
+                                                                        </div>
+                                                                        <div className="space-y-0.5 flex-1 min-w-0">
+                                                                            <span className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5 text-left">
+                                                                                {b.title}
+                                                                            </span>
+                                                                            <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-snug text-left">
+                                                                                {b.desc}
+                                                                            </p>
+                                                                        </div>
+                                                                    </label>
+                                                                )
+                                                            })
+                                                        )}
+                                                    </div>
+                                                </ScrollArea>
+                                                
+                                                {selectedBadges.length > 0 && (
+                                                    <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                                                        <span className="text-[10px] font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Selected ({selectedBadges.length}):</span>
+                                                        {selectedBadges.map((type) => {
+                                                            const b = PREDEFINED_BADGES.find(x => x.type === type)
+                                                            return (
+                                                                <Badge 
+                                                                    key={type} 
+                                                                    variant="secondary" 
+                                                                    className="flex items-center gap-1 pl-2 pr-1 py-0.5 bg-indigo-50 dark:bg-indigo-950/40 text-indigo-700 dark:text-indigo-400 border border-indigo-105 dark:border-indigo-900/50"
+                                                                >
+                                                                    <span className="text-[10px] font-medium">{b?.title || type}</span>
+                                                                    <button
+                                                                        type="button"
+                                                                        onClick={() => setSelectedBadges(selectedBadges.filter(t => t !== type))}
+                                                                        className="rounded-full hover:bg-indigo-100 dark:hover:bg-indigo-900/80 p-0.5 focus:outline-none"
+                                                                    >
+                                                                        <XCircle className="h-3 w-3" />
+                                                                    </button>
+                                                                </Badge>
+                                                            )
+                                                        })}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        </TabsContent>
+                                        
+                                        <TabsContent value="custom" className="space-y-4 mt-0">
+                                            {/* Custom Badge Form */}
+                                            <div className="space-y-4 bg-slate-50/50 dark:bg-slate-900/10 p-3 rounded-lg border border-slate-200 dark:border-slate-800">
+                                                <div className="space-y-1.5">
+                                                    <Label htmlFor="custom-badge-id">Custom Badge ID (unique)</Label>
+                                                    <Input
+                                                        id="custom-badge-id"
+                                                        placeholder="e.g. hackathon_winner"
+                                                        value={customBadgeType}
+                                                        onChange={(e) => setCustomBadgeType(e.target.value)}
+                                                    />
+                                                </div>
+                                                <div className="space-y-1.5">
+                                                    <Label htmlFor="custom-badge-icon">Icon</Label>
+                                                    <Select value={badgeIcon} onValueChange={setBadgeIcon}>
+                                                        <SelectTrigger id="custom-badge-icon">
+                                                            <SelectValue />
+                                                        </SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="Award">Award (Ribbon)</SelectItem>
+                                                            <SelectItem value="Crown">Crown</SelectItem>
+                                                            <SelectItem value="Heart">Heart</SelectItem>
+                                                            <SelectItem value="Code2">Code Bracket</SelectItem>
+                                                            <SelectItem value="Compass">Compass (Navigation)</SelectItem>
+                                                            <SelectItem value="Zap">Lightning Zap</SelectItem>
+                                                            <SelectItem value="Users">Users (Team)</SelectItem>
+                                                            <SelectItem value="CheckCircle">Checkmark Circle</SelectItem>
+                                                            <SelectItem value="ShieldAlert">Shield Warning</SelectItem>
+                                                            <SelectItem value="Shield">Shield</SelectItem>
+                                                        </SelectContent>
+                                                    </Select>
+                                                </div>
+                                                <div className="space-y-2">
+                                                    <Label htmlFor="badge-title">Badge Title</Label>
+                                                    <Input
+                                                        id="badge-title"
+                                                        placeholder="e.g. Expert Mentor"
+                                                        value={badgeTitle}
+                                                        onChange={(e) => setBadgeTitle(e.target.value)}
+                                                    />
+                                                </div>
+                                                <div className="space-y-2">
+                                                    <Label htmlFor="badge-desc">Badge Description</Label>
+                                                    <Textarea
+                                                        id="badge-desc"
+                                                        placeholder="Briefly explain what criteria is represented by this badge."
+                                                        value={badgeDescription}
+                                                        onChange={(e) => setBadgeDescription(e.target.value)}
+                                                        className="h-20"
+                                                    />
+                                                </div>
+                                            </div>
+                                        </TabsContent>
+                                    </Tabs>
+
+                                    <div className="space-y-2">
+                                        <Label htmlFor="badge-evidence">Note / Evidence (optional)</Label>
+                                        <Textarea
+                                            id="badge-evidence"
+                                            placeholder="e.g. Awarded for mentoring 5 teams in Q1 2026."
+                                            value={badgeEvidence}
+                                            onChange={(e) => setBadgeEvidence(e.target.value)}
+                                            className="h-20"
+                                        />
+                                    </div>
+                                </CardContent>
+                                <CardFooter className="pt-2">
+                                    <Button
+                                        className="w-full bg-indigo-650 hover:bg-indigo-700 text-white"
+                                        disabled={submittingBadge}
+                                        onClick={handleGrantBadge}
+                                    >
+                                        {submittingBadge ? 'Awarding...' : 'Grant Badge'}
+                                    </Button>
+                                </CardFooter>
+                            </Card>
+                        </div>
+
+                        {/* RIGHT COLUMNS: USER MANUAL & SHOWCASE */}
+                        <div className="lg:col-span-2 space-y-6">
+                            {/* USER MANUAL & WIKI */}
+                            <Card className="border border-slate-200 dark:border-slate-800 shadow-md">
+                                <CardHeader className="pb-3">
+                                    <CardTitle className="flex items-center gap-2 text-md">
+                                        <BookOpen className="h-5 w-5 text-indigo-500" />
+                                        Platform Trust & Reputation System Wiki
+                                    </CardTitle>
+                                    <CardDescription>
+                                        A comprehensive operations guide to peer scoring, automated mathematical checks, and anti-cheating mechanisms.
+                                    </CardDescription>
+                                </CardHeader>
+                                <CardContent className="space-y-4 text-sm max-h-[350px] overflow-y-auto pr-2">
+                                    <div>
+                                        <h4 className="font-semibold text-slate-800 dark:text-slate-200 mb-1">1. Multidimensional Reputation Metric Architecture</h4>
+                                        <p className="text-muted-foreground text-xs leading-relaxed">
+                                            Rather than calculating a singular aggregated score, user profiles expose a multidimensional grid of four metrics, evaluated out of 100:
+                                        </p>
+                                        <ul className="list-disc pl-5 mt-1 text-xs text-muted-foreground space-y-1">
+                                            <li><strong>Verified Collaborator</strong>: Setup profile photo, bio, and at least 3 custom skills.</li>
+                                            <li><strong>Trusted Teammate</strong>: 3+ reviews with cooperation ratings of 4.5+ stars (85%+ score).</li>
+                                            <li><strong>Reliable Contributor</strong>: Completed at least 10 tasks on or before deadline + reliability rating {'>='}85%.</li>
+                                            <li><strong>Verified Deliverer</strong>: Completed projects with activity-verified team activity level.</li>
+                                        </ul>
+                                    </div>
+
+                                    <div>
+                                        <h4 className="font-semibold text-slate-800 dark:text-slate-200 mb-1">2. Bayesian Mathematical Stabilization</h4>
+                                        <p className="text-muted-foreground text-xs leading-relaxed">
+                                            To protect against outlier volatility, all incoming raw feedback points undergo Bayesian shrinkage math. New users without sufficient history are automatically modeled with a 4.0 network mean prior, ensuring fairness and stability until statistically significant review volumes are reached.
+                                        </p>
+                                    </div>
+
+                                    <div>
+                                        <h4 className="font-semibold text-slate-800 dark:text-slate-200 mb-1">3. Automated Reputation Credentials</h4>
+                                        <p className="text-muted-foreground text-xs leading-relaxed">
+                                            The system engine programmatically awards immutable badges (e.g. Proven Professional, Project Master) upon verification of project delivery milestones and verified team activity, functioning as universally recognized credentials of user trustworthiness.
+                                        </p>
+                                    </div>
+
+                                    <div>
+                                        <h4 className="font-semibold text-slate-800 dark:text-slate-200 mb-1">4. Anti-Gaming Mechanisms</h4>
+                                        <p className="text-muted-foreground text-xs leading-relaxed">
+                                            Reciprocal loops are managed by **Collusion Graph Analysis**—repeated reviews between the same members decay review influence coefficients. Sybil validation checks omit ratings submitted by unverified accounts to protect platform integrity.
+                                        </p>
+                                    </div>
+                                </CardContent>
+                            </Card>
+
+                            {/* BADGES DESIGN SHOWCASE */}
+                            <Card className="border border-slate-200 dark:border-slate-800 shadow-md">
+                                <CardHeader className="pb-3">
+                                    <CardTitle className="text-md">Badges Showcase & Design Preview</CardTitle>
+                                    <CardDescription>Visual design preview of standard automatic credentials and honorary admin badges.</CardDescription>
+                                </CardHeader>
+                                <CardContent>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                        {SHOWCASE_BADGES.map((b) => (
+                                            <div
+                                                key={b.type}
+                                                className={`flex items-center gap-3 p-3 rounded-xl border bg-gradient-to-br ${b.bg} ${b.border}`}
+                                            >
+                                                {/* Badge SVG image — fixed 48×48 */}
+                                                <div className="flex-shrink-0 h-12 w-12 flex items-center justify-center">
+                                                    {BADGE_IMAGES[b.type] ? (
+                                                        <img
+                                                            src={BADGE_IMAGES[b.type]}
+                                                            alt={b.title}
+                                                            className="h-12 w-12 object-contain"
+                                                            draggable={false}
+                                                        />
+                                                    ) : (
+                                                        <div className={`h-12 w-12 rounded-lg border flex items-center justify-center ${b.color}`}>
+                                                            {renderBadgeIcon(b.icon, "h-6 w-6")}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                                <div className="space-y-0.5 flex-1 min-w-0">
+                                                    <h4 className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1">
+                                                        <span className="truncate">{b.title}</span>
+                                                        {b.type.startsWith('verified_') || b.type === 'trusted_teammate' || b.type === 'reliable_contributor' || b.type === 'project_finisher' || b.type === 'project_veteran' || b.type === 'project_master' || b.type === 'verified_deliverer' || b.type === 'outstanding_collaborator' || b.type === 'top_rated' || b.type === 'community_trusted' ? (
+                                                            <span className="shrink-0 text-[8px] bg-indigo-100 text-indigo-700 dark:bg-indigo-950/40 dark:text-indigo-400 px-1.5 py-0.5 rounded font-normal uppercase tracking-wider">Auto</span>
+                                                        ) : (
+                                                            <span className="shrink-0 text-[8px] bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:text-rose-400 px-1.5 py-0.5 rounded font-normal uppercase tracking-wider">Admin</span>
+                                                        )}
+                                                    </h4>
+                                                    <p className="text-[10px] text-slate-500 dark:text-slate-400 leading-snug">
+                                                        {b.desc}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        </div>
+                    </div>
+                </TabsContent>
+
+                {/* ══════════════════════════════════════════
+                    MIGRATIONS TAB
+                ══════════════════════════════════════════ */}
+                <TabsContent value="migrations" className="space-y-6">
+                    <div className="flex items-center justify-between">
+                        <div>
+                            <h2 className="text-xl font-bold">System Schema Migrations</h2>
+                            <p className="text-muted-foreground text-sm">Retroactively populate unique identifiers and privacy levels for Phase 6.</p>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                        {/* Control Card */}
+                        <div className="lg:col-span-1 space-y-6">
+                            <Card className="border border-slate-200 dark:border-slate-800 shadow-md">
+                                <CardHeader>
+                                    <CardTitle className="flex items-center gap-2">
+                                        <ShieldAlert className="h-5 w-5 text-indigo-500" />
+                                        Migration Runner
+                                    </CardTitle>
+                                    <CardDescription>
+                                        Inspect and update users and projects in Firestore to comply with current data schema constraints.
+                                    </CardDescription>
+                                </CardHeader>
+                                <CardContent className="space-y-4 text-sm">
+                                    <div className="space-y-2 p-3 bg-indigo-50/55 dark:bg-indigo-950/20 border border-indigo-100 dark:border-indigo-900/40 rounded-xl">
+                                        <h4 className="font-semibold text-indigo-900 dark:text-indigo-450 flex items-center gap-2">
+                                            <Info className="h-4 w-4" />
+                                            Scope of Changes
+                                        </h4>
+                                        <ul className="list-disc pl-4 text-xs text-slate-650 dark:text-slate-400 space-y-1 mt-1">
+                                            <li>Generates unique fallback usernames for users missing `username`.</li>
+                                            <li>Populates `profileVisibility: 'public'` for users missing visibility settings.</li>
+                                            <li>Generates unique URL-safe slugs for projects missing `slug`.</li>
+                                            <li>Populates `projectVisibility: 'public'` for projects missing visibility settings.</li>
+                                        </ul>
+                                    </div>
+                                    
+                                    <div className="text-xs text-muted-foreground bg-amber-50/50 dark:bg-amber-950/20 border border-amber-100 dark:border-amber-900/40 p-3 rounded-xl">
+                                        <p className="font-medium text-amber-800 dark:text-amber-400 flex items-center gap-1.5 mb-1">
+                                            <AlertTriangle className="h-3.5 w-3.5" />
+                                            Precautionary Warning
+                                        </p>
+                                        This operation involves write-intensive batched operations to Firestore. Do not close or refresh the window while the migration is active.
+                                    </div>
+                                </CardContent>
+                                <CardFooter>
+                                    <Button 
+                                        className="w-full bg-indigo-650 hover:bg-indigo-750 text-white font-medium"
+                                        onClick={handleRunMigration}
+                                        disabled={migrationLoading}
+                                    >
+                                        {migrationLoading ? (
+                                            <>
+                                                <RefreshCw className="h-4 w-4 mr-2 animate-spin" />
+                                                Migrating Database...
+                                            </>
+                                        ) : (
+                                            <>
+                                                <Zap className="h-4 w-4 mr-2" />
+                                                Run Schema Migration
+                                            </>
+                                        )}
+                                    </Button>
+                                </CardFooter>
+                            </Card>
+                        </div>
+
+                        {/* Results / Status Card */}
+                        <div className="lg:col-span-2 space-y-6">
+                            <Card className="border border-slate-200 dark:border-slate-800 shadow-md">
+                                <CardHeader>
+                                    <CardTitle>Migration Summary</CardTitle>
+                                    <CardDescription>
+                                        Detailed breakdown of the most recent migration run in this session.
+                                    </CardDescription>
+                                </CardHeader>
+                                <CardContent>
+                                    {migrationResult ? (
+                                        <div className="space-y-6">
+                                            <div className="grid grid-cols-2 gap-4">
+                                                <div className="p-4 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/20">
+                                                    <span className="text-xs text-muted-foreground block mb-1">Users Checked</span>
+                                                    <span className="text-2xl font-bold">{migrationResult.usersChecked}</span>
+                                                </div>
+                                                <div className="p-4 rounded-xl border border-indigo-100 dark:border-indigo-900/40 bg-indigo-50/20 dark:bg-indigo-950/10">
+                                                    <span className="text-xs text-indigo-650 dark:text-indigo-400 block mb-1">Users Updated</span>
+                                                    <span className="text-2xl font-bold text-indigo-600 dark:text-indigo-400">{migrationResult.usersUpdated}</span>
+                                                </div>
+                                                <div className="p-4 rounded-xl border border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/20">
+                                                    <span className="text-xs text-muted-foreground block mb-1">Projects Checked</span>
+                                                    <span className="text-2xl font-bold">{migrationResult.projectsChecked}</span>
+                                                </div>
+                                                <div className="p-4 rounded-xl border border-emerald-100 dark:border-emerald-900/40 bg-emerald-50/20 dark:bg-emerald-950/10">
+                                                    <span className="text-xs text-emerald-650 dark:text-emerald-450 block mb-1">Projects Updated</span>
+                                                    <span className="text-2xl font-bold text-emerald-600 dark:text-emerald-450">{migrationResult.projectsUpdated}</span>
+                                                </div>
+                                            </div>
+
+                                            <div className="flex items-center gap-2 p-3 bg-green-50 dark:bg-green-950/25 border border-green-200 dark:border-green-900/50 rounded-xl text-green-700 dark:text-green-400 text-xs">
+                                                <CheckCircle className="h-4 w-4 shrink-0" />
+                                                <span>
+                                                    Migration finished successfully. All existing accounts and projects have valid usernames, slugs, and visibility keys.
+                                                </span>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+                                            <ShieldAlert className="h-12 w-12 opacity-20 mb-3" />
+                                            <p className="font-medium">No migration run history</p>
+                                            <p className="text-xs text-center max-w-xs mt-1">
+                                                Trigger a migration to inspect statistics and repair database fields.
+                                            </p>
+                                        </div>
+                                    )}
+                                </CardContent>
+                            </Card>
+                        </div>
+                    </div>
                 </TabsContent>
             </Tabs>
 

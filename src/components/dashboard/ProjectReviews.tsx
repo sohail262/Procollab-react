@@ -8,9 +8,10 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Star, Loader2 } from 'lucide-react'
 import { db } from '@/lib/firebase'
-import { doc, setDoc, serverTimestamp } from 'firebase/firestore'
+import { doc, setDoc, getDoc, getDocs, collection, serverTimestamp } from 'firebase/firestore'
 import { useAuth } from '@/hooks/use-auth'
 import { useToast } from '@/hooks/use-toast'
+import { revealProjectReviews } from '@/lib/reputationEngine'
 
 interface ProjectReviewsProps {
     open: boolean
@@ -48,9 +49,21 @@ export function ProjectReviews({
         setSubmitting(true)
 
         try {
+            // Fetch project verification details and member list
+            const projectRef = doc(db, 'projects', projectId)
+            const projectSnap = await getDoc(projectRef)
+            const projectData = projectSnap.exists() ? projectSnap.data() : null
+            const isVerified = projectData?.activityVerified || false
+            const memberIds: string[] = Array.from(new Set([
+                ...(projectData?.metrics?.memberIds || []),
+                ...(projectData?.members || []),
+                ...(projectData?.createdBy ? [projectData.createdBy] : [])
+            ])).filter(Boolean)
+
             const reviewId = `${user.uid}_${projectId}`
             const reviewRef = doc(db, 'users', targetUserId, 'reviews', reviewId)
 
+            // 1. Save the review in "pending" status
             await setDoc(reviewRef, {
                 projectId,
                 projectName,
@@ -63,12 +76,34 @@ export function ProjectReviews({
                 skill,
                 comment: comment.trim(),
                 createdAt: serverTimestamp(),
+                status: 'pending',
+                isVerified
             })
 
-            toast({
-                title: 'Review submitted!',
-                description: `Successfully reviewed ${targetUserName}.`,
+            // 2. Mark this reviewer as having completed their review
+            await setDoc(doc(db, 'projects', projectId, 'reviewStates', user.uid), {
+                hasReviewed: true,
+                submittedAt: serverTimestamp()
             })
+
+            // 3. Check if all members have submitted reviews
+            const reviewStatesSnap = await getDocs(collection(db, 'projects', projectId, 'reviewStates'))
+            const reviewersCount = reviewStatesSnap.docs.filter(d => d.data().hasReviewed === true).length
+
+            // If everyone has reviewed, reveal all reviews for the project
+            if (reviewersCount >= memberIds.length && memberIds.length > 0) {
+                await revealProjectReviews(projectId, memberIds)
+                toast({
+                    title: 'Feedback revealed!',
+                    description: 'All peer reviews have been submitted and revealed on profiles.',
+                })
+            } else {
+                toast({
+                    title: 'Review submitted!',
+                    description: `Your feedback for ${targetUserName} is locked and will be revealed when all teammates submit theirs.`,
+                })
+            }
+
             onOpenChange(false)
             setComment('')
             onReviewSubmitted?.()

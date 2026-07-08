@@ -104,8 +104,8 @@ export function GalleryView({ readOnly = false }: GalleryViewProps) {
     }
 
     return (
-        <div className="h-full space-y-4">
-            <div className="flex items-center justify-between">
+        <div className="h-full flex flex-col space-y-4">
+            <div className="flex items-center justify-between flex-shrink-0">
                 <h2 className="text-xl font-semibold tracking-tight">Gallery</h2>
                 {!readOnly && (
                     <Button onClick={() => setIsNewTaskOpen(true)}>
@@ -115,8 +115,7 @@ export function GalleryView({ readOnly = false }: GalleryViewProps) {
                 )}
             </div>
 
-
-            <ScrollArea className="h-[calc(100vh-220px)]">
+            <ScrollArea className="flex-1 min-h-0">
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6 pb-6">
                     {tasks.map((task) => (
                         <Card key={task.id} className="overflow-hidden group hover:shadow-lg transition-all duration-200 border-muted">

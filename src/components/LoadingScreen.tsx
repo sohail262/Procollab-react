@@ -1,81 +1,92 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import Loader from './Loader'
 
-const QUOTES = [
-    // Collaboration
-    { text: "Alone we can do so little; together we can do so much.", author: "Helen Keller" },
-    { text: "If you want to go fast, go alone. If you want to go far, go together.", author: "African Proverb" },
-    { text: "None of us is as smart as all of us.", author: "Ken Blanchard" },
-    { text: "The whole is greater than the sum of its parts.", author: "Aristotle" },
-    { text: "Coming together is a beginning. Keeping together is progress. Working together is success.", author: "Henry Ford" },
-    // Projects
-    { text: "A goal without a plan is just a wish.", author: "Antoine de Saint-Exupéry" },
-    { text: "It always seems impossible until it's done.", author: "Nelson Mandela" },
-    { text: "The best way to predict the future is to create it.", author: "Peter Drucker" },
-    { text: "Great things in business are never done by one person; they're done by a team.", author: "Steve Jobs" },
-    { text: "Build something people want, with people who care.", author: "ProCollab" },
-    // Project management
-    { text: "Plans are nothing; planning is everything.", author: "Dwight D. Eisenhower" },
-    { text: "Project management is the art of creating the illusion that any outcome was the only possible one.", author: "Anonymous" },
-    { text: "A successful project manager turns vision into reality, one milestone at a time.", author: "Anonymous" },
-    { text: "Operations keeps the lights on, strategy provides direction, but project management moves the organization forward.", author: "Joy Gumz" },
-    { text: "The secret of getting ahead is getting started.", author: "Mark Twain" },
-    // Jobs in project management
-    { text: "Your network is your net worth in the world of project management.", author: "Anonymous" },
-    { text: "The best investment you can make is in yourself and the people around you.", author: "Warren Buffett" },
-    { text: "Opportunities don't happen. You create them.", author: "Chris Grosser" },
-    { text: "Choose a job you love, and you will never have to work a day in your life.", author: "Confucius" },
-    { text: "The strength of the team is each individual member. The strength of each member is the team.", author: "Phil Jackson" },
-]
+interface LoadingScreenProps {
+  message?: string
+  /** When true the screen fades out and unmounts. */
+  done?: boolean
+  onExited?: () => void
+}
 
-export function LoadingScreen({ message }: { message?: string }) {
-    const quote = useMemo(() => QUOTES[Math.floor(Math.random() * QUOTES.length)], [])
-    const [progress, setProgress] = useState(5)
-    const [dots, setDots] = useState(0)
+export function LoadingScreen({ done = false, onExited }: LoadingScreenProps) {
+  const [visible, setVisible] = useState(true)
+  const overlayRef = useRef<HTMLDivElement>(null)
 
-    useEffect(() => {
-        const id = setInterval(() => {
-            setProgress(p => p >= 88 ? p : p + Math.max(0.4, (88 - p) * 0.05))
-        }, 120)
-        return () => clearInterval(id)
-    }, [])
+  useEffect(() => {
+    if (!done) return
+    const el = overlayRef.current
+    if (!el) return
 
-    useEffect(() => {
-        const id = setInterval(() => setDots(d => (d + 1) % 4), 500)
-        return () => clearInterval(id)
-    }, [])
+    // Trigger fade-out
+    el.style.opacity = '0'
+    el.style.pointerEvents = 'none'
 
-    return (
-        <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-background px-6">
-            {/* Brand */}
-            <div className="mb-10 flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center">
-                    <span className="font-bold text-white text-sm">P</span>
-                </div>
-                <span className="text-lg font-semibold tracking-tight text-foreground">ProCollab</span>
-            </div>
+    const timer = setTimeout(() => {
+      setVisible(false)
+      onExited?.()
+    }, 500) // matches transition duration
 
-            {/* Quote */}
-            <div className="max-w-md text-center mb-12">
-                <p className="text-sm sm:text-base text-foreground/80 leading-relaxed italic mb-2">
-                    "{quote.text}"
-                </p>
-                <p className="text-xs text-muted-foreground">— {quote.author}</p>
-            </div>
+    return () => clearTimeout(timer)
+  }, [done, onExited])
 
-            {/* Progress bar — thin, clean, blue only */}
-            <div className="w-full max-w-[280px]">
-                <div className="h-0.5 bg-border rounded-full overflow-hidden">
-                    <div
-                        className="h-full bg-blue-600 rounded-full transition-[width] duration-300 ease-out"
-                        style={{ width: `${progress}%` }}
-                    />
-                </div>
-                <p className="mt-4 text-center text-xs text-muted-foreground">
-                    {message || `Loading${'.'.repeat(dots)}`}
-                </p>
-            </div>
+  if (!visible) return null
+
+  return (
+    <div
+      ref={overlayRef}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 9999,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        background: 'hsl(var(--background))',
+        transition: 'opacity 0.5s cubic-bezier(0.4, 0, 0.2, 1)',
+        opacity: 1,
+      }}
+    >
+      {/* Brand mark — matches WelcomeScreen typography */}
+      <div style={{ marginBottom: '2.5rem', display: 'flex', alignItems: 'center', gap: '0.625rem' }}>
+        <div
+          style={{
+            width: 30,
+            height: 30,
+            borderRadius: 8,
+            background: 'hsl(var(--foreground))',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <span style={{
+            fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif",
+            fontSize: 15,
+            fontWeight: 700,
+            color: 'hsl(var(--background))',
+            lineHeight: 1,
+            marginTop: 1,
+          }}>P</span>
         </div>
-    )
+        <span style={{
+          fontSize: 11,
+          fontWeight: 400,
+          letterSpacing: '0.22em',
+          textTransform: 'uppercase' as const,
+          color: 'hsl(var(--muted-foreground))',
+          fontFamily: "'DM Sans', system-ui, sans-serif",
+        }}>
+          ProCollab
+        </span>
+      </div>
+
+      {/* Speeder animation */}
+      <div style={{ position: 'relative', width: 300, height: 120 }}>
+        <Loader />
+      </div>
+    </div>
+  )
 }
 
 export default LoadingScreen

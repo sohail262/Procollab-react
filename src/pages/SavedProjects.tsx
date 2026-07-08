@@ -122,7 +122,7 @@ export function SavedProjects() {
 
             {loading ? (
                 <div className="text-center py-12">
-                    <div className="animate-spin inline-block w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full mb-4"></div>
+                    <div className="animate-spin inline-block w-8 h-8 border-4 border-primary border-t-transparent rounded-full mb-4"></div>
                     <p className="text-gray-500 text-sm">Loading saved projects...</p>
                 </div>
             ) : projects.length === 0 ? (

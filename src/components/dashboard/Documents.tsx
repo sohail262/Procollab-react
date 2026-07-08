@@ -286,7 +286,7 @@ export function Documents({ readOnly = false }: DocumentsProps) {
 
     // ── Title change ─────────────────────────────────────────────────────────
     // Debounce title updates to avoid hammering Firestore
-    const titleDebounce = useRef<ReturnType<typeof setTimeout>>()
+    const titleDebounce = useRef<any>(null)
 
     const handleTitleChange = (title: string) => {
         if (!selectedDoc) return
@@ -354,7 +354,7 @@ export function Documents({ readOnly = false }: DocumentsProps) {
     // ── Loading skeleton ─────────────────────────────────────────────────────
     if (loading) {
         return (
-            <div className="h-[calc(100vh-12rem)] grid grid-cols-12 gap-6">
+            <div className="h-full grid grid-cols-12 gap-6">
                 <div className="col-span-3 space-y-2 p-4">
                     {[1, 2, 3, 4].map(i => <Skeleton key={i} className="h-8 w-full" />)}
                 </div>
@@ -366,7 +366,7 @@ export function Documents({ readOnly = false }: DocumentsProps) {
     }
 
     return (
-        <div className="h-[calc(100vh-12rem)] grid grid-cols-12 gap-6">
+        <div className="h-full grid grid-cols-12 gap-6">
 
             {/* ── Sidebar ── */}
             <Card className="col-span-3 h-full flex flex-col">

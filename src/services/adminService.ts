@@ -13,6 +13,7 @@ import {
     writeBatch,
     Timestamp,
     deleteDoc,
+    setDoc,
 } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
 
@@ -316,9 +317,6 @@ export async function notifyAllUsers(
 // Admin Audit Logging
 // ─────────────────────────────────────────────────────────
 
-/**
- * Log an admin action for audit trail
- */
 export async function logAdminAction(
     action: string,
     adminId: string,
@@ -335,7 +333,7 @@ export async function logAdminAction(
         targetType,
         targetId,
         targetName,
-        details,
+        ...(details ? { details } : {}),
         timestamp: serverTimestamp(),
     })
 }
@@ -726,4 +724,52 @@ export async function backfillDailyStats(days: number = 30): Promise<void> {
             console.error(`Failed to backfill stats for ${date.toISOString().split('T')[0]}:`, error)
         }
     }
+}
+
+/**
+ * Grant a badge to a user (admin action)
+ */
+export async function grantUserBadge(
+    userId: string,
+    badgeData: {
+        badgeType: string
+        title: string
+        description: string
+        icon: string
+        evidence?: any
+    }
+): Promise<void> {
+    const badgesCollectionRef = collection(db, 'users', userId, 'badges')
+    const badgeId = `${badgeData.badgeType}_${Date.now()}`
+    const badgeDocRef = doc(badgesCollectionRef, badgeId)
+    await setDoc(badgeDocRef, {
+        badgeType: badgeData.badgeType,
+        title: badgeData.title,
+        description: badgeData.description,
+        icon: badgeData.icon,
+        issuedAt: serverTimestamp(),
+        evidence: badgeData.evidence || { assignedByAdmin: true }
+    })
+}
+
+/**
+ * Load all badges for a specific user
+ */
+export async function getUserBadges(userId: string): Promise<any[]> {
+    try {
+        const badgesRef = collection(db, 'users', userId, 'badges')
+        const snap = await getDocs(badgesRef)
+        return snap.docs.map(d => ({ id: d.id, ...d.data() }))
+    } catch (error) {
+        console.error('Error loading user badges:', error)
+        return []
+    }
+}
+
+/**
+ * Remove a badge from a user (admin action)
+ */
+export async function removeUserBadge(userId: string, badgeId: string): Promise<void> {
+    const badgeDocRef = doc(db, 'users', userId, 'badges', badgeId)
+    await deleteDoc(badgeDocRef)
 }

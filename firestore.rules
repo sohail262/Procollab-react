@@ -138,7 +138,11 @@ service cloud.firestore {
     match /users/{userId} {
       allow read, list, get: if isSignedIn();
       allow create:          if isValidUser() && isOwner(userId);
-      allow update, write:   if isValidUser() && (isOwner(userId) || isAdmin());
+      allow update:          if isValidUser() && (
+                               isOwner(userId) || 
+                               isAdmin() ||
+                               request.resource.data.diff(resource.data).affectedKeys().hasOnly(['reputation', 'reputationStats'])
+                             );
       allow delete:          if isSignedIn()  && (isOwner(userId) || isAdmin());
 
       match /savedProjects/{projectId} {
@@ -168,7 +172,7 @@ service cloud.firestore {
       }
 
       match /joinedProjects/{projectId} {
-        allow read, list: if isSignedIn() && isOwner(userId);
+        allow read, list: if isSignedIn();
         allow write:      if isSignedIn() && isOwner(userId);
         allow create:     if isSignedIn();
         // Allow project owners to remove members from their joinedProjects
@@ -191,6 +195,18 @@ service cloud.firestore {
         );
       }
 
+      match /sentRequests/{toUserId} {
+        // Only the sender (owner of this sub-collection) can read/write their own sent requests.
+        // Also allow the target user to delete (for cleanup on accept/reject).
+        allow read, list: if isSignedIn() && request.auth.uid == userId;
+        allow create:     if isSignedIn() && request.auth.uid == userId;
+        allow delete:     if isSignedIn() && (
+          request.auth.uid == userId ||
+          request.auth.uid == toUserId
+        );
+        allow update:     if isSignedIn() && request.auth.uid == userId;
+      }
+
       match /connections/{otherUserId} {
         allow read, list, write: if isSignedIn() &&
           request.auth.uid == userId;
@@ -210,10 +226,36 @@ service cloud.firestore {
       }
 
       match /reviews/{reviewId} {
+        allow get: if isSignedIn() && (
+          resource.data.status == 'revealed' ||
+          !('status' in resource.data) ||
+          resource.data.reviewerId == request.auth.uid
+        );
+        allow list: if isSignedIn() && resource.data.status == 'revealed';
+        allow create: if isSignedIn() &&
+                         request.resource.data.reviewerId == request.auth.uid &&
+                         request.auth.uid != userId &&
+                         request.resource.data.status == 'pending' &&
+                         canAccessProject(request.resource.data.projectId) &&
+                         (
+                           getProject(request.resource.data.projectId).createdBy == userId ||
+                           (getProject(request.resource.data.projectId).teamMembers != null &&
+                            userId in getProject(request.resource.data.projectId).teamMembers)
+                         );
+        allow update: if isSignedIn() && (
+                         resource.data.reviewerId == request.auth.uid ||
+                         (
+                           canAccessProject(resource.data.projectId) &&
+                           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']) &&
+                           request.resource.data.status == 'revealed'
+                         )
+                       );
+        allow delete: if isSignedIn() && (resource.data.reviewerId == request.auth.uid || isAdmin());
+      }
+
+      match /badges/{badgeId} {
         allow read, list: if isSignedIn();
-        allow create:     if isSignedIn() && request.resource.data.reviewerId == request.auth.uid;
-        allow update:     if isSignedIn() && resource.data.reviewerId == request.auth.uid;
-        allow delete:     if isSignedIn() && (resource.data.reviewerId == request.auth.uid || isAdmin());
+        allow write:      if isSignedIn();
       }
     }
 
@@ -385,6 +427,12 @@ service cloud.firestore {
       match /whiteboard/{document=**} {
         allow read, list, get: if isValidUser() && canAccessProject(projectId);
         allow write:           if isValidUser() && canAccessProject(projectId);
+      }
+
+      // ── Review States sub-collection ──────────────────────────────────────────
+      match /reviewStates/{reviewerId} {
+        allow read, list, get: if isValidUser() && canAccessProject(projectId);
+        allow write:           if isValidUser() && canAccessProject(projectId) && request.auth.uid == reviewerId;
       }
 
       // ── Members sub-collection ────────────────────────────────────────────────

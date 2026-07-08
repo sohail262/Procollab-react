@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react"
 import type { FormEvent } from "react"
 import { Link, useNavigate, useSearchParams } from "react-router-dom"
+import { Logo } from "@/components/layout/Logo"
 import { useAuth } from "@/contexts/AuthContext"
 import { auth } from "@/lib/firebase"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"

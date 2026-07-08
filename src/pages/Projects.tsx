@@ -7,6 +7,13 @@ import { ApplicationModal } from '@/components/ApplicationModal'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select'
+import {
     Search,
     FolderKanban,
     ChevronLeft,
@@ -247,79 +254,92 @@ export function Projects() {
     return (
         <DashboardLayout>
             {/* Filter Section */}
-            <Card className="mb-5 sm:mb-8">
-                <CardContent className="p-3 sm:p-6">
+            <Card className="glass-card mb-5 sm:mb-8 overflow-hidden rounded-lg">
+                <span className="glass-sheen" style={{ display: 'none' }} />
+                <CardContent className="p-3 sm:p-6 relative z-10">
                     <div className="grid grid-cols-2 gap-2 sm:gap-3">
                         <div>
-                            <label className="block text-xs sm:text-sm font-medium mb-1 sm:mb-2">
+                            <label className="block text-xs sm:text-sm font-medium mb-1 sm:mb-2 text-white/80">
                                 Status
                             </label>
-                            <select
-                                className="w-full px-2 py-1.5 sm:px-3 sm:py-2 text-xs sm:text-sm border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800"
+                            <Select
                                 value={statusFilter}
-                                onChange={e => {
-                                    setStatusFilter(e.target.value)
+                                onValueChange={value => {
+                                    setStatusFilter(value)
                                     setCurrentPage(1)
                                 }}
                             >
-                                <option value="all">All Statuses</option>
-                                <option value="active">Active</option>
-                                <option value="recruiting">Recruiting</option>
-                                <option value="completed">Completed</option>
-                                <option value="on-hold">On Hold</option>
-                            </select>
+                                <SelectTrigger className="w-full text-xs sm:text-sm border-white/10 hover:border-primary/30 bg-white/3 h-8 sm:h-10 rounded-lg transition-all duration-300">
+                                    <SelectValue placeholder="All Statuses" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="all">All Statuses</SelectItem>
+                                    <SelectItem value="active">Active</SelectItem>
+                                    <SelectItem value="recruiting">Recruiting</SelectItem>
+                                    <SelectItem value="completed">Completed</SelectItem>
+                                    <SelectItem value="on-hold">On Hold</SelectItem>
+                                </SelectContent>
+                            </Select>
                         </div>
 
                         <div>
-                            <label className="block text-xs sm:text-sm font-medium mb-1 sm:mb-2">
+                            <label className="block text-xs sm:text-sm font-medium mb-1 sm:mb-2 text-white/80">
                                 Discipline
                             </label>
-                            <select
-                                className="w-full px-2 py-1.5 sm:px-3 sm:py-2 text-xs sm:text-sm border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800"
+                            <Select
                                 value={disciplineFilter}
-                                onChange={e => {
-                                    setDisciplineFilter(e.target.value)
+                                onValueChange={value => {
+                                    setDisciplineFilter(value)
                                     setCurrentPage(1)
                                 }}
                             >
-                                <option value="all">All Disciplines</option>
-                                {DISCIPLINES.slice(1).map((d, i) => (
-                                    <option
-                                        key={i}
-                                        value={d.toLowerCase().replace(/ & /g, '-').replace(/ /g, '-')}
-                                    >
-                                        {d}
-                                    </option>
-                                ))}
-                            </select>
+                                <SelectTrigger className="w-full text-xs sm:text-sm border-white/10 hover:border-primary/30 bg-white/3 h-8 sm:h-10 rounded-lg transition-all duration-300">
+                                    <SelectValue placeholder="All Disciplines" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="all">All Disciplines</SelectItem>
+                                    {DISCIPLINES.slice(1).map((d, i) => (
+                                        <SelectItem
+                                            key={i}
+                                            value={d.toLowerCase().replace(/ & /g, '-').replace(/ /g, '-')}
+                                        >
+                                            {d}
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
                         </div>
 
                         <div>
-                            <label className="block text-xs sm:text-sm font-medium mb-1 sm:mb-2">
+                            <label className="block text-xs sm:text-sm font-medium mb-1 sm:mb-2 text-white/80">
                                 Sort By
                             </label>
-                            <select
-                                className="w-full px-2 py-1.5 sm:px-3 sm:py-2 text-xs sm:text-sm border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800"
+                            <Select
                                 value={sortBy}
-                                onChange={e => setSortBy(e.target.value)}
+                                onValueChange={value => setSortBy(value)}
                             >
-                                <option value="newest">Newest First</option>
-                                <option value="oldest">Oldest First</option>
-                                <option value="popularity">Most Popular</option>
-                                <option value="alphabetical">Alphabetical</option>
-                            </select>
+                                <SelectTrigger className="w-full text-xs sm:text-sm border-white/10 hover:border-primary/30 bg-white/3 h-8 sm:h-10 rounded-lg transition-all duration-300">
+                                    <SelectValue placeholder="Newest First" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="newest">Newest First</SelectItem>
+                                    <SelectItem value="oldest">Oldest First</SelectItem>
+                                    <SelectItem value="popularity">Most Popular</SelectItem>
+                                    <SelectItem value="alphabetical">Alphabetical</SelectItem>
+                                </SelectContent>
+                            </Select>
                         </div>
 
                         <div>
-                            <label className="block text-xs sm:text-sm font-medium mb-1 sm:mb-2">
+                            <label className="block text-xs sm:text-sm font-medium mb-1 sm:mb-2 text-white/80">
                                 Search
                             </label>
                             <div className="relative">
-                                <Search className="absolute left-2 sm:left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 sm:h-4 sm:w-4 text-gray-500" />
+                                <Search className="absolute left-2.5 sm:left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 sm:h-4 sm:w-4 text-white/50" />
                                 <Input
                                     type="text"
                                     placeholder="Search..."
-                                    className="pl-7 sm:pl-10 text-xs sm:text-sm h-8 sm:h-10"
+                                    className="pl-8 sm:pl-10 text-xs sm:text-sm h-8 sm:h-10 rounded-lg bg-white/3 border-white/10 hover:border-primary/30 focus-visible:ring-primary transition-all duration-300"
                                     value={searchQuery}
                                     onChange={e => {
                                         setSearchQuery(e.target.value)
@@ -344,7 +364,7 @@ export function Projects() {
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-6">
                     {loading ? (
                         <div className="col-span-full text-center py-12">
-                            <div className="animate-spin inline-block w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full mb-4" />
+                            <div className="animate-spin inline-block w-8 h-8 border-4 border-primary border-t-transparent rounded-full mb-4" />
                             <p className="text-gray-500">Loading projects...</p>
                         </div>
                     ) : currentProjects.length === 0 ? (

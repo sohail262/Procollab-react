@@ -53,12 +53,13 @@ export function useNotificationPrompt(userId: string | null) {
         localStorage.setItem(STORAGE_KEY, Date.now().toString())
     }
 
-    const handleAccept = async (userId: string): Promise<void> => {
+    const handleAccept = async (userId: string): Promise<boolean> => {
         const success = await requestPermissionAndRegister(userId)
         if (success) {
             localStorage.removeItem(STORAGE_KEY)
             setShowPrompt(false)
         }
+        return success
     }
 
     return { showPrompt, handleDismiss, handleAccept }

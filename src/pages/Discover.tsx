@@ -5,6 +5,13 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select'
 import { useInfiniteScroll, usePagination } from '@/hooks/useInfiniteScroll'
 import { useDebounce } from '@/hooks/useDebounce'
 import {
@@ -50,6 +57,7 @@ import { useToast } from '@/hooks/use-toast'
 import { InviteToProjectDropdown, InviteButton } from '@/components/InviteToProjectDropdown'
 import { sendNotificationWithPush } from '@/services/notificationTrigger'
 import { trackFeatureUsed } from '@/services/analyticsService'
+import { getTagColorClass } from '@/lib/utils'
 
 // ── sessionStorage cache key + TTL ────────────────────────────────────────────
 const SS_USERS_KEY = 'discover_users_page1'
@@ -682,45 +690,49 @@ export function Discover() {
                 {/* Filters: always side-by-side in a 2-col grid */}
                 <div className="grid grid-cols-2 gap-3 mb-6">
                     <div className="relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/50" />
                         <Input
                             type="text"
                             placeholder="Search by name or skill"
-                            className="pl-10 w-full"
+                            className="pl-10 w-full rounded-lg bg-white/3 border-white/10 hover:border-primary/30 focus-visible:ring-primary transition-all duration-300"
                             value={peopleSearch}
                             onChange={e => setPeopleSearch(e.target.value)}
                         />
                     </div>
-                    <select
-                        className="px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-sm w-full"
+                    <Select
                         value={disciplineFilter}
-                        onChange={e => setDisciplineFilter(e.target.value)}
+                        onValueChange={value => setDisciplineFilter(value)}
                     >
-                        {disciplines.map((d, i) => (
-                            <option
-                                key={i}
-                                value={
-                                    i === 0
-                                        ? 'all'
-                                        : d.toLowerCase().replace(/ & /g, '-').replace(/ /g, '-')
-                                }
-                            >
-                                {d}
-                            </option>
-                        ))}
-                    </select>
+                        <SelectTrigger className="w-full text-sm border-white/10 hover:border-primary/30 bg-white/3 h-10 rounded-lg transition-all duration-300">
+                            <SelectValue placeholder="All Disciplines" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {disciplines.map((d, i) => (
+                                <SelectItem
+                                    key={i}
+                                    value={
+                                        i === 0
+                                            ? 'all'
+                                            : d.toLowerCase().replace(/ & /g, '-').replace(/ /g, '-')
+                                    }
+                                >
+                                    {d}
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
                 </div>
 
                 <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
                     {loading ? (
                         <div className="col-span-full text-center py-12">
-                            <div className="animate-spin inline-block w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full mb-4" />
-                            <p className="text-gray-500">Loading collaborators...</p>
+                            <div className="animate-spin inline-block w-8 h-8 border-4 border-primary border-t-transparent rounded-full mb-4" />
+                            <p className="text-white/50">Loading collaborators...</p>
                         </div>
                     ) : filteredPeople.length === 0 ? (
                         <div className="col-span-full text-center py-12">
-                            <Users className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                            <p className="text-gray-500">No collaborators found</p>
+                            <Users className="h-12 w-12 text-white/30 mx-auto mb-4" />
+                            <p className="text-white/50">No collaborators found</p>
                         </div>
                     ) : (
                         filteredPeople.map(person => {
@@ -731,9 +743,11 @@ export function Discover() {
                             return (
                                 <Card
                                     key={person.id}
-                                    className="hover:shadow-lg transition-all duration-300 group"
+                                    className={`glass-card hover:border-white/20 transition-all duration-300 group h-full flex flex-col ${
+                                        inviteOpenForUserId === person.id ? 'relative z-30 shadow-2xl' : 'relative z-10'
+                                    }`}
                                 >
-                                    <CardContent className="p-3 sm:p-5">
+                                    <CardContent className="p-3 sm:p-5 flex flex-col flex-1 h-full">
                                         <div className="flex items-start justify-between mb-3 gap-2">
                                             <div className="flex items-center gap-2 sm:gap-3 min-w-0">
                                                 <img
@@ -742,17 +756,17 @@ export function Discover() {
                                                         `https://api.dicebear.com/7.x/${person.avatarStyle || 'avataaars'}/svg?seed=${encodeURIComponent(person.avatarSeed || person.email || person.id)}`
                                                     }
                                                     alt={`${person.firstName} ${person.lastName}`}
-                                                    className="w-10 h-10 sm:w-12 sm:h-12 rounded-full border border-gray-200 dark:border-gray-700 cursor-pointer hover:border-blue-500 transition-colors shrink-0"
+                                                    className="w-10 h-10 sm:w-12 sm:h-12 rounded-full border border-white/10 cursor-pointer hover:border-primary transition-colors shrink-0"
                                                     onClick={() => navigate(`/profile/${person.id}`)}
                                                 />
                                                 <div className="min-w-0">
                                                     <h3
-                                                        className="font-semibold text-sm sm:text-base text-gray-900 dark:text-white cursor-pointer hover:text-blue-600 transition-colors truncate"
+                                                        className="font-semibold text-sm sm:text-base text-white cursor-pointer hover:text-primary transition-colors truncate"
                                                         onClick={() => navigate(`/profile/${person.id}`)}
                                                     >
                                                         {person.firstName} {person.lastName}
                                                     </h3>
-                                                    <p className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                                                    <p className="text-xs text-white/50 truncate">
                                                         {person.role}
                                                     </p>
                                                 </div>
@@ -764,7 +778,7 @@ export function Discover() {
                                                     <Button
                                                         size="sm"
                                                         variant="outline"
-                                                        className="h-7 px-2 text-xs text-amber-600 border-amber-200 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-800 dark:text-amber-400"
+                                                        className="h-7 px-2 text-xs text-primary border-primary/20 bg-primary/10"
                                                         disabled
                                                     >
                                                         <Check className="h-3 w-3 sm:mr-1" />
@@ -773,7 +787,7 @@ export function Discover() {
                                                 ) : isIncoming ? (
                                                     <Button
                                                         size="sm"
-                                                        className="h-7 px-2 text-xs bg-green-600 hover:bg-green-700"
+                                                        className="h-7 px-2 text-xs bg-emerald-600 hover:bg-emerald-700 text-white border-0"
                                                         onClick={() => navigate(`/profile/${person.id}`)}
                                                     >
                                                         <Check className="h-3 w-3 sm:mr-1" />
@@ -783,7 +797,7 @@ export function Discover() {
                                                     <Button
                                                         size="sm"
                                                         variant="secondary"
-                                                        className="h-7 px-2 text-xs"
+                                                        className="h-7 px-2 text-xs text-white/90 hover:text-white"
                                                         onClick={() => handleConnect(person.id)}
                                                     >
                                                         <UserPlus className="h-3 w-3 sm:mr-1" />
@@ -793,45 +807,43 @@ export function Discover() {
                                             </div>
                                         </div>
 
-                                        <div className="space-y-2">
-                                            <div className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-400">
+                                        <div className="space-y-2 flex-grow flex flex-col justify-start mb-3">
+                                            <div className="flex items-center gap-1.5 text-xs text-white/50">
                                                 <BookOpen className="h-3 w-3 shrink-0" />
-                                                <span className="truncate">{person.discipline || (
-                                                    <span className="italic text-gray-400">
+                                                <span className="truncate text-white/70">{person.discipline || (
+                                                    <span className="italic text-white/40">
                                                         No discipline listed
                                                     </span>
                                                 )}</span>
                                             </div>
-                                            <p className="text-xs sm:text-sm text-gray-600 dark:text-gray-300 line-clamp-2">
+                                            <p className="text-xs sm:text-sm text-white/60 line-clamp-2">
                                                 {person.bio || (
-                                                    <span className="italic text-gray-400">
+                                                    <span className="italic text-white/40">
                                                         No bio available
                                                     </span>
                                                 )}
                                             </p>
-                                            <div className="flex flex-wrap gap-1 pt-0.5">
+                                            <div className="flex flex-wrap gap-1 pt-1.5 mt-auto">
                                                 {(person.skills || []).length > 0 ? (
                                                     <>
                                                         {person.skills.slice(0, 3).map((skill, i) => (
                                                             <Badge
                                                                 key={i}
-                                                                variant="outline"
-                                                                className="text-[10px] px-1.5 py-0.5 h-5 bg-gray-50 dark:bg-gray-800/50"
+                                                                className={`text-[10px] px-2 py-0.5 h-5 border-0 font-semibold transition-colors ${getTagColorClass(skill)}`}
                                                             >
                                                                 {skill}
                                                             </Badge>
                                                         ))}
                                                         {person.skills.length > 3 && (
                                                             <Badge
-                                                                variant="outline"
-                                                                className="text-[10px] px-1.5 py-0.5 h-5"
+                                                                className="text-[10px] px-2 py-0.5 h-5 border-0 bg-white/5 text-white/70"
                                                             >
                                                                 +{person.skills.length - 3}
                                                             </Badge>
                                                         )}
                                                     </>
                                                 ) : (
-                                                    <span className="text-[10px] italic text-gray-400">
+                                                    <span className="text-[10px] italic text-white/45">
                                                         No skills listed
                                                     </span>
                                                 )}

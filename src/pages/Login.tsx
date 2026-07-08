@@ -1,6 +1,7 @@
 import { useState } from "react"
 import type { FormEvent } from "react"
 import { Link, useNavigate, useSearchParams, Navigate } from "react-router-dom"
+import { Logo } from "@/components/layout/Logo"
 import { useAuth } from "@/contexts/AuthContext"
 import { auth } from "@/lib/firebase"
 import { Button } from "@/components/ui/button"
@@ -305,8 +306,7 @@ export function Login() {
                     {/* Header */}
                     <div className="auth-card-header">
                         <div className="auth-brand">
-                            <div className="auth-brand-mark"><span>P</span></div>
-                            <span className="auth-brand-name">ProCollab</span>
+                            <Logo iconSize={32} showText={true} textColor="text-zinc-300" />
                         </div>
                         <h1 className="auth-title">Welcome back</h1>
                         <p className="auth-subtitle">Sign in to continue to your workspace</p>

@@ -181,7 +181,7 @@ export function trackFeatureUsed(userId: string, feature: FeatureName, params?: 
 }
 
 // New whitelisted Tier 1 telemetry
-export function trackApplicationResolved(resolverId: string, applicantId: string, projectId: string, action: 'accepted' | 'rejected' | 'shortlisted') {
+export function trackApplicationResolved(resolverId: string, applicantId: string, projectId: string, action: 'accepted' | 'rejected' | 'shortlisted' | 'interviewing') {
     return track('application_resolved', { resolver_id: resolverId, applicant_id: applicantId, project_id: projectId, action })
 }
 

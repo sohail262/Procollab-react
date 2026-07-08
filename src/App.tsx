@@ -1,11 +1,14 @@
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
 import { Suspense, lazy } from 'react'
+import { HelmetProvider } from 'react-helmet-async'
 import { AuthProvider } from '@/contexts/AuthContext'
 import { ProtectedRoute } from '@/components/ProtectedRoute'
 import { AdminRoute } from '@/components/AdminRoute'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { Toaster } from '@/components/ui/toaster'
 import { usePageTracking } from '@/hooks/usePageTracking'
+// Static import — must NOT be lazy so it renders immediately with no blank flash
+import { LoadingScreen } from '@/components/LoadingScreen'
 const InviteAccept = lazy(() => import('@/pages/InviteAccept'))
 // Lazy load components to reduce initial bundle size
 const Landing = lazy(() => import('@/pages/Landing').then(module => ({ default: module.Landing })))
@@ -26,16 +29,11 @@ const ManageTeam = lazy(() => import('@/pages/ManageTeam').then(module => ({ def
 const Applications = lazy(() => import('@/pages/Applications').then(module => ({ default: module.Applications })))
 const AdminDashboard = lazy(() => import('@/pages/AdminDashboard').then(module => ({ default: module.AdminDashboard })))
 const Notifications = lazy(() => import('@/pages/Notifications').then(module => ({ default: module.Notifications })))
-const ProfileRedesignTest = lazy(() => import('@/pages/ProfileRedesignTest'))
 const PublicProjectShowcase = lazy(() => import('@/pages/PublicProjectShowcase'))
-const LoadingScreen = lazy(() => import('@/components/LoadingScreen').then(m => ({ default: m.LoadingScreen })))
-
-// Loading component — quote-driven splash with animated progress bar
-const PageLoader = () => (
-  <Suspense fallback={null}>
-    <LoadingScreen />
-  </Suspense>
-)
+const PublicProfile = lazy(() => import('@/pages/PublicProfile'))
+const PublicProject = lazy(() => import('@/pages/PublicProject'))
+// PageLoader uses the statically-imported LoadingScreen — zero blank-screen flash
+const PageLoader = () => <LoadingScreen />
 
 // Inner component that can use Router hooks
 function AppRoutes() {
@@ -48,18 +46,9 @@ function AppRoutes() {
               <Route path="/register" element={<Register />} />
               <Route path="/invite" element={<InviteAccept />} />
               <Route path="/project/public/:projectId" element={<PublicProjectShowcase />} />
-              {/* Test Route for Profile Redesign */}
-              <Route 
-                path="/test/profile-redesign" 
-                element={
-                  <ErrorBoundary>
-                    <ProtectedRoute>
-                      <ProfileRedesignTest />
-                    </ProtectedRoute>
-                  </ErrorBoundary>
-                } 
-              />
-              
+              <Route path="/u/:username" element={<Profile />} />
+              <Route path="/projects/:slug" element={<PublicProject />} />
+
               <Route path="/create-project" element={<CreateProject />} />
               <Route path="/edit-project/:id" element={<EditProject />} />
               <Route path="/project/:id/dashboard" element={<ProjectDashboard />} />
@@ -130,9 +119,7 @@ function AppRoutes() {
               path="/discover"
               element={
                 <ErrorBoundary>
-                  <ProtectedRoute>
-                    <Discover />
-                  </ProtectedRoute>
+                  <Discover />
                 </ErrorBoundary>
               }
             />
@@ -235,11 +222,13 @@ function AppRoutes() {
 function App() {
   return (
     <ErrorBoundary>
-      <Router>
-        <AuthProvider>
-          <AppRoutes />
-        </AuthProvider>
-      </Router>
+      <HelmetProvider>
+        <Router>
+          <AuthProvider>
+            <AppRoutes />
+          </AuthProvider>
+        </Router>
+      </HelmetProvider>
     </ErrorBoundary>
   )
 }

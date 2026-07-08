@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { ArrowLeft, Loader2, ShieldAlert, CheckCircle, Info, Shield, XCircle, Check } from 'lucide-react'
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore'
 import { db, auth } from '@/lib/firebase'
+import { generateUniqueProjectSlug } from '@/lib/urlUtils'
 import { useToast } from '@/hooks/use-toast'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { validateFormData, projectValidationSchema } from '@/lib/validation'
@@ -39,6 +40,7 @@ export function CreateProject() {
         summary: '',
         description: '',
         status: 'recruiting',
+        projectVisibility: 'public',
         duration: '',
         durationUnit: 'months',
         teamSize: 4,
@@ -194,9 +196,14 @@ export function CreateProject() {
                 return
             }
 
+            // Generate a unique slug for the project
+            const projectSlug = await generateUniqueProjectSlug(validation.sanitizedData.title)
+
             // Create project with sanitized data
             const projectData = {
                 ...validation.sanitizedData,
+                slug: projectSlug,
+                projectVisibility: formData.projectVisibility || 'public',
                 status: moderationStatus === 'review' ? 'pending_review' : (validation.sanitizedData.status || 'recruiting'),
                 teamSize: parseInt(validation.sanitizedData.teamSize.toString()),
                 maxMembers: parseInt(validation.sanitizedData.teamSize.toString()),
@@ -445,7 +452,7 @@ export function CreateProject() {
                                     )}
                                 </div>
 
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                     <div className="space-y-2">
                                         <Label htmlFor="status">Status *</Label>
                                         <select
@@ -457,6 +464,20 @@ export function CreateProject() {
                                             <option value="recruiting">Recruiting</option>
                                             <option value="active">Active</option>
                                             <option value="planning">Planning</option>
+                                        </select>
+                                    </div>
+
+                                    <div className="space-y-2">
+                                        <Label htmlFor="projectVisibility">Project Visibility *</Label>
+                                        <select
+                                            id="projectVisibility"
+                                            className="w-full px-3 py-2 border rounded-md bg-background"
+                                            value={formData.projectVisibility}
+                                            onChange={e => handleInputChange('projectVisibility', e.target.value)}
+                                        >
+                                            <option value="public">Public (Everyone can view)</option>
+                                            <option value="connections_only">Connections Only (Only friends can view)</option>
+                                            <option value="private">Private (Only team can view)</option>
                                         </select>
                                     </div>
 

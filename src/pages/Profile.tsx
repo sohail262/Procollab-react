@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import { DashboardLayout } from '@/components/layout/DashboardLayout'
@@ -9,6 +9,8 @@ import {
     Loader2, MapPin, Link as LinkIcon, Github, Linkedin, Twitter,
     Mail, Calendar, UserPlus, Check, BookOpen, Trash2,
     LayoutDashboard, FileText, Users, ImageIcon, X, Award, Star,
+    Zap, CheckCircle, ShieldAlert, Crown, Heart, Code2, Compass, Shield,
+    ShieldCheck, Clock, GitBranch, Layers, Briefcase, BarChart3, Share2
 } from 'lucide-react'
 import {
     doc, getDoc, collection, query, where,
@@ -17,7 +19,9 @@ import {
 } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
 import { cachedGetDoc, cachedQuery } from '@/lib/queryUtils'
+import { BADGE_IMAGES } from '@/lib/badgeImages'
 import { useToast } from '@/hooks/use-toast'
+import { getTagColorClass } from '@/lib/utils'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import {
     sendConnectionRequest,
@@ -29,6 +33,12 @@ import {
 import { BANNER_PRESETS, DEFAULT_BANNER, type BannerPreset } from '@/components/BannerPresets'
 import { InviteToProjectDropdown, InviteButton } from '@/components/InviteToProjectDropdown'
 import { sendNotificationWithPush } from '@/services/notificationTrigger'
+import {
+    Tooltip,
+    TooltipContent,
+    TooltipProvider,
+    TooltipTrigger,
+} from '@/components/ui/tooltip'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface UserProfile {
@@ -36,6 +46,7 @@ interface UserProfile {
     firstName: string
     lastName: string
     email: string
+    username?: string
     photoURL?: string
     bio?: string
     role?: string
@@ -65,6 +76,8 @@ interface UserProfile {
         communicationScore: number
         completionScore: number
         totalReviews: number
+        trustScore?: number
+        overallRating?: number
     }
 }
 interface Project {
@@ -74,6 +87,12 @@ interface Project {
     status: string
     primaryDiscipline: string
     tags: string[]
+    activityVerified?: boolean
+    metrics?: {
+        completedTasks?: number
+        totalTasks?: number
+        memberIds?: string[]
+    }
 }
 interface Application {
     id: string
@@ -88,16 +107,51 @@ interface NetworkFriend {
     photoURL?: string
 }
 
+const toDate = (val: any): Date => {
+    if (!val) return new Date()
+    if (typeof val.toDate === 'function') return val.toDate()
+    if (typeof val.seconds === 'number') {
+        return new Date(val.seconds * 1000 + Math.floor((val.nanoseconds || 0) / 1000000))
+    }
+    return new Date(val)
+}
+
+const ICON_MAP: Record<string, React.ComponentType<any>> = {
+    Award,
+    Star,
+    Zap,
+    Users,
+    CheckCircle,
+    ShieldAlert,
+    Crown,
+    Heart,
+    Code2,
+    Compass,
+    Shield,
+    ShieldCheck,
+    Clock,
+    GitBranch,
+    Layers,
+    Briefcase,
+    BarChart3,
+    BookOpen,
+    FileText
+}
+
 export default function Profile() {
-    const { id } = useParams()
+    const { id, username: usernameParam } = useParams<{ id?: string; username?: string }>()
     const { user: currentUser, logout } = useAuth()
     const navigate = useNavigate()
     const { toast } = useToast()
+    // If accessed via /u/:username, we resolve the uid here
+    const [resolvedId, setResolvedId] = useState<string | undefined>(id)
 
     const [profile, setProfile] = useState<UserProfile | null>(null)
     const [projects, setProjects] = useState<Project[]>([])
     const [applications, setApplications] = useState<Application[]>([])
     const [reviews, setReviews] = useState<any[]>([])
+    const [badges, setBadges] = useState<any[]>([])
+    const [projectFilter, setProjectFilter] = useState<'active' | 'completed'>('active')
     const [loading, setLoading] = useState(true)
     const [connectionStatus, setConnectionStatus] = useState<
         'none' | 'pending_out' | 'pending_in' | 'connected'
@@ -115,6 +169,8 @@ export default function Profile() {
     const [sentInvites, setSentInvites] = useState<Set<string>>(new Set())
 
     const NETWORK_LIMIT = 15
+    const BADGES_LIMIT = 8
+    const [showAllBadges, setShowAllBadges] = useState(false)
 
     const currentBanner = BANNER_PRESETS.find(p => p.id === profile?.bannerStyle) || DEFAULT_BANNER
 
@@ -133,8 +189,8 @@ export default function Profile() {
         }
     }
 
-        const isOwnProfile = !id || (currentUser && id === currentUser.uid)
-    const profileId = id || currentUser?.uid
+        const isOwnProfile = !resolvedId || (currentUser && resolvedId === currentUser.uid)
+    const profileId = resolvedId || currentUser?.uid
 
     // Profile Strength Calculation
     const getProfileStrength = useCallback(() => {
@@ -210,35 +266,40 @@ export default function Profile() {
 
     const { score: profileStrengthScore, suggestions: profileStrengthSuggestions } = getProfileStrength()
 
-    // Compute reputation dynamically based on Firestore reviews subcollection
+    // Compute reputation dynamically based on Firestore reviews subcollection or pre-aggregated map
     const computedReputation = (() => {
-        if (!reviews || reviews.length === 0) {
-            if (profile?.reputation) {
-                const rep = profile.reputation
-                const coop = typeof rep.collaborationScore === 'number' ? rep.collaborationScore : 100
-                const rel = typeof rep.reliabilityScore === 'number' ? rep.reliabilityScore : 100
-                const comm = typeof rep.communicationScore === 'number' ? rep.communicationScore : 100
-                const comp = typeof rep.completionScore === 'number' ? rep.completionScore : 100
-                const total = typeof rep.totalReviews === 'number' ? rep.totalReviews : 1
-                return {
-                    totalReviews: total,
-                    collaborationScore: coop,
-                    reliabilityScore: rel,
-                    communicationScore: comm,
-                    completionScore: comp,
-                    overallRating: ((coop + rel + comm + comp) / 4) / 20
-                }
+        if (profile?.reputation) {
+            const rep = profile.reputation
+            const coop = typeof rep.collaborationScore === 'number' ? rep.collaborationScore : 80
+            const rel = typeof rep.reliabilityScore === 'number' ? rep.reliabilityScore : 80
+            const comm = typeof rep.communicationScore === 'number' ? rep.communicationScore : 80
+            const comp = typeof rep.completionScore === 'number' ? rep.completionScore : 80
+            const trust = typeof rep.trustScore === 'number' ? rep.trustScore : 80
+            const total = typeof rep.totalReviews === 'number' ? rep.totalReviews : 0
+            const overall = typeof rep.overallRating === 'number' ? rep.overallRating : 4.0
+            return {
+                totalReviews: total,
+                collaborationScore: coop,
+                reliabilityScore: rel,
+                communicationScore: comm,
+                completionScore: comp,
+                overallRating: overall,
+                trustScore: trust
             }
+        }
+
+        const revealedReviews = reviews?.filter((r: any) => r.status === 'revealed' || !r.status) || []
+        if (revealedReviews.length === 0) {
             return null
         }
         
-        const total = reviews.length
+        const total = revealedReviews.length
         let coopSum = 0
         let relSum = 0
         let commSum = 0
         let skillSum = 0
 
-        reviews.forEach(r => {
+        revealedReviews.forEach(r => {
             coopSum += typeof r.cooperation === 'number' ? r.cooperation : 5
             relSum += typeof r.reliability === 'number' ? r.reliability : 5
             commSum += typeof r.communication === 'number' ? r.communication : 5
@@ -258,8 +319,33 @@ export default function Profile() {
             communicationScore,
             completionScore,
             overallRating,
+            trustScore: Math.min(100, Math.max(0, Math.round(80 + (overallRating - 4.0) * 10 + Math.min(10, total * 2))))
         }
     })()
+
+    const groupedBadges = useMemo(() => {
+        if (!badges) return []
+        const groups: Record<string, { badgeType: string; count: number; instances: any[] }> = {}
+        badges.forEach(b => {
+            if (!groups[b.badgeType]) {
+                groups[b.badgeType] = { badgeType: b.badgeType, count: 0, instances: [] }
+            }
+            groups[b.badgeType].count += 1
+            groups[b.badgeType].instances.push(b)
+        })
+        return Object.values(groups).map(g => {
+            const latestInstance = [...g.instances].sort((a, b) => {
+                const dateA = a.issuedAt?.toDate ? a.issuedAt.toDate() : new Date(a.issuedAt || 0)
+                const dateB = b.issuedAt?.toDate ? b.issuedAt.toDate() : new Date(b.issuedAt || 0)
+                return dateB.getTime() - dateA.getTime()
+            })[0]
+            return {
+                ...latestInstance,
+                count: g.count,
+                instances: g.instances
+            }
+        })
+    }, [badges])
 
     // ── Re-derive connection status from Firestore ────────────────────────────
     const refreshConnectionStatus = useCallback(async () => {
@@ -267,6 +353,41 @@ export default function Profile() {
         const status = await getConnectionStatus(currentUser.uid, profileId)
         setConnectionStatus(status)
     }, [currentUser, profileId, isOwnProfile])
+
+    // ── Resolve username → uid if accessed via /u/:username ─────────────────
+    useEffect(() => {
+        if (usernameParam && !id) {
+            // Resolve the username to a Firebase uid
+            import('firebase/firestore').then(({ collection, query, where, getDocs }) => {
+                getDocs(query(collection(db, 'users'), where('username', '==', usernameParam.toLowerCase())))
+                    .then(snap => {
+                        if (!snap.empty) {
+                            setResolvedId(snap.docs[0].id)
+                        } else {
+                            setResolvedId(undefined)
+                        }
+                    })
+                    .catch(err => {
+                        console.error('Username lookup failed', err)
+                        setResolvedId(undefined)
+                    })
+            })
+        } else {
+            setResolvedId(id)
+        }
+    }, [usernameParam, id])
+
+    // ── Share profile ─────────────────────────────────────────────────────────
+    const handleShareProfile = useCallback(() => {
+        const profileUrl = profile?.username
+            ? `${window.location.origin}/u/${profile.username}`
+            : `${window.location.origin}/profile/${profileId}`
+        navigator.clipboard.writeText(profileUrl).then(() => {
+            toast({ title: 'Link copied!', description: 'Profile URL copied to clipboard.' })
+        }).catch(() => {
+            toast({ title: 'Copy failed', description: 'Could not copy link.', variant: 'destructive' })
+        })
+    }, [profile, profileId, toast])
 
     // ── Load profile + real-time friends listener ─────────────────────────────
     useEffect(() => {
@@ -338,18 +459,19 @@ export default function Profile() {
             try {
                 setLoading(true)
 
-                // ── FIX: Try sessionStorage for own profile (instant revisit) ──
+                // ── Try sessionStorage for own profile (instant revisit) ──
                 const ssKey = `profile_${profileId}`
                 const SS_TTL = 3 * 60_000 // 3 min
                 if (isOwnProfile) {
                     try {
                         const raw = sessionStorage.getItem(ssKey)
                         if (raw) {
-                            const { profileData, projectsData, applicationsData, ts } = JSON.parse(raw)
+                            const { profileData, projectsData, applicationsData, badgesData, ts } = JSON.parse(raw)
                             if (Date.now() - ts < SS_TTL) {
                                 setProfile(profileData)
                                 setProjects(projectsData)
                                 setApplications(applicationsData)
+                                setBadges(badgesData || [])
                                 setLoading(false)
                                 // Still refresh connection status in bg
                                 if (!isOwnProfile && currentUser) refreshConnectionStatus()
@@ -376,33 +498,45 @@ export default function Profile() {
                     } catch { /* ignore */ }
                 }
 
-                // ── FIX: Parallel fetch instead of 4 sequential awaits ──
+                const wrapPromise = (p: Promise<any>, name: string) => p.catch(err => {
+                    console.error(`Promise failed: ${name}`, err);
+                    throw err;
+                });
+
+                // ── Parallel fetch instead of sequential awaits ──
                 const basePromises: Promise<any>[] = [
                     // 1. User document (cached)
-                    cachedGetDoc(doc(db, 'users', profileId!), { ttl: 300_000 }),
+                    wrapPromise(cachedGetDoc(doc(db, 'users', profileId!), { ttl: 300_000 }), '1. userDoc'),
                     // 2. Projects created by this user (cached)
-                    cachedQuery(
+                    wrapPromise(cachedQuery(
                         query(collection(db, 'projects'), where('createdBy', '==', profileId)),
                         { ttl: 300_000, cacheKey: `profile-projects-${profileId}` }
-                    ),
+                    ), '2. projectsCreated'),
                     // 3. Reviews (cached)
-                    cachedQuery(
-                        query(collection(db, 'users', profileId!, 'reviews'), orderBy('createdAt', 'desc')),
+                    wrapPromise(cachedQuery(
+                        query(collection(db, 'users', profileId!, 'reviews'), where('status', '==', 'revealed')),
                         { ttl: 300_000, cacheKey: `profile-reviews-${profileId}` }
-                    )
+                    ), '3. reviews'),
+                    // 4. Badges (cached)
+                    wrapPromise(cachedQuery(
+                        collection(db, 'users', profileId!, 'badges'),
+                        { ttl: 300_000, cacheKey: `profile-badges-${profileId}` }
+                    ), '4. badges'),
+                    // 5. Joined project IDs
+                    wrapPromise(getDocs(collection(db, 'users', profileId!, 'joinedProjects')), '5. joinedProjects')
                 ]
 
-                // 4. Applications — own profile only (cached)
+                // 6. Applications — own profile only (cached)
                 if (isOwnProfile) {
                     basePromises.push(
-                        cachedQuery(
+                        wrapPromise(cachedQuery(
                             collection(db, 'users', profileId!, 'applications') as any,
                             { ttl: 120_000, cacheKey: `profile-apps-${profileId}` }
-                        )
+                        ), '6. applications')
                     )
                 }
 
-                const [userDoc, projectsSnap, reviewsSnap, appsSnap] = await Promise.all(basePromises)
+                const [userDoc, projectsSnap, reviewsSnap, badgesSnap, joinedProjectsSnap, appsSnap] = await Promise.all(basePromises)
 
                 let profileData: UserProfile | null = null
                 if (userDoc.exists()) {
@@ -410,10 +544,40 @@ export default function Profile() {
                     setProfile(profileData)
                 }
 
-                const projectsData = projectsSnap.docs.map((d: any) => ({ id: d.id, ...d.data() })) as Project[]
+                // Parse badges
+                const badgesData = badgesSnap.docs.map((d: any) => ({ id: d.id, ...d.data() }))
+                setBadges(badgesData)
+
+                // Parse created projects
+                const createdProjects = projectsSnap.docs.map((d: any) => ({ id: d.id, ...d.data() })) as Project[]
+
+                // Parse joined projects (fetch documents in parallel)
+                const joinedIds = joinedProjectsSnap.docs.map((d: any) => d.id)
+                const joinedDocs = await Promise.all(
+                    joinedIds.map((pId: string) => cachedGetDoc(doc(db, 'projects', pId), { ttl: 300_000 }))
+                )
+                const joinedProjects = joinedDocs
+                    .map((d: any) => d.exists() ? { id: d.id, ...d.data() } as Project : null)
+                    .filter(Boolean) as Project[]
+
+                // Combine both created and joined projects
+                const combinedProjects = [...createdProjects, ...joinedProjects]
+                // De-duplicate projects by ID (just in case)
+                const uniqueProjectsMap: Record<string, Project> = {}
+                combinedProjects.forEach(p => {
+                    if (p) uniqueProjectsMap[p.id] = p
+                })
+                const projectsData = Object.values(uniqueProjectsMap)
                 setProjects(projectsData)
 
-                const reviewsData = reviewsSnap.docs.map((d: any) => ({ id: d.id, ...d.data() }))
+                const reviewsData = reviewsSnap.docs
+                    .map((d: any) => ({ id: d.id, ...d.data() }))
+                    .filter((r: any) => r.status === 'revealed')
+                    .sort((a: any, b: any) => {
+                        const dateA = toDate(a.createdAt)
+                        const dateB = toDate(b.createdAt)
+                        return dateB.getTime() - dateA.getTime()
+                    })
                 setReviews(reviewsData)
 
                 let applicationsData: Application[] = []
@@ -429,6 +593,7 @@ export default function Profile() {
                             profileData,
                             projectsData,
                             applicationsData,
+                            badgesData,
                             ts: Date.now()
                         }))
                     } catch { /* quota */ }
@@ -689,7 +854,7 @@ export default function Profile() {
             <div className="max-w-5xl mx-auto">
 
                 {/* Profile Header */}
-                <div className="relative bg-white dark:bg-gray-900 rounded-xl shadow-sm border border-gray-200 dark:border-gray-800 overflow-visible mb-6">
+                <div className="relative bg-zinc-900/40 backdrop-blur-xl border border-zinc-800/80 rounded-xl overflow-visible mb-6">
                     {/* Banner */}
                     <div
                         className="relative h-36 sm:h-44 overflow-hidden cursor-pointer group rounded-t-xl"
@@ -712,7 +877,7 @@ export default function Profile() {
                     {/* Banner picker overlay */}
                     {showBannerPicker && (
                         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-                            <div className="bg-white dark:bg-gray-900 rounded-xl shadow-2xl p-4 w-full max-w-2xl">
+                            <div className="bg-zinc-950 border border-zinc-800 rounded-xl shadow-2xl p-4 w-full max-w-2xl">
                                 <div className="flex items-center justify-between mb-3">
                                     <h3 className="font-semibold text-sm">Choose a banner</h3>
                                     <button
@@ -752,7 +917,7 @@ export default function Profile() {
                         <div className="flex flex-wrap justify-between items-start gap-3 -mt-10 sm:-mt-12 mb-3">
                             {/* Avatar with ring */}
                             <div className="relative shrink-0">
-                                <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full ring-4 ring-white dark:ring-gray-900 overflow-hidden bg-white dark:bg-gray-900 shadow-md">
+                                <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full ring-4 ring-zinc-950 overflow-hidden bg-zinc-950 shadow-md">
                                     <img
                                         src={
                                             profile.photoURL ||
@@ -785,6 +950,15 @@ export default function Profile() {
                                             Edit Profile
                                         </Button>
                                         <Button
+                                            variant="outline"
+                                            size="sm"
+                                            className="h-8 text-xs"
+                                            onClick={handleShareProfile}
+                                        >
+                                            <Share2 className="h-3.5 w-3.5 mr-1.5" />
+                                            Share
+                                        </Button>
+                                        <Button
                                             variant="destructive"
                                             size="icon"
                                             className="h-8 w-8"
@@ -796,6 +970,15 @@ export default function Profile() {
                                 ) : (
                                     <div className="flex items-center gap-2">
                                         {renderConnectionButton()}
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            className="h-8 text-xs"
+                                            onClick={handleShareProfile}
+                                        >
+                                            <Share2 className="h-3.5 w-3.5 mr-1.5" />
+                                            Share
+                                        </Button>
                                         <div className="relative">
                                             <InviteButton
                                                 isOpen={inviteDropdownOpen}
@@ -868,7 +1051,7 @@ export default function Profile() {
                             {profile.joinedAt && (
                                 <span className="flex items-center gap-1">
                                     <Calendar className="h-3.5 w-3.5 shrink-0" />
-                                    Joined {new Date(profile.joinedAt.toDate()).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}
+                                    Joined {toDate(profile.joinedAt).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}
                                 </span>
                             )}
 
@@ -923,8 +1106,8 @@ export default function Profile() {
                     {/* Left Column */}
                     <div className="space-y-6">
 
-                        {/* Profile Strength Card (Own Profile only) */}
-                        {isOwnProfile && (
+                        {/* Profile Strength Card — hidden once score reaches 100% */}
+                        {isOwnProfile && profileStrengthScore < 100 && (
                             <Card className="relative overflow-hidden border border-indigo-100 dark:border-indigo-900/30">
                                 <CardContent className="pt-6">
                                     <div className="flex justify-between items-center mb-3">
@@ -978,52 +1161,7 @@ export default function Profile() {
                             </Card>
                         )}
 
-                        {/* Collaboration Preferences Card */}
-                        <Card>
-                            <CardHeader className="pb-3">
-                                <CardTitle className="text-sm font-bold flex items-center justify-between">
-                                    <span>Collaboration Preferences</span>
-                                    {profile.isOpenToWork ? (
-                                        <Badge className="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500/20 font-semibold text-[10px] py-0.5">
-                                            ● Open to Work
-                                        </Badge>
-                                    ) : (
-                                        <Badge variant="outline" className="text-gray-400 dark:text-gray-500 text-[10px] py-0.5">
-                                            Not Active
-                                        </Badge>
-                                    )}
-                                </CardTitle>
-                            </CardHeader>
-                            <CardContent className="space-y-4">
-                                <div className="grid grid-cols-2 gap-3 text-xs">
-                                    <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-100 dark:border-gray-800">
-                                        <span className="text-gray-400 dark:text-gray-500 block mb-0.5 text-[10px]">Availability</span>
-                                        <span className="font-semibold text-gray-800 dark:text-gray-200 text-xs">
-                                            {profile.availabilityHours ? `${profile.availabilityHours} hrs/week` : 'Not specified'}
-                                        </span>
-                                    </div>
-                                    <div className="p-3 rounded-lg bg-gray-50 dark:bg-gray-900 border border-gray-100 dark:border-gray-800">
-                                        <span className="text-gray-400 dark:text-gray-500 block mb-0.5 text-[10px]">Timezone</span>
-                                        <span className="font-semibold text-gray-800 dark:text-gray-200 text-xs truncate block">
-                                            {profile.timezone || 'Not specified'}
-                                        </span>
-                                    </div>
-                                </div>
-
-                                {profile.preferredRoles && profile.preferredRoles.length > 0 && (
-                                    <div>
-                                        <span className="text-[10px] text-gray-400 dark:text-gray-500 block mb-2 font-semibold uppercase tracking-wider">Preferred Roles</span>
-                                        <div className="flex flex-wrap gap-1.5">
-                                            {profile.preferredRoles.map((role, i) => (
-                                                <Badge key={i} variant="outline" className="bg-blue-50/50 dark:bg-blue-950/20 text-blue-600 dark:text-blue-400 border-blue-200/50 dark:border-blue-900/30 text-[10px]">
-                                                    {role}
-                                                </Badge>
-                                            ))}
-                                        </div>
-                                    </div>
-                                )}
-                            </CardContent>
-                        </Card>
+                        {/* Collaboration Preferences Card removed */}
 
                         {/* About */}
                         <Card>
@@ -1111,6 +1249,17 @@ export default function Profile() {
                                     </CardTitle>
                                 </CardHeader>
                                 <CardContent className="space-y-4">
+                                    {/* Trust Score Header Indicator */}
+                                    {computedReputation.trustScore && (
+                                        <div className="flex items-center justify-between text-xs border-b border-gray-100 dark:border-gray-800 pb-3 mb-2">
+                                            <span className="flex items-center gap-1.5 font-semibold text-gray-700 dark:text-gray-300">
+                                                <Award className="h-4 w-4 text-indigo-500" />
+                                                Reputation Trust Score
+                                            </span>
+                                            <span className="font-extrabold text-indigo-600 dark:text-indigo-400 text-sm">{computedReputation.trustScore}%</span>
+                                        </div>
+                                    )}
+
                                     {typeof computedReputation.overallRating === 'number' && (
                                         <div className="flex items-center gap-3 bg-amber-500/5 dark:bg-amber-500/10 border border-amber-500/15 dark:border-amber-500/20 rounded-lg p-3">
                                             <div className="text-3xl font-extrabold text-amber-600 dark:text-amber-400">
@@ -1128,7 +1277,7 @@ export default function Profile() {
                                                         )
                                                     })}
                                                 </div>
-                                                <p className="text-[10px] text-gray-505 dark:text-gray-400 font-semibold">
+                                                <p className="text-[10px] text-gray-500 dark:text-gray-400 font-semibold">
                                                     Overall Peer Rating
                                                 </p>
                                             </div>
@@ -1144,11 +1293,11 @@ export default function Profile() {
                                             <div key={idx} className="space-y-1">
                                                 <div className="flex justify-between text-xs">
                                                     <span className="text-gray-500 dark:text-gray-400 font-medium">{rep.label}</span>
-                                                    <span className="font-semibold text-gray-800 dark:text-gray-200">{Math.round(rep.score / 20 * 10) / 10} / 5</span>
+                                                    <span className="font-semibold text-gray-700 dark:text-gray-300">{rep.score}%</span>
                                                 </div>
-                                                <div className="w-full h-1.5 bg-gray-200 dark:bg-gray-800 rounded-full overflow-hidden">
-                                                    <div 
-                                                        className="h-full bg-amber-500 rounded-full transition-all duration-300"
+                                                <div className="w-full h-1.5 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
+                                                    <div
+                                                        className="h-full bg-gradient-to-r from-indigo-500 to-purple-500 rounded-full transition-all duration-500"
                                                         style={{ width: `${rep.score}%` }}
                                                     />
                                                 </div>
@@ -1159,16 +1308,169 @@ export default function Profile() {
                             </Card>
                         )}
 
+                        {/* Verified Badges Section */}
+                        {groupedBadges && groupedBadges.length > 0 && (
+                            <Card className="mt-4">
+                                <CardHeader className="pb-2">
+                                    <CardTitle className="text-sm font-bold flex items-center gap-1.5">
+                                        <Award className="h-4 w-4 text-indigo-500" />
+                                        Verified Trust Credentials
+                                    </CardTitle>
+                                </CardHeader>
+                                <CardContent className="pt-2">
+                                    <TooltipProvider>
+                                        <div className="grid grid-cols-4 gap-y-4 gap-x-2">
+                                            {(showAllBadges ? groupedBadges : groupedBadges.slice(0, BADGES_LIMIT)).map((badge) => {
+                                                const BADGE_DESIGNS: Record<string, { title: string; desc: string }> = {
+                                                    verified_collaborator: {
+                                                        title: 'Verified Collaborator',
+                                                        desc: 'Established complete profile setup to build community trust.'
+                                                    },
+                                                    trusted_teammate: {
+                                                        title: 'Trusted Teammate',
+                                                        desc: 'Maintained outstanding cooperation ratings across multiple team deliverables.'
+                                                    },
+                                                    reliable_contributor: {
+                                                        title: 'Reliable Contributor',
+                                                        desc: 'Successfully shipped 10+ tasks on or before schedule with high reliability.'
+                                                    },
+                                                    proven_professional: {
+                                                        title: 'Proven Professional',
+                                                        desc: 'Maintained exceptional quality and reviews across a substantial project history.'
+                                                    },
+                                                    project_finisher: {
+                                                        title: 'Project Finisher',
+                                                        desc: 'Successfully completed project milestones and delivered assigned tasks.'
+                                                    },
+                                                    project_veteran: {
+                                                        title: 'Project Veteran',
+                                                        desc: 'Successfully completed 5 verified projects on the platform.'
+                                                    },
+                                                    project_master: {
+                                                        title: 'Project Master',
+                                                        desc: 'Successfully completed 10 verified projects with outstanding completion rates.'
+                                                    },
+                                                    verified_deliverer: {
+                                                        title: 'Verified Deliverer',
+                                                        desc: 'Completed projects with verified team activity levels.'
+                                                    },
+                                                    team_builder: {
+                                                        title: 'Team Builder',
+                                                        desc: 'Exhibited exceptional team coordination and alignment on project deliverables.'
+                                                    },
+                                                    outstanding_collaborator: {
+                                                        title: 'Outstanding Collaborator',
+                                                        desc: 'Consistently praised by teammates for cooperation and communication.'
+                                                    },
+                                                    cross_functional_dev: {
+                                                        title: 'Cross-Functional Contributor',
+                                                        desc: 'Demonstrated versatile capabilities across multiple project disciplines.'
+                                                    },
+                                                    project_leader: {
+                                                        title: 'Project Leader',
+                                                        desc: 'Demonstrated outstanding project leadership, coordination, and team direction.'
+                                                    },
+                                                    delivery_manager: {
+                                                        title: 'Delivery Manager',
+                                                        desc: 'Consistently delivered milestones and managed timeline goals for product teams.'
+                                                    },
+                                                    top_rated: {
+                                                        title: 'Top Rated',
+                                                        desc: 'Maintained an overall peer rating of 4.8+ stars across a large project history.'
+                                                    },
+                                                    community_trusted: {
+                                                        title: 'Community Trusted',
+                                                        desc: 'Achieved legendary reputation with exceptional ratings across 20+ peer evaluations.'
+                                                    },
+                                                    verified_mentor: {
+                                                        title: 'Verified Mentor',
+                                                        desc: 'Recognized for exceptional guidance and mentorship of project teams.'
+                                                    },
+                                                    knowledge_contributor: {
+                                                        title: 'Knowledge Contributor',
+                                                        desc: 'Outstanding contributions to community documentation, wiki, or research.'
+                                                    }
+                                                }
+
+                                                const design = BADGE_DESIGNS[badge.badgeType] || {
+                                                    title: badge.title || 'Special Contributor',
+                                                    desc: badge.description || 'Verified delivery credential.'
+                                                }
+
+                                                const IconComponent = ICON_MAP[badge.icon] || Award
+
+                                                return (
+                                                    <div key={badge.id || badge.badgeType} className="flex flex-col items-center text-center gap-1.5 min-w-0">
+                                                        <Tooltip>
+                                                            <TooltipTrigger asChild>
+                                                                <div className="relative">
+                                                                    <div className="h-14 w-14 shrink-0 flex items-center justify-center overflow-hidden rounded-full cursor-pointer hover:scale-105 transition-transform border border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 shadow-sm">
+                                                                        {BADGE_IMAGES[badge.badgeType] ? (
+                                                                            <img
+                                                                                src={BADGE_IMAGES[badge.badgeType]}
+                                                                                alt={design.title}
+                                                                                className="h-14 w-14 object-contain scale-[1.45] -translate-y-[9px]"
+                                                                                draggable={false}
+                                                                            />
+                                                                        ) : (
+                                                                            <IconComponent className="h-6 w-6 text-gray-400 dark:text-gray-500" />
+                                                                        )}
+                                                                    </div>
+                                                                    {badge.count > 1 && (
+                                                                        <span className="absolute -top-1 -right-1 bg-indigo-600 text-white text-[8px] font-extrabold px-1.5 py-0.5 rounded-full border border-white dark:border-slate-900 shadow-sm z-10 pointer-events-none">
+                                                                            *{badge.count}
+                                                                        </span>
+                                                                    )}
+                                                                </div>
+                                                            </TooltipTrigger>
+                                                            <TooltipContent className="p-3 max-w-xs space-y-1 bg-slate-900 text-white border border-slate-800 rounded-lg shadow-md">
+                                                                <h4 className="text-xs font-bold flex items-center gap-1.5">
+                                                                    {design.title}
+                                                                </h4>
+                                                                <p className="text-[10px] text-slate-300 leading-snug">
+                                                                    {design.desc}
+                                                                </p>
+                                                                {badge.evidence?.reason && (
+                                                                    <p className="text-[9px] text-slate-400 border-t border-slate-800 pt-1 mt-1 italic">
+                                                                        Reason: {badge.evidence.reason}
+                                                                    </p>
+                                                                )}
+                                                            </TooltipContent>
+                                                        </Tooltip>
+                                                        <span className="text-[10px] font-semibold text-slate-700 dark:text-slate-350 tracking-tight leading-tight max-w-[64px] line-clamp-2">
+                                                            {design.title}
+                                                        </span>
+                                                    </div>
+                                                )
+                                            })}
+                                        </div>
+                                    </TooltipProvider>
+
+                                    {groupedBadges.length > BADGES_LIMIT && (
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowAllBadges(v => !v)}
+                                            className="mt-4 text-xs text-blue-600 dark:text-blue-400 hover:underline w-full text-center font-medium"
+                                        >
+                                            {showAllBadges
+                                                ? 'Show less'
+                                                : `View all ${groupedBadges.length} credentials`}
+                                        </button>
+                                    )}
+                                </CardContent>
+                            </Card>
+                        )}
+
                         {/* Skills */}
                         <Card>
                             <CardHeader>
                                 <CardTitle className="text-lg">Skills</CardTitle>
                             </CardHeader>
                             <CardContent>
-                                <div className="flex flex-wrap gap-2">
+                                <div className="flex flex-wrap gap-1.5">
                                     {profile.skills && profile.skills.length > 0 ? (
                                         profile.skills.map((skill, i) => (
-                                            <Badge key={i} variant="secondary">
+                                            <Badge key={i} className={`border-0 font-semibold text-xs px-3.5 py-1.5 rounded-md transition-colors ${getTagColorClass(skill)}`}>
                                                 {skill}
                                             </Badge>
                                         ))
@@ -1188,61 +1490,99 @@ export default function Profile() {
 
                         {/* Projects */}
                         <div>
-                            <h2 className="text-xl font-bold mb-4">Projects</h2>
-                            {projects.length > 0 ? (
-                                <div className="space-y-4">
-                                    {projects.map(project => (
-                                        <Card
-                                            key={project.id}
-                                            className="hover:shadow-md transition-shadow cursor-pointer"
-                                            onClick={() => navigate(`/project/${project.id}`)}
-                                        >
-                                            <CardContent className="p-6">
-                                                <div className="flex justify-between items-start mb-2">
-                                                    <div>
-                                                        <h3 className="font-semibold text-lg text-blue-600 dark:text-blue-400 mb-1">
-                                                            {project.title}
-                                                        </h3>
-                                                        <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
-                                                            {project.primaryDiscipline}
+                            <div className="flex justify-between items-center mb-4">
+                                <h2 className="text-xl font-bold">Projects</h2>
+                                <div className="flex gap-1 bg-zinc-900/60 p-0.5 rounded-lg border border-zinc-800">
+                                    <button
+                                        type="button"
+                                        onClick={() => setProjectFilter('active')}
+                                        className={`px-3 py-1 text-xs font-semibold rounded-md transition-all ${projectFilter === 'active' ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-400 hover:text-white'}`}
+                                    >
+                                        Active
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setProjectFilter('completed')}
+                                        className={`px-3 py-1 text-xs font-semibold rounded-md transition-all ${projectFilter === 'completed' ? 'bg-zinc-800 text-white shadow-sm' : 'text-zinc-400 hover:text-white'}`}
+                                    >
+                                        Completed
+                                    </button>
+                                </div>
+                            </div>
+
+                            {(() => {
+                                const filtered = projects.filter(p => projectFilter === 'completed' ? p.status === 'completed' : p.status !== 'completed')
+                                if (filtered.length > 0) {
+                                    return (
+                                        <div className="space-y-4">
+                                            {filtered.map(project => (
+                                                <Card
+                                                    key={project.id}
+                                                    className="hover:shadow-md transition-shadow cursor-pointer"
+                                                    onClick={() => navigate(`/project/${project.id}`)}
+                                                >
+                                                    <CardContent className="p-6">
+                                                        <div className="flex justify-between items-start mb-2">
+                                                            <div>
+                                                                <h3 className="font-semibold text-lg text-blue-600 dark:text-blue-400 mb-1 flex items-center gap-1.5 flex-wrap">
+                                                                    {project.title}
+                                                                    {project.status === 'completed' && project.activityVerified && (
+                                                                        <span className="inline-flex items-center gap-0.5 text-[9px] font-bold bg-emerald-100 dark:bg-emerald-950/45 text-emerald-750 dark:text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-900/50 uppercase tracking-wide">
+                                                                            <Check className="h-2.5 w-2.5" />
+                                                                            Verified Work
+                                                                        </span>
+                                                                    )}
+                                                                </h3>
+                                                                <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
+                                                                    {project.primaryDiscipline}
+                                                                </p>
+                                                            </div>
+                                                            <Badge
+                                                                variant={
+                                                                    project.status === 'recruiting'
+                                                                        ? 'default'
+                                                                        : 'secondary'
+                                                                }
+                                                            >
+                                                                {project.status}
+                                                            </Badge>
+                                                        </div>
+                                                        <p className="text-gray-600 dark:text-gray-300 mb-4 line-clamp-2">
+                                                            {project.description}
                                                         </p>
-                                                    </div>
-                                                    <Badge
-                                                        variant={
-                                                            project.status === 'recruiting'
-                                                                ? 'default'
-                                                                : 'secondary'
-                                                        }
-                                                    >
-                                                        {project.status}
-                                                    </Badge>
-                                                </div>
-                                                <p className="text-gray-600 dark:text-gray-300 mb-4 line-clamp-2">
-                                                    {project.description}
-                                                </p>
-                                                <div className="flex flex-wrap gap-2">
-                                                    {project.tags?.slice(0, 3).map((tag, i) => (
-                                                        <Badge
-                                                            key={i}
-                                                            variant="outline"
-                                                            className="text-xs"
-                                                        >
-                                                            {tag}
-                                                        </Badge>
-                                                    ))}
-                                                </div>
+                                                        <div className="flex justify-between items-center mt-3 pt-3 border-t border-gray-100 dark:border-gray-800">
+                                                            <div className="flex flex-wrap gap-2">
+                                                                {project.tags?.slice(0, 3).map((tag, i) => (
+                                                                    <Badge
+                                                                        key={i}
+                                                                        className="border-0 bg-white/5 text-white/85 text-xs px-2.5 py-0.5 rounded-md"
+                                                                    >
+                                                                        {tag}
+                                                                    </Badge>
+                                                                ))}
+                                                            </div>
+                                                            {project.status === 'completed' && project.metrics && (
+                                                                <span className="text-[10px] font-medium text-slate-400">
+                                                                    {project.metrics.completedTasks || 0} tasks delivered
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    </CardContent>
+                                                </Card>
+                                            ))}
+                                        </div>
+                                    )
+                                } else {
+                                    return (
+                                        <Card>
+                                            <CardContent className="p-8 text-center text-gray-500">
+                                                <BookOpen className="h-12 w-12 mx-auto mb-3 text-gray-300" />
+                                                <p>No {projectFilter} projects yet</p>
                                             </CardContent>
                                         </Card>
-                                    ))}
-                                </div>
-                            ) : (
-                                <Card>
-                                    <CardContent className="p-8 text-center text-gray-500">
-                                        <BookOpen className="h-12 w-12 mx-auto mb-3 text-gray-300" />
-                                        <p>No projects yet</p>
-                                    </CardContent>
-                                </Card>
-                            )}
+                                    )
+                                }
+                            })()}
                         </div>
 
                         {/* Teammate Endorsements */}
@@ -1367,9 +1707,7 @@ export default function Profile() {
                                                             </h3>
                                                             <p className="text-xs text-gray-500">
                                                                 Applied on{' '}
-                                                                {new Date(
-                                                                    app.appliedAt?.toDate()
-                                                                ).toLocaleDateString()}
+                                                                {toDate(app.appliedAt).toLocaleDateString()}
                                                             </p>
                                                         </div>
                                                     </div>
@@ -1406,7 +1744,7 @@ export default function Profile() {
             {/* Delete Account Modal */}
             {isDeleteModalOpen && (
                 <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-                    <div className="bg-white dark:bg-gray-900 rounded-lg shadow-xl max-w-md w-full p-6">
+                    <div className="bg-zinc-950 border border-zinc-800 rounded-lg shadow-xl max-w-md w-full p-6">
                         <h2 className="text-xl font-bold text-red-600 mb-4">
                             Delete Account
                         </h2>

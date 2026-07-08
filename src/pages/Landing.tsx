@@ -93,9 +93,9 @@ export function Landing() {
                         <div className="grid grid-cols-2 md:grid-cols-4 divide-x divide-border">
                             {[
                                 { value: "10K+", label: "Active Users", id: "01" },
-                                { value: "5K+",  label: "Projects Completed", id: "02" },
-                                { value: "50+",  label: "Countries", id: "03" },
-                                { value: "98%",  label: "Satisfaction Rate", id: "04" },
+                                { value: "5K+", label: "Projects Completed", id: "02" },
+                                { value: "50+", label: "Countries", id: "03" },
+                                { value: "98%", label: "Satisfaction Rate", id: "04" },
                             ].map((stat) => (
                                 <div key={stat.id} className="flex flex-col items-center justify-center py-10 px-4 text-center">
                                     <span className="text-xs font-mono text-muted-foreground tracking-widest mb-2">[{stat.id}]</span>
@@ -123,9 +123,9 @@ export function Landing() {
                         {/* Primary feature cards */}
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-px bg-border border border-border">
                             {[
-                                { icon: Users,    title: "Find Your Dream Team",   desc: "Connect with talented individuals from diverse backgrounds. Smart matching finds collaborators who complement your skills perfectly.", id: "F.01" },
-                                { icon: Lightbulb, title: "Discover Innovation",   desc: "Browse cutting-edge projects or launch your own. Get inspired by what others are building and find opportunities to contribute.", id: "F.02" },
-                                { icon: ListTodo, title: "Seamless Collaboration", desc: "Integrated tools for task management, real-time messaging, and progress tracking. Everything you need in one place.",              id: "F.03" },
+                                { icon: Users, title: "Find Your Dream Team", desc: "Connect with talented individuals from diverse backgrounds. Smart matching finds collaborators who complement your skills perfectly.", id: "F.01" },
+                                { icon: Lightbulb, title: "Discover Innovation", desc: "Browse cutting-edge projects or launch your own. Get inspired by what others are building and find opportunities to contribute.", id: "F.02" },
+                                { icon: ListTodo, title: "Seamless Collaboration", desc: "Integrated tools for task management, real-time messaging, and progress tracking. Everything you need in one place.", id: "F.03" },
                             ].map((feature) => (
                                 <div key={feature.id} className="bg-background p-8 group hover:bg-muted/20 transition-colors border-t-2 border-t-transparent hover:border-t-primary">
                                     <div className="text-xs font-mono text-muted-foreground mb-5 tracking-widest">{feature.id}</div>
@@ -141,9 +141,9 @@ export function Landing() {
                         {/* Secondary feature row */}
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
                             {[
-                                { icon: Shield,    title: "Secure & Private",  desc: "Enterprise-grade security for your data" },
-                                { icon: TrendingUp, title: "Track Progress",   desc: "Real-time analytics and insights" },
-                                { icon: Zap,       title: "Lightning Fast",    desc: "Optimized for speed and performance" },
+                                { icon: Shield, title: "Secure & Private", desc: "Enterprise-grade security for your data" },
+                                { icon: TrendingUp, title: "Track Progress", desc: "Real-time analytics and insights" },
+                                { icon: Zap, title: "Lightning Fast", desc: "Optimized for speed and performance" },
                             ].map((feature, i) => (
                                 <div key={i} className="flex gap-4 p-5 border border-border hover:border-primary transition-colors group">
                                     <div className="flex-shrink-0 w-9 h-9 border border-border group-hover:border-primary flex items-center justify-center transition-colors">
@@ -175,9 +175,9 @@ export function Landing() {
 
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                             {[
-                                { title: "AI-Powered Healthcare Diagnostics",  desc: "Combining medical expertise with AI to develop accessible diagnostic tools for underserved communities.", tags: ["Medicine", "AI", "Data Science"],          members: "3/5", id: "PRJ.001" },
-                                { title: "Sustainable Urban Planning",          desc: "Redesigning urban spaces with focus on sustainability, community engagement, and tech integration.",         tags: ["Architecture", "Environment", "Sociology"], members: "4/6", id: "PRJ.002" },
-                                { title: "Digital Humanities Archive",          desc: "Creating an interactive digital archive of historical artifacts using advanced visualization.",              tags: ["History", "Computer Science", "Design"],    members: "2/4", id: "PRJ.003" },
+                                { title: "AI-Powered Healthcare Diagnostics", desc: "Combining medical expertise with AI to develop accessible diagnostic tools for underserved communities.", tags: ["Medicine", "AI", "Data Science"], members: "3/5", id: "PRJ.001" },
+                                { title: "Sustainable Urban Planning", desc: "Redesigning urban spaces with focus on sustainability, community engagement, and tech integration.", tags: ["Architecture", "Environment", "Sociology"], members: "4/6", id: "PRJ.002" },
+                                { title: "Digital Humanities Archive", desc: "Creating an interactive digital archive of historical artifacts using advanced visualization.", tags: ["History", "Computer Science", "Design"], members: "2/4", id: "PRJ.003" },
                             ].map((project) => (
                                 <div key={project.id} className="border border-border bg-background hover:border-primary transition-colors group p-6 flex flex-col">
                                     <div className="flex items-center justify-between mb-5">
@@ -234,9 +234,9 @@ export function Landing() {
 
                         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                             {[
-                                { name: "Jane Smith",          role: "Computer Science Student", initial: "JS", quote: "I found the perfect team for my senior project. The interdisciplinary approach brought fresh perspectives I wouldn't have considered otherwise." },
-                                { name: "Michael Rodriguez",   role: "Biomedical Researcher",    initial: "MR", quote: "Finding collaborators from other fields used to be challenging. This platform streamlined the process and helped me form a diverse team for my grant proposal." },
-                                { name: "Aisha Patel",         role: "Environmental Engineer",   initial: "AP", quote: "The project management tools made collaboration seamless. We completed our sustainability project with team members from three countries." },
+                                { name: "Jane Smith", role: "Computer Science Student", initial: "JS", quote: "I found the perfect team for my senior project. The interdisciplinary approach brought fresh perspectives I wouldn't have considered otherwise." },
+                                { name: "Michael Rodriguez", role: "Biomedical Researcher", initial: "MR", quote: "Finding collaborators from other fields used to be challenging. This platform streamlined the process and helped me form a diverse team for my grant proposal." },
+                                { name: "Aisha Patel", role: "Environmental Engineer", initial: "AP", quote: "The project management tools made collaboration seamless. We completed our sustainability project with team members from three countries." },
                             ].map((t, i) => (
                                 <div key={i} className="border border-border bg-background hover:border-primary transition-colors p-6 flex flex-col">
                                     <div className="flex items-center gap-3 mb-5">

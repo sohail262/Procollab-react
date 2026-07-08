@@ -465,8 +465,7 @@ export function GoogleDocsPanel() {
                             size="lg"
                             onClick={handleConnectGoogle}
                             disabled={connecting}
-                            className="bg-blue-600 hover:bg-blue-700 text-white
-                                       shadow-lg shadow-blue-500/25 gap-3 px-8"
+                            className="shadow-lg shadow-white/5 gap-3 px-8"
                         >
                             <img
                                 src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg"

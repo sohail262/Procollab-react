@@ -134,14 +134,14 @@ export function WelcomeScreen({
     return (
         <>
             <style>{`
-                @import url('https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&display=swap');
+                @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300..800;1,300..800&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&display=swap');
 
                 /* ── Root ─────────────────────────────────────────────────── */
                 .wlc-root {
                     position: fixed;
                     inset: 0;
                     z-index: 9999;
-                    background: #080a0e;
+                    background: #050a08;
                     display: flex;
                     flex-direction: column;
                     align-items: center;
@@ -163,9 +163,9 @@ export function WelcomeScreen({
                 .wlc-bg {
                     position: absolute; inset: 0; pointer-events: none;
                     background:
-                        radial-gradient(ellipse 65% 55% at 15% 65%, rgba(59,130,246,0.07) 0%, transparent 70%),
-                        radial-gradient(ellipse 45% 65% at 85% 25%, rgba(99,102,241,0.06) 0%, transparent 70%),
-                        radial-gradient(ellipse 80% 35% at 50% 105%, rgba(16,185,129,0.035) 0%, transparent 70%);
+                        radial-gradient(ellipse 65% 55% at 15% 65%, rgba(16,185,129,0.08) 0%, transparent 70%),
+                        radial-gradient(ellipse 45% 65% at 85% 25%, rgba(5,150,105,0.06) 0%, transparent 70%),
+                        radial-gradient(ellipse 80% 35% at 50% 105%, rgba(16,185,129,0.04) 0%, transparent 70%);
                 }
                 .wlc-grid {
                     position: absolute; inset: 0; pointer-events: none;
@@ -177,7 +177,7 @@ export function WelcomeScreen({
                 .wlc-rule {
                     position: absolute; top: 0; left: 0; right: 0;
                     height: 1px; pointer-events: none;
-                    background: linear-gradient(90deg, transparent 0%, rgba(99,102,241,0.7) 30%, rgba(59,130,246,0.5) 70%, transparent 100%);
+                    background: linear-gradient(90deg, transparent 0%, rgba(16,185,129,0.7) 30%, rgba(5,150,105,0.5) 70%, transparent 100%);
                     animation: wlcRuleIn 1.4s cubic-bezier(0.4,0,0.2,1) forwards;
                     transform-origin: left center;
                 }
@@ -190,10 +190,10 @@ export function WelcomeScreen({
                     opacity: 0;
                     animation: wlcRise 0.7s ease 1.1s forwards;
                 }
-                .wlc-corner.tl { top: 28px; left: 28px; border-top: 1px solid rgba(99,102,241,0.32); border-left: 1px solid rgba(99,102,241,0.32); }
-                .wlc-corner.tr { top: 28px; right: 28px; border-top: 1px solid rgba(99,102,241,0.32); border-right: 1px solid rgba(99,102,241,0.32); }
-                .wlc-corner.bl { bottom: 28px; left: 28px; border-bottom: 1px solid rgba(99,102,241,0.32); border-left: 1px solid rgba(99,102,241,0.32); }
-                .wlc-corner.br { bottom: 28px; right: 28px; border-bottom: 1px solid rgba(99,102,241,0.32); border-right: 1px solid rgba(99,102,241,0.32); }
+                .wlc-corner.tl { top: 28px; left: 28px; border-top: 1px solid rgba(16,185,129,0.32); border-left: 1px solid rgba(16,185,129,0.32); }
+                .wlc-corner.tr { top: 28px; right: 28px; border-top: 1px solid rgba(16,185,129,0.32); border-right: 1px solid rgba(16,185,129,0.32); }
+                .wlc-corner.bl { bottom: 28px; left: 28px; border-bottom: 1px solid rgba(16,185,129,0.32); border-left: 1px solid rgba(16,185,129,0.32); }
+                .wlc-corner.br { bottom: 28px; right: 28px; border-bottom: 1px solid rgba(16,185,129,0.32); border-right: 1px solid rgba(16,185,129,0.32); }
 
                 /* ── Brand ─────────────────────────────────────────────────── */
                 .wlc-brand {
@@ -204,13 +204,14 @@ export function WelcomeScreen({
                 }
                 .wlc-brand-mark {
                     width: 30px; height: 30px; border-radius: 8px;
-                    background: linear-gradient(135deg, #3b82f6 0%, #6366f1 100%);
+                    background: linear-gradient(135deg, #10b981 0%, #059669 100%);
                     display: flex; align-items: center; justify-content: center;
                     flex-shrink: 0;
                 }
                 .wlc-brand-mark span {
-                    font-family: 'DM Serif Display', serif;
+                    font-family: 'Plus Jakarta Sans', sans-serif;
                     font-size: 15px; color: #fff; line-height: 1; margin-top: 1px;
+                    font-weight: 700;
                 }
                 .wlc-brand-name {
                     font-size: 11px; font-weight: 400;
@@ -228,13 +229,13 @@ export function WelcomeScreen({
                     display: block;
                     font-size: 10px; font-weight: 500;
                     letter-spacing: 0.26em; text-transform: uppercase;
-                    color: rgba(99,102,241,0.85); margin-bottom: 14px;
+                    color: rgba(16,185,129,0.85); margin-bottom: 14px;
                 }
                 .wlc-name {
-                    font-family: 'DM Serif Display', serif;
+                    font-family: 'Plus Jakarta Sans', sans-serif;
                     font-size: clamp(32px, 8vw, 68px);
                     color: #fff; line-height: 1.05;
-                    font-weight: 400; letter-spacing: -0.02em;
+                    font-weight: 700; letter-spacing: -0.02em;
                 }
                 .wlc-name em {
                     font-style: italic; color: rgba(255,255,255,0.7);
@@ -276,15 +277,15 @@ export function WelcomeScreen({
                 .wlc-pillar.active { opacity: 1; }
                 .wlc-pillar-dot {
                     width: 4px; height: 4px; border-radius: 50%;
-                    background: rgba(99,102,241,0.5); margin-bottom: 2px;
+                    background: rgba(16,185,129,0.5); margin-bottom: 2px;
                     transition: background 0.5s ease, transform 0.5s ease;
                 }
                 .wlc-pillar.active .wlc-pillar-dot {
-                    background: #818cf8; transform: scale(1.6);
+                    background: #34d399; transform: scale(1.6);
                 }
                 .wlc-pillar-label {
-                    font-family: 'DM Serif Display', serif;
-                    font-size: 18px; color: #fff; font-weight: 400;
+                    font-family: 'Plus Jakarta Sans', sans-serif;
+                    font-size: 18px; color: #fff; font-weight: 600;
                     letter-spacing: -0.01em; white-space: nowrap;
                 }
                 .wlc-pillar-desc {
@@ -304,7 +305,7 @@ export function WelcomeScreen({
                 }
                 .wlc-progress-fill {
                     height: 100%;
-                    background: linear-gradient(90deg, #6366f1, #3b82f6);
+                    background: linear-gradient(90deg, #10b981, #059669);
                     border-radius: 1px;
                     animation: wlcProgress ${totalHold}ms cubic-bezier(0.4,0,0.2,1) ${enterMs}ms forwards;
                 }
@@ -349,11 +350,12 @@ export function WelcomeScreen({
                     box-sizing: border-box;
                 }
                 .wlc-q-title {
-                    font-family: 'DM Serif Display', serif;
+                    font-family: 'Plus Jakarta Sans', sans-serif;
                     font-size: 32px;
                     color: #fff;
                     margin-bottom: 8px;
                     letter-spacing: -0.01em;
+                    font-weight: 700;
                 }
                 .wlc-q-subtitle {
                     font-size: 14px;

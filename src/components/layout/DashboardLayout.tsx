@@ -1,10 +1,10 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import { Button } from '@/components/ui/button'
-import { ModeToggle } from '@/components/mode-toggle'
+import { Logo } from '@/components/layout/Logo'
 import { ConnectionRequestsDropdown } from '@/components/ConnectionRequestsDropdown'
 import { NotificationsDropdown } from '@/components/NotificationsDropdown'
-import { AnimatePresence } from 'framer-motion'
+import { AnimatePresence, motion } from 'framer-motion'
 import { NotificationPermissionPrompt } from '@/components/NotificationPermissionPrompt'
 import { useNotificationPrompt } from '@/hooks/useNotificationPrompt'
 import {
@@ -168,33 +168,31 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
     }
 
     return (
-        <div className="min-h-screen bg-gray-50 dark:bg-gray-950">
-            {/* Top Navigation Bar */}
-            <nav className="fixed top-0 z-50 w-full bg-white border-b border-gray-200 dark:bg-gray-900 dark:border-gray-800">
-                <div className="px-3 py-3 lg:px-5 lg:pl-3">
+        <div className="min-h-screen bg-background">
+            {/* Top Navigation Bar — Frosted Glass */}
+            <nav className="fixed top-0 z-50 w-full glass border-b border-border/40">
+                <div className="px-4 py-3 lg:px-6">
                     <div className="flex items-center justify-between">
                         <div className="flex items-center justify-start">
                             <button
                                 onClick={() => setSidebarOpen(!sidebarOpen)}
-                                className="inline-flex items-center p-2 text-sm text-gray-500 rounded-lg lg:hidden hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-gray-200 dark:text-gray-400 dark:hover:bg-gray-700 dark:focus:ring-gray-600"
+                                className="inline-flex items-center p-2 text-muted-foreground rounded-lg lg:hidden hover:bg-accent hover:text-foreground transition-all duration-200"
                             >
-                                {sidebarOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+                                {sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
                             </button>
-                            <Link to="/" className="flex ml-2 md:mr-24">
-                                <span className="self-center text-xl font-semibold sm:text-2xl whitespace-nowrap dark:text-white">
-                                    ProCollab
-                                </span>
+                            <Link to="/" className="flex items-center ml-2 md:mr-24 group">
+                                <Logo iconSize={38} showText={true} />
                             </Link>
                         </div>
-                        <div className="flex items-center gap-1 sm:gap-3">
+                        <div className="flex items-center gap-2 sm:gap-3">
                             <div ref={searchRef} className="relative hidden md:block">
                                 <div className="relative">
                                     <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
-                                        <Search className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                                        <Search className="w-3.5 h-3.5 text-muted-foreground" />
                                     </div>
                                     <input
                                         type="text"
-                                        className="block w-64 p-2 pl-10 pr-8 text-sm text-gray-900 border border-gray-300 rounded-lg bg-gray-50 focus:ring-blue-500 focus:border-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:placeholder-gray-400 dark:text-white"
+                                        className="block w-56 p-2 pl-9 pr-8 text-sm bg-transparent border border-border/50 rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-foreground/15 focus:border-foreground/20 transition-all duration-200"
                                         placeholder="Search projects..."
                                         value={searchQuery}
                                         onChange={(e) => setSearchQuery(e.target.value)}
@@ -203,36 +201,36 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                                     {searchQuery && (
                                         <button
                                             onClick={() => setSearchQuery('')}
-                                            className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                                            className="absolute right-2 top-1/2 transform -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
                                         >
-                                            <X className="h-4 w-4" />
+                                            <X className="h-3.5 w-3.5" />
                                         </button>
                                     )}
                                 </div>
 
                                 {/* Search Results Dropdown */}
                                 {isSearchFocused && searchQuery && (
-                                    <div className="absolute top-full mt-2 left-0 right-0 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg overflow-hidden z-50 min-w-[300px]">
+                                    <div className="absolute top-full mt-2 left-0 right-0 bg-card border border-border/50 rounded-xl shadow-2xl overflow-hidden z-50 min-w-[300px]">
                                         {searchResults.length > 0 ? (
                                             <div className="max-h-[300px] overflow-y-auto">
                                                 {searchResults.map((project) => (
                                                     <div
                                                         key={project.id}
                                                         onClick={() => handleProjectClick(project.id)}
-                                                        className="flex items-center gap-3 p-3 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer border-b border-gray-100 dark:border-gray-700 last:border-b-0 transition-colors"
+                                                        className="flex items-center gap-3 p-3 hover:bg-accent cursor-pointer border-b border-border/30 last:border-b-0 transition-colors duration-150"
                                                     >
-                                                        <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-white text-xs font-bold">
+                                                        <div className="w-8 h-8 rounded-lg bg-foreground/10 flex items-center justify-center text-foreground text-xs font-semibold">
                                                             {project.title?.charAt(0) || 'P'}
                                                         </div>
                                                         <div className="flex-1 min-w-0">
-                                                            <p className="font-medium text-sm text-gray-900 dark:text-white truncate">{project.title}</p>
-                                                            <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{project.primaryDiscipline || 'Project'}</p>
+                                                            <p className="font-medium text-sm text-foreground truncate">{project.title}</p>
+                                                            <p className="text-xs text-muted-foreground truncate">{project.primaryDiscipline || 'Project'}</p>
                                                         </div>
                                                     </div>
                                                 ))}
                                             </div>
                                         ) : (
-                                            <div className="p-4 text-center text-gray-500 dark:text-gray-400 text-sm">
+                                            <div className="p-4 text-center text-muted-foreground text-sm">
                                                 No projects found for "{searchQuery}"
                                             </div>
                                         )}
@@ -241,24 +239,23 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                             </div>
                             <ConnectionRequestsDropdown />
                             <NotificationsDropdown />
-                            <ModeToggle />
-                            <div className="flex items-center gap-1 sm:gap-3">
+                            <div className="flex items-center gap-2 sm:gap-3">
                                 <button
                                     onClick={() => navigate('/profile')}
-                                    className="focus:outline-none focus:ring-2 focus:ring-blue-500 rounded-full"
+                                    className="focus:outline-none rounded-full ring-1 ring-border/50 hover:ring-foreground/20 transition-all duration-200"
                                     title="View Profile"
                                 >
                                     <img
                                         key={getUserAvatarUrl()}
                                         src={getUserAvatarUrl()}
                                         alt="User avatar"
-                                        className="w-8 h-8 sm:w-10 sm:h-10 rounded-full border-2 border-gray-300 dark:border-gray-600 hover:border-blue-500 dark:hover:border-blue-400 transition-colors cursor-pointer"
+                                        className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-muted"
                                     />
                                 </button>
-                                <span className="text-sm text-gray-700 dark:text-gray-300 hidden md:block">
+                                <span className="text-sm text-muted-foreground hidden md:block">
                                     {user?.displayName || user?.email?.split('@')[0]}
                                 </span>
-                                <Button variant="ghost" size="sm" onClick={handleLogout} className="hidden sm:flex">
+                                <Button variant="ghost" size="sm" onClick={handleLogout} className="hidden sm:flex text-muted-foreground hover:text-foreground">
                                     <LogOut className="h-4 w-4" />
                                 </Button>
                             </div>
@@ -267,61 +264,86 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                 </div>
             </nav>
 
-            {/* Sidebar */}
+            {/* Sidebar — Frosted Glass */}
             <aside
-                className={`fixed top-0 left-0 z-40 w-64 h-screen pt-20 transition-transform ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'
-                    } bg-white border-r border-gray-200 lg:translate-x-0 dark:bg-gray-900 dark:border-gray-800`}
+                className={`fixed top-0 left-0 z-40 w-64 h-screen pt-20 transition-transform duration-300 ease-premium ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'
+                    } glass border-r border-border/40 lg:translate-x-0`}
             >
                 <div className="h-full px-3 pb-4 overflow-y-auto flex flex-col">
-                    <ul className="space-y-2 font-medium flex-1">
-                        {navigation.map((item) => {
+                    <ul className="space-y-0.5 font-medium flex-1 mt-2">
+                        {navigation.map((item, index) => {
                             const isActive = location.pathname === item.href
                             return (
-                                <li key={item.name}>
+                                <motion.li
+                                    key={item.name}
+                                    initial={{ opacity: 0, x: -8 }}
+                                    animate={{ opacity: 1, x: 0 }}
+                                    transition={{ delay: index * 0.04, duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+                                >
                                     <Link
                                         to={item.href}
                                         onClick={() => setSidebarOpen(false)}
-                                        className={`flex items-center p-2 rounded-lg group ${isActive
-                                            ? 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300'
-                                            : 'text-gray-900 hover:bg-gray-100 dark:text-white dark:hover:bg-gray-700'
+                                        className={`relative flex items-center px-3 py-2.5 rounded-lg group transition-all duration-200 ${isActive
+                                            ? 'bg-foreground/[0.06] text-foreground'
+                                            : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
                                             }`}
                                     >
-                                        <item.icon className={`w-5 h-5 transition duration-75 ${isActive ? 'text-blue-700 dark:text-blue-300' : 'text-gray-500 dark:text-gray-400'
-                                            }`} />
-                                        <span className="ml-3">{item.name}</span>
+                                        {/* Active indicator bar */}
+                                        {isActive && (
+                                            <motion.div
+                                                layoutId="sidebar-active"
+                                                className="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] h-4 bg-foreground rounded-full"
+                                                transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+                                            />
+                                        )}
+                                        <item.icon className={`w-[18px] h-[18px] transition-colors duration-200 ${isActive ? 'text-foreground' : 'text-muted-foreground group-hover:text-foreground'
+                                            }`} strokeWidth={1.5} />
+                                        <span className="ml-3 text-[13px]">{item.name}</span>
                                     </Link>
-                                </li>
+                                </motion.li>
                             )
                         })}
                     </ul>
 
                     {/* Logout — mobile sidebar only */}
-                    <div className="pt-3 mt-3 border-t border-gray-200 dark:border-gray-800 lg:hidden">
+                    <div className="pt-3 mt-3 border-t border-border/30 lg:hidden">
                         <button
                             onClick={handleLogout}
-                            className="w-full flex items-center p-2 rounded-lg text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                            className="w-full flex items-center px-3 py-2.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-all duration-200"
                         >
-                            <LogOut className="w-5 h-5" />
-                            <span className="ml-3 font-medium">Log out</span>
+                            <LogOut className="w-[18px] h-[18px]" strokeWidth={1.5} />
+                            <span className="ml-3 text-[13px] font-medium">Log out</span>
                         </button>
                     </div>
                 </div>
             </aside>
 
             {/* Main Content */}
-            <div className="pt-20 px-3 pb-3 sm:px-4 sm:pb-4 lg:ml-64">
-                <div className="rounded-lg">
+            <div className="pt-20 px-4 pb-4 sm:px-6 sm:pb-6 lg:ml-64">
+                <motion.div
+                    key={location.pathname}
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+                    className="rounded-lg"
+                >
                     {children}
-                </div>
+                </motion.div>
             </div>
 
             {/* Mobile sidebar overlay */}
-            {sidebarOpen && (
-                <div
-                    className="fixed inset-0 z-30 bg-gray-900/50 lg:hidden"
-                    onClick={() => setSidebarOpen(false)}
-                ></div>
-            )}
+            <AnimatePresence>
+                {sidebarOpen && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        transition={{ duration: 0.2 }}
+                        className="fixed inset-0 z-30 bg-black/40 backdrop-blur-sm lg:hidden"
+                        onClick={() => setSidebarOpen(false)}
+                    />
+                )}
+            </AnimatePresence>
 
             {/* Notification Permission Prompt */}
             <AnimatePresence>

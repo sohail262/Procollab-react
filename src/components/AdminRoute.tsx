@@ -49,7 +49,7 @@ export function AdminRoute({ children }: AdminRouteProps) {
                     </p>
                     <a
                         href="/dashboard"
-                        className="inline-flex items-center justify-center px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
+                        className="inline-flex items-center justify-center px-4 py-2 border border-white/20 bg-transparent text-white rounded-lg hover:bg-white/5 hover:border-white/40 active:scale-[0.97] transition-all duration-300"
                     >
                         Go to Dashboard
                     </a>

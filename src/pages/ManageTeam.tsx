@@ -29,6 +29,7 @@ import {
     ArrowLeft, Mail, Trash2, Users, ClipboardList,
     Settings, Shield, Kanban, FileText, MessageSquare,
     Calendar, LayoutDashboard, Pencil, ExternalLink, X,
+    Clock, AlertTriangle, Zap, Loader2,
 } from 'lucide-react'
 import {
     doc, getDoc, getDocs, collection, query, where,
@@ -166,6 +167,7 @@ export function ManageTeam() {
     const [inviteEmail,   setInviteEmail]   = useState('')
     const [inviteRole,    setInviteRole]    = useState<'member' | 'viewer'>('member')
     const [inviteLoading, setInviteLoading] = useState(false)
+    const [actionLoadingId, setActionLoadingId] = useState<string | null>(null)
     const [members,       setMembers]       = useState<TeamMember[]>([])
     const [invitations,   setInvitations]   = useState<Invitation[]>([])
     const [joinRequests,  setJoinRequests]  = useState<JoinRequest[]>([])
@@ -367,6 +369,42 @@ export function ManageTeam() {
         })
     }, [activeTab, joinRequests, id, user])
 
+    // ✅ Fire stale-application alerts when owner visits the Applications tab
+    // Triggers for any application pending 5+ days that hasn't been alerted this session
+    useEffect(() => {
+        if (!id || !user || activeTab !== 'applications' || joinRequests.length === 0) return
+
+        const STALE_DAYS = 5
+        const SESSION_KEY = `stale-alerts-${id}`
+        const alreadyAlerted = new Set<string>(
+            JSON.parse(sessionStorage.getItem(SESSION_KEY) || '[]')
+        )
+
+        const staleRequests = joinRequests.filter(r => {
+            const activeStatuses = ['applied', 'viewed', 'pending']
+            if (!activeStatuses.includes(r.status)) return false
+            const daysPending = Math.floor((Date.now() - r.appliedAt.getTime()) / (1000 * 60 * 60 * 24))
+            return daysPending >= STALE_DAYS && !alreadyAlerted.has(r.id)
+        })
+
+        if (staleRequests.length === 0) return
+
+        const newAlerted = [...alreadyAlerted]
+        staleRequests.forEach(async (request) => {
+            try {
+                await import('@/services/notificationTrigger').then(({ triggerStaleApplicationAlert }) =>
+                    triggerStaleApplicationAlert(user.uid, request.userId, id, request.id)
+                )
+                newAlerted.push(request.id)
+            } catch (err) {
+                console.warn('[ManageTeam] Failed to send stale alert for', request.id, err)
+            }
+        })
+
+        // Persist alerted IDs for this session so we don't spam
+        try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(newAlerted)) } catch { /* quota */ }
+    }, [activeTab, joinRequests, id, user])
+
     // ── Invite ────────────────────────────────────────────
     const handleInvite = async () => {
         if (!id || !user || !inviteEmail.trim()) return
@@ -508,8 +546,13 @@ export function ManageTeam() {
 
     const handleCancelInvite = async (inviteId: string) => {
         if (!id) return
+
+        // ── Optimistic update: remove invitation card immediately ─────────────
+        const previousInvitations = invitations
+        setInvitations(prev => prev.filter(i => i.id !== inviteId))
+
         try {
-            const invDoc = invitations.find(i => i.id === inviteId)
+            const invDoc = previousInvitations.find(i => i.id === inviteId)
             await deleteDoc(
                 doc(db, 'projects', id, 'invitations', inviteId)
             )
@@ -520,10 +563,12 @@ export function ManageTeam() {
             }
             toast({ title: 'Invitation cancelled' })
         } catch (error) {
+            // ── Rollback ──────────────────────────────────────────────────────
+            setInvitations(previousInvitations)
             console.error('Error cancelling invitation:', error)
             toast({
-                title:       'Error',
-                description: 'Failed to cancel invitation.',
+                title:       "Changes couldn't be saved.",
+                description: 'Failed to cancel invitation. Please try again.',
                 variant:     'destructive',
             })
         }
@@ -542,6 +587,22 @@ export function ManageTeam() {
     const handleRemoveMember = async () => {
         const { memberId, memberUid, memberName } = removeDialog
         if (!id || !memberId) return
+
+        // ── Optimistic update: remove member row + decrement count instantly ──
+        const previousMembers = members
+        const previousProject = project
+        setMembers(prev => prev.filter(m => m.id !== memberId))
+        if (project) {
+            setProject((prev: any) => prev
+                ? { ...prev, currentMembers: Math.max(0, (prev.currentMembers ?? 1) - 1) }
+                : prev
+            )
+        }
+        if (selectedMember?.uid === memberUid) setSelectedMember(null)
+
+        // Close dialog immediately so UX feels responsive
+        setRemoveDialog({ open: false, memberId: '', memberUid: '', memberName: '' })
+        setRemovalReason('')
 
         try {
             const batch = writeBatch(db)
@@ -565,8 +626,8 @@ export function ManageTeam() {
 
             await batch.commit()
 
-            // ✅ Notify removed member
-            await sendNotificationWithPush(memberUid, {
+            // ✅ Notify removed member (fire-and-forget, non-blocking)
+            sendNotificationWithPush(memberUid, {
                 title:     'Removed from Project',
                 body:      `You have been removed from "${
                     project?.title ?? 'a project'
@@ -574,27 +635,23 @@ export function ManageTeam() {
                 type:      'warning',
                 url:       '/discover',
                 projectId: id,
-            })
+            }).catch(err => console.warn('[ManageTeam] notify removed member failed:', err))
 
             toast({
                 title:       'Member removed',
                 description: `${memberName} has been removed and notified.`,
             })
 
-            if (selectedMember?.uid === memberUid) setSelectedMember(null)
-
         } catch (error) {
+            // ── Rollback ──────────────────────────────────────────────────────
+            setMembers(previousMembers)
+            setProject(previousProject)
             console.error('Error removing member:', error)
             toast({
-                title:       'Error',
-                description: 'Failed to remove member.',
+                title:       "Changes couldn't be saved.",
+                description: 'Failed to remove member. Please try again.',
                 variant:     'destructive',
             })
-        } finally {
-            setRemoveDialog({
-                open: false, memberId: '', memberUid: '', memberName: '',
-            })
-            setRemovalReason('')
         }
     }
 
@@ -730,6 +787,13 @@ export function ManageTeam() {
         newStatus: 'shortlisted' | 'interviewing' | 'rejected'
     ) => {
         if (!id || !user) return
+
+        // ── Optimistic update: update applicant status badge instantly ────────
+        const previousJoinRequests = joinRequests
+        setJoinRequests(prev => prev.map(r =>
+            r.id === request.id ? { ...r, status: newStatus } : r
+        ))
+
         try {
             const statusEntry = {
                 status: newStatus,
@@ -749,27 +813,20 @@ export function ManageTeam() {
             // Track application resolution
             trackApplicationResolved(user.uid, request.userId, id, newStatus)
 
-
-            // 2. Update user side
-            const userAppsSnap = await getDocs(
-                query(
-                    collection(db, 'users', request.userId, 'applications'),
-                    where('projectId', '==', id)
-                )
-            )
-            await Promise.all(
-                userAppsSnap.docs.map(appDoc =>
+            // 2. Update user side (fire-and-forget — applicant's own view)
+            getDocs(query(
+                collection(db, 'users', request.userId, 'applications'),
+                where('projectId', '==', id)
+            )).then(userAppsSnap =>
+                Promise.all(userAppsSnap.docs.map(appDoc =>
                     updateDoc(
                         doc(db, 'users', request.userId, 'applications', appDoc.id),
-                        {
-                            status: newStatus,
-                            statusHistory: arrayUnion(statusEntry)
-                        }
+                        { status: newStatus, statusHistory: arrayUnion(statusEntry) }
                     )
-                )
-            )
+                ))
+            ).catch(err => console.warn('[ManageTeam] user-side status sync failed:', err))
 
-            // 3. Send notification
+            // 3. Send notification (fire-and-forget)
             let title = 'Application Update'
             let body = `Your application to join "${project?.title || 'project'}" has been updated.`
             let type: 'info' | 'success' | 'warning' = 'info'
@@ -788,23 +845,25 @@ export function ManageTeam() {
                 type = 'warning'
             }
 
-            await sendNotificationWithPush(request.userId, {
+            sendNotificationWithPush(request.userId, {
                 title,
                 body,
                 type,
                 url: '/dashboard/applications',
                 projectId: id,
-            })
+            }).catch(err => console.warn('[ManageTeam] notify status update failed:', err))
 
             toast({
                 title: `Application ${newStatus}`,
                 description: `${request.userName || request.userEmail} notified.`,
             })
         } catch (error) {
+            // ── Rollback ──────────────────────────────────────────────────────
+            setJoinRequests(previousJoinRequests)
             console.error(`Error updating application to ${newStatus}:`, error)
             toast({
-                title: 'Error',
-                description: `Failed to update application status.`,
+                title: "Changes couldn't be saved.",
+                description: 'Failed to update application status. Please try again.',
                 variant: 'destructive',
             })
         }
@@ -813,7 +872,7 @@ export function ManageTeam() {
     const performAcceptRequest = async (request: JoinRequest) => {
         if (!id || !user) return
 
-        // Guard: check if already a member
+        // Guard: check if already a member (blocking — prevents duplicates)
         const existingMemberSnap = await getDoc(
             doc(db, 'projects', id, 'members', request.userId)
         )
@@ -830,15 +889,40 @@ export function ManageTeam() {
             return
         }
 
-        try {
-            const displayName  = request.userName || request.userEmail
-            const defaultPerms = getDefaultPermissions('member')
-            const statusEntry = {
-                status: 'accepted',
-                timestamp: new Date(),
-                changedBy: user.uid
-            }
+        const displayName  = request.userName || request.userEmail
+        const defaultPerms = getDefaultPermissions('member')
+        const statusEntry  = {
+            status:    'accepted',
+            timestamp: new Date(),
+            changedBy: user.uid
+        }
 
+        // ── Optimistic update: remove applicant from queue + add to members + increment count ──
+        const previousJoinRequests = joinRequests
+        const previousMembers      = members
+        const previousProject      = project
+
+        const optimisticMember: TeamMember = {
+            id:          request.userId,
+            uid:         request.userId,
+            name:        displayName,
+            email:       request.userEmail,
+            avatar:      request.userAvatar,
+            role:        'member',
+            joinedAt:    new Date(),
+            permissions: defaultPerms,
+        }
+
+        setJoinRequests(prev => prev.filter(r => r.id !== request.id))
+        setMembers(prev => [...prev, optimisticMember])
+        if (project) {
+            setProject((prev: any) => prev
+                ? { ...prev, currentMembers: (prev.currentMembers ?? 1) + 1 }
+                : prev
+            )
+        }
+
+        try {
             const batch = writeBatch(db)
 
             // 1. Write to members subcollection
@@ -881,10 +965,7 @@ export function ManageTeam() {
             // 4. Mark application accepted and update history
             batch.update(
                 doc(db, 'projects', id, 'applications', request.id),
-                { 
-                    status: 'accepted',
-                    statusHistory: arrayUnion(statusEntry)
-                }
+                { status: 'accepted', statusHistory: arrayUnion(statusEntry) }
             )
 
             await batch.commit()
@@ -893,41 +974,29 @@ export function ManageTeam() {
             trackApplicationResolved(user.uid, request.userId, id, 'accepted')
 
             // Track team formed event
-            const newTeamSize = (project?.currentMembers || 1) + 1
+            const newTeamSize = (previousProject?.currentMembers || 1) + 1
             if (newTeamSize >= 2) {
                 trackTeamFormed(user.uid, id, newTeamSize)
-                
-                // Set functionalDuoAt if not set yet
-                const projectRef = doc(db, 'projects', id)
-                await updateDoc(projectRef, {
+                updateDoc(doc(db, 'projects', id), {
                     functionalDuoAt: serverTimestamp()
                 }).catch(() => {})
             }
 
-
-
-            // 5. Update user's applications subcollection docs
-            const userAppsSnap = await getDocs(
-                query(
-                    collection(db, 'users', request.userId, 'applications'),
-                    where('projectId', '==', id)
-                )
-            )
-
-            await Promise.all(
-                userAppsSnap.docs.map(appDoc =>
+            // 5. Update user's applications subcollection (fire-and-forget)
+            getDocs(query(
+                collection(db, 'users', request.userId, 'applications'),
+                where('projectId', '==', id)
+            )).then(userAppsSnap =>
+                Promise.all(userAppsSnap.docs.map(appDoc =>
                     updateDoc(
                         doc(db, 'users', request.userId, 'applications', appDoc.id),
-                        { 
-                            status: 'accepted',
-                            statusHistory: arrayUnion(statusEntry)
-                        }
+                        { status: 'accepted', statusHistory: arrayUnion(statusEntry) }
                     )
-                )
-            )
+                ))
+            ).catch(err => console.warn('[ManageTeam] user-side accept sync failed:', err))
 
-            // 6. Notify accepted member
-            await sendNotificationWithPush(request.userId, {
+            // 6. Notify accepted member (fire-and-forget)
+            sendNotificationWithPush(request.userId, {
                 title:     'Application Accepted!',
                 body:      `Your application to join "${
                     project?.title ?? 'a project'
@@ -935,7 +1004,7 @@ export function ManageTeam() {
                 type:      'success',
                 url:       `/project/${id}/dashboard`,
                 projectId: id,
-            })
+            }).catch(err => console.warn('[ManageTeam] notify accept failed:', err))
 
             toast({
                 title:       'Application accepted',
@@ -944,22 +1013,17 @@ export function ManageTeam() {
 
             // Auto-navigate to permissions tab for new member
             setActiveTab('permissions')
-            setSelectedMember({
-                id:          request.userId,
-                uid:         request.userId,
-                name:        displayName,
-                email:       request.userEmail,
-                avatar:      request.userAvatar,
-                role:        'member',
-                joinedAt:    new Date(),
-                permissions: defaultPerms,
-            })
+            setSelectedMember(optimisticMember)
 
         } catch (error) {
+            // ── Rollback all three slices ─────────────────────────────────────
+            setJoinRequests(previousJoinRequests)
+            setMembers(previousMembers)
+            setProject(previousProject)
             console.error('Error accepting request:', error)
             toast({
-                title:       'Error',
-                description: 'Failed to accept application.',
+                title:       "Changes couldn't be saved.",
+                description: 'Failed to accept application. Please try again.',
                 variant:     'destructive',
             })
         }
@@ -984,12 +1048,16 @@ export function ManageTeam() {
         if (!pendingAction) return
         const { type, request, newStatus } = pendingAction
 
+        setActionLoadingId(request.id)
+
         // 1. First run the database updates
         if (type === 'status' && newStatus) {
             await performStatusUpdate(request, newStatus)
         } else if (type === 'accept') {
             await performAcceptRequest(request)
         }
+
+        setActionLoadingId(null)
 
         // 2. Open email client if not skipped
         if (client !== 'skip') {
@@ -1036,6 +1104,18 @@ export function ManageTeam() {
 
 
     // ── Helpers ───────────────────────────────────────────
+
+    /** Returns how many calendar days ago this date was */
+    const getDaysAgo = (date: Date): number =>
+        Math.floor((Date.now() - date.getTime()) / (1000 * 60 * 60 * 24))
+
+    /** Color token for application age badge */
+    const getAgeBadgeStyle = (days: number): string => {
+        if (days <= 1) return 'bg-green-50 text-green-700 border-green-200 dark:bg-green-950/20 dark:text-green-400 dark:border-green-800'
+        if (days <= 4) return 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/20 dark:text-amber-400 dark:border-amber-800'
+        return 'bg-red-50 text-red-700 border-red-200 dark:bg-red-950/20 dark:text-red-400 dark:border-red-800'
+    }
+
     const getAppStatusColor = (status: string) => {
         switch (status) {
             case 'applied':
@@ -1537,6 +1617,29 @@ export function ManageTeam() {
                                 </CardDescription>
                             </CardHeader>
                             <CardContent>
+                                {/* ── Stale Application Nudge Banner ── */}
+                                {(() => {
+                                    const staleCount = joinRequests.filter(r => {
+                                        const active = ['applied', 'viewed', 'pending']
+                                        return active.includes(r.status) && getDaysAgo(r.appliedAt) >= 2
+                                    }).length
+                                    if (staleCount === 0) return null
+                                    return (
+                                        <div className="mb-4 flex items-start gap-3 p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800">
+                                            <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400 mt-0.5 shrink-0" />
+                                            <div className="flex-1 min-w-0">
+                                                <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">
+                                                    {staleCount} application{staleCount > 1 ? 's' : ''} waiting for your response
+                                                </p>
+                                                <p className="text-xs text-amber-700 dark:text-amber-400 mt-0.5">
+                                                    Applicants who wait longer than 48h are more likely to lose interest. Review now to keep your team forming fast.
+                                                </p>
+                                            </div>
+                                            <Zap className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+                                        </div>
+                                    )
+                                })()}
+
                                 {joinRequests.length === 0 ? (
                                     <div className="text-center py-8 text-muted-foreground">
                                         <ClipboardList className="h-12 w-12 mx-auto mb-3 opacity-20" />
@@ -1594,9 +1697,10 @@ export function ManageTeam() {
                                                                     size="sm"
                                                                     variant="outline"
                                                                     className="h-8 text-xs border-amber-200 text-amber-700 hover:bg-amber-50 hover:text-amber-800"
+                                                                    disabled={actionLoadingId === request.id}
                                                                     onClick={() => handleUpdateStatus(request, 'shortlisted')}
                                                                 >
-                                                                    Shortlist
+                                                                    {actionLoadingId === request.id ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Shortlist'}
                                                                 </Button>
                                                             )}
                                                             {/* Interview trigger */}
@@ -1605,27 +1709,36 @@ export function ManageTeam() {
                                                                     size="sm"
                                                                     variant="outline"
                                                                     className="h-8 text-xs border-cyan-200 text-cyan-700 hover:bg-cyan-50 hover:text-cyan-800"
+                                                                    disabled={actionLoadingId === request.id}
                                                                     onClick={() => handleUpdateStatus(request, 'interviewing')}
                                                                 >
-                                                                    Invite to Interview
+                                                                    {actionLoadingId === request.id ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Invite to Interview'}
                                                                 </Button>
                                                             )}
                                                             {/* Accept trigger */}
                                                             <Button
                                                                 size="sm"
                                                                 className="h-8 text-xs bg-green-600 hover:bg-green-700 text-white font-medium"
+                                                                disabled={actionLoadingId === request.id}
                                                                 onClick={() => handleAcceptRequest(request)}
                                                             >
-                                                                Accept
+                                                                {actionLoadingId === request.id
+                                                                    ? <Loader2 className="h-3 w-3 animate-spin" />
+                                                                    : 'Accept'
+                                                                }
                                                             </Button>
                                                             {/* Reject trigger */}
                                                             <Button
                                                                 size="sm"
                                                                 variant="outline"
                                                                 className="h-8 text-xs text-red-600 hover:bg-red-50 hover:text-red-750 border-red-200/50"
+                                                                disabled={actionLoadingId === request.id}
                                                                 onClick={() => handleUpdateStatus(request, 'rejected')}
                                                             >
-                                                                Reject
+                                                                {actionLoadingId === request.id
+                                                                    ? <Loader2 className="h-3 w-3 animate-spin" />
+                                                                    : 'Reject'
+                                                                }
                                                             </Button>
                                                         </div>
                                                     </div>
@@ -1658,7 +1771,7 @@ export function ManageTeam() {
                                                         )}
                                                     </div>
 
-                                                    <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-1 border-t border-dashed">
+                                                    <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-1 border-t border-dashed flex-wrap gap-y-1">
                                                         <span>
                                                             Position: <strong className="text-foreground">{request.position || 'Any'}</strong>
                                                         </span>
@@ -1672,9 +1785,20 @@ export function ManageTeam() {
                                                                 Commitment: <strong className="text-foreground">{request.timeCommitment}</strong>
                                                             </span>
                                                         )}
-                                                        <span>
-                                                            Applied: {request.appliedAt.toLocaleDateString()}
-                                                        </span>
+                                                        {/* Application age badge */}
+                                                        {(() => {
+                                                            const days = getDaysAgo(request.appliedAt)
+                                                            const isActive = ['applied', 'viewed', 'pending'].includes(status)
+                                                            if (!isActive) return (
+                                                                <span>Applied: {request.appliedAt.toLocaleDateString()}</span>
+                                                            )
+                                                            return (
+                                                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[9px] font-semibold ${getAgeBadgeStyle(days)}`}>
+                                                                    <Clock className="h-2.5 w-2.5" />
+                                                                    {days === 0 ? 'Today' : days === 1 ? '1 day ago' : `${days} days pending`}
+                                                                </span>
+                                                            )
+                                                        })()}
                                                     </div>
                                                 </div>
                                             )

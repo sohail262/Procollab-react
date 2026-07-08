@@ -9,6 +9,11 @@ export default {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        display: ['Plus Jakarta Sans', 'system-ui', 'sans-serif'],
+        body: ['DM Sans', 'system-ui', '-apple-system', 'sans-serif'],
+        sans: ['DM Sans', 'system-ui', '-apple-system', 'sans-serif'],
+      },
       colors: {
         background: 'hsl(var(--background))',
         foreground: 'hsl(var(--foreground))',
@@ -55,8 +60,27 @@ export default {
         lg: 'var(--radius)',
         md: 'calc(var(--radius) - 2px)',
         sm: 'calc(var(--radius) - 4px)'
-      }
+      },
+      transitionTimingFunction: {
+        'premium': 'cubic-bezier(0.22, 1, 0.36, 1)',
+        'out-expo': 'cubic-bezier(0.16, 1, 0.3, 1)',
+        'smooth': 'cubic-bezier(0.4, 0, 0.2, 1)',
+      },
+      transitionDuration: {
+        '250': '250ms',
+        '350': '350ms',
+        '400': '400ms',
+      },
+      keyframes: {
+        'rise': {
+          from: { opacity: '0', transform: 'translateY(14px)' },
+          to: { opacity: '1', transform: 'translateY(0)' },
+        },
+      },
+      animation: {
+        'rise': 'rise 0.65s cubic-bezier(0.22, 1, 0.36, 1) both',
+      },
     }
   },
-  plugins: [], // [tailwindcssAnimate],
+  plugins: [tailwindcssAnimate],
 }

@@ -619,7 +619,7 @@ export function Whiteboard({ readOnly = false }: WhiteboardProps) {
     // ─── Render ───────────────────────────────────────────────────────────────
     return (
         <Card
-            className="relative h-[calc(100vh-12rem)] w-full overflow-hidden border bg-background"
+            className="relative h-full w-full overflow-hidden border bg-background"
             style={{ touchAction: 'none', userSelect: 'none' }}
         >
             {/* HUD */}

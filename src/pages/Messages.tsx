@@ -372,7 +372,7 @@ export function Messages() {
                             <div className="flex-1 overflow-y-auto p-4 space-y-3">
                                 {loadingMessages && messages.length === 0 ? (
                                     <div className="flex justify-center items-center h-full">
-                                        <Loader2 className="h-6 w-6 animate-spin text-blue-500" />
+                                        <Loader2 className="h-6 w-6 animate-spin text-primary" />
                                     </div>
                                 ) : (
                                     messages.map(msg => {
@@ -384,12 +384,12 @@ export function Messages() {
                                             >
                                                 <div className={`max-w-[70%] rounded-2xl px-4 py-2 text-sm shadow-sm ${
                                                     isMe
-                                                        ? 'bg-blue-600 text-white rounded-br-none'
-                                                        : 'bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-bl-none border'
+                                                        ? 'bg-white/10 text-white rounded-br-none border border-white/20'
+                                                        : 'bg-white/3 text-white/90 rounded-bl-none border border-white/10'
                                                 }`}>
                                                     <p className="break-words leading-relaxed">{msg.text}</p>
                                                     <span className={`block text-[9px] mt-1 text-right ${
-                                                        isMe ? 'text-blue-150' : 'text-muted-foreground'
+                                                        isMe ? 'text-white/50' : 'text-muted-foreground'
                                                     }`}>
                                                         {msg.createdAt && formatTime(msg.createdAt)}
                                                     </span>

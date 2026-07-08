@@ -24,6 +24,7 @@ import {
     onSnapshot, arrayUnion,
 } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
+import { getTagColorClass } from '@/lib/utils'
 import { sendNotificationWithPush } from '@/services/notificationTrigger'
 import {
     buildReportOwnerNotif,
@@ -919,7 +920,7 @@ export function ProjectDetails() {
                     <div className="flex items-center gap-2">
                         <Button 
                             size="sm" 
-                            className="bg-blue-600 hover:bg-blue-700 text-white font-medium text-xs h-8 px-4 shadow-sm"
+                            className="font-medium text-xs h-8 px-4 shadow-sm"
                             onClick={handleAcceptInvitation}
                             disabled={processingInvitation}
                         >
@@ -967,14 +968,13 @@ export function ProjectDetails() {
 
                         <div className="flex flex-wrap gap-2 mb-6">
                             <Badge
-                                variant="outline"
-                                className="text-blue-600 border-blue-200 bg-blue-50"
+                                className="border-0 bg-primary/10 text-primary font-semibold rounded-md px-2.5 py-0.5"
                             >
                                 {disciplineLabels[project.primaryDiscipline] ||
                                     project.primaryDiscipline}
                             </Badge>
                             {project.tags?.map((tag, i) => (
-                                <Badge key={i} variant="outline">{tag}</Badge>
+                                <Badge key={i} className={`border-0 font-semibold px-2.5 py-0.5 rounded-md transition-colors ${getTagColorClass(tag)}`}>{tag}</Badge>
                             ))}
                         </div>
                     </div>
@@ -1018,7 +1018,7 @@ export function ProjectDetails() {
                             <CardContent>
                                 <div className="flex flex-wrap gap-2">
                                     {project.requiredSkills.map((skill, i) => (
-                                        <Badge key={i} variant="secondary" className="px-3 py-1">
+                                        <Badge key={i} className={`border-0 font-semibold px-3 py-1 rounded-md transition-colors ${getTagColorClass(skill)}`}>
                                             {skill}
                                         </Badge>
                                     ))}
@@ -1326,7 +1326,7 @@ export function ProjectDetails() {
                         <div className="space-y-2">
                             <Label>Reason *</Label>
                             <select
-                                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md bg-white dark:bg-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-red-500"
+                                className="w-full px-3 py-2 border border-zinc-800 rounded-md bg-zinc-900 text-zinc-100 text-sm focus:outline-none focus:ring-1 focus:ring-red-500"
                                 value={reportReason}
                                 onChange={e => setReportReason(e.target.value)}
                             >

@@ -1,12 +1,13 @@
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Bookmark, Users, Send, LayoutDashboard, CheckCircle } from 'lucide-react'
+import { Bookmark, Users, Send, LayoutDashboard, CheckCircle, AlertTriangle } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { doc, setDoc, deleteDoc, getDoc } from 'firebase/firestore'
 import { db, auth } from '@/lib/firebase'
 import { Button } from '@/components/ui/button'
 import { invalidateSavedProjectsCache } from '@/services/dashboardService'
+import { getTagColorClass } from '@/lib/utils'
 
 interface ProjectCardProps {
     project: {
@@ -24,6 +25,7 @@ interface ProjectCardProps {
         summary?:          string
         primaryDiscipline?:string
         teamSize?:         number
+        ownerLastActiveAt?:any   // ← optional: owner's last activity timestamp
     }
     onApply?:         () => void
     isAlreadyMember?: boolean
@@ -119,6 +121,19 @@ export function ProjectCard({ project, onApply, isAlreadyMember = false, hasAppl
     const isOwner =
         auth.currentUser && project.createdBy === auth.currentUser.uid
 
+    // Ghost project: recruiting for 14+ days with no recent owner activity
+    const isGhostProject = (() => {
+        if (project.status !== 'recruiting') return false
+        // Use ownerLastActiveAt if available, else fall back to createdAt
+        const referenceDate = project.ownerLastActiveAt
+            ? new Date(project.ownerLastActiveAt?.toDate?.() ?? project.ownerLastActiveAt)
+            : new Date(project.createdAt)
+        const daysSince = Math.floor(
+            (Date.now() - referenceDate.getTime()) / (1000 * 60 * 60 * 24)
+        )
+        return daysSince >= 14
+    })()
+
     const avatars =
         memberProfiles.length > 0
             ? memberProfiles
@@ -135,7 +150,7 @@ export function ProjectCard({ project, onApply, isAlreadyMember = false, hasAppl
                 <Button
                     variant="ghost"
                     size="sm"
-                    className="text-purple-500 hover:text-purple-400 hover:bg-purple-500/10 h-auto p-0 px-2"
+                    className="text-muted-foreground hover:text-foreground h-auto p-0 px-2"
                     onClick={e => {
                         e.stopPropagation()
                         navigate(`/project/${project.id}/dashboard`)
@@ -153,7 +168,7 @@ export function ProjectCard({ project, onApply, isAlreadyMember = false, hasAppl
                 <Button
                     variant="ghost"
                     size="sm"
-                    className="text-green-500 hover:text-green-400 hover:bg-green-500/10 h-auto p-0 px-2"
+                    className="text-muted-foreground hover:text-foreground h-auto p-0 px-2"
                     onClick={e => {
                         e.stopPropagation()
                         navigate(`/project/${project.id}/dashboard`)
@@ -172,9 +187,9 @@ export function ProjectCard({ project, onApply, isAlreadyMember = false, hasAppl
                     variant="ghost"
                     size="sm"
                     disabled
-                    className="text-blue-500 hover:text-blue-500 hover:bg-transparent h-auto p-0 px-2 cursor-default opacity-100 dark:text-blue-400"
+                    className="text-muted-foreground h-auto p-0 px-2 cursor-default opacity-100"
                 >
-                    <CheckCircle className="h-4 w-4 mr-1 text-blue-500 dark:text-blue-400" />
+                    <CheckCircle className="h-4 w-4 mr-1" />
                     Applied
                 </Button>
             )
@@ -186,7 +201,7 @@ export function ProjectCard({ project, onApply, isAlreadyMember = false, hasAppl
                 <Button
                     variant="ghost"
                     size="sm"
-                    className="text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-800 h-auto p-0 px-2"
+                    className="text-muted-foreground hover:text-foreground h-auto p-0 px-2"
                     onClick={e => {
                         e.stopPropagation()
                         onApply()
@@ -201,31 +216,51 @@ export function ProjectCard({ project, onApply, isAlreadyMember = false, hasAppl
         return null
     }
 
+    const getStatusStyle = (status: string) => {
+        const s = status.toLowerCase()
+        if (s === 'recruiting') {
+            return 'border-emerald-500/20 bg-emerald-500/10 text-emerald-400 border'
+        }
+        if (s === 'active') {
+            return 'border-orange-500/30 bg-orange-500/15 text-orange-400 border'
+        }
+        if (s === 'planning' || s === 'completed') {
+            return 'border-primary/25 bg-primary/10 text-primary border'
+        }
+        return 'border-white/10 bg-white/5 text-white/70 border'
+    }
+
     // ─── Render ───────────────────────────────────────────────────────────
 
     return (
-        <Card className="bg-white dark:bg-[#0B1120] border-gray-200 dark:border-gray-800 hover:border-gray-300 dark:hover:border-gray-700 transition-colors shadow-sm">
-            <CardContent className="p-4 sm:p-6">
+        <Card className="glass-card rounded-lg overflow-hidden transition-all duration-300 h-full flex flex-col">
+            <CardContent className="p-4 sm:p-6 relative z-10 flex flex-col flex-1">
                 {/* Header row */}
                 <div className="flex justify-between items-start mb-3">
                     <div className="flex items-center gap-1.5 flex-wrap">
                         <Badge
-                            variant="secondary"
-                            className={`border-none font-medium text-xs ${
-                                project.status === 'recruiting'
-                                    ? 'bg-yellow-100 text-yellow-800 hover:bg-yellow-200'
-                                    : project.status === 'active'
-                                        ? 'bg-green-100 text-green-800 hover:bg-green-200'
-                                        : 'bg-gray-100 text-gray-800 hover:bg-gray-200'
-                            }`}
+                            variant="outline"
+                            className={`font-semibold text-[10px] uppercase tracking-wider rounded-full px-2.5 py-0.5 ${getStatusStyle(project.status)}`}
                         >
-                            {project.status.charAt(0).toUpperCase() + project.status.slice(1)}
+                            {project.status}
                         </Badge>
+
+                        {/* Ghost project warning */}
+                        {isGhostProject && !isOwner && (
+                            <Badge
+                                variant="outline"
+                                className="border-destructive/20 text-destructive bg-destructive/10 text-[10px] rounded-full px-2 py-0.5 gap-1 font-semibold"
+                                title="Owner hasn't been active for 14+ days"
+                            >
+                                <AlertTriangle className="h-2.5 w-2.5" />
+                                Low activity
+                            </Badge>
+                        )}
 
                         {isAlreadyMember && (
                             <Badge
                                 variant="outline"
-                                className="border-green-500/40 text-green-500 bg-green-500/10 text-xs"
+                                className="border-white/15 text-white/80 bg-white/5 text-xs rounded-full px-2.5 py-0.5"
                             >
                                 <CheckCircle className="h-3 w-3 mr-1" />
                                 Joined
@@ -233,36 +268,38 @@ export function ProjectCard({ project, onApply, isAlreadyMember = false, hasAppl
                         )}
                     </div>
 
-                    <span className="text-xs text-gray-500 dark:text-gray-400 shrink-0 ml-2">
+                    <span className="text-xs text-muted-foreground shrink-0 ml-2">
                         {formatTimeAgo(project.createdAt)}
                     </span>
                 </div>
 
-                {/* Title */}
-                <h3 className="text-base sm:text-lg font-bold mb-1.5 text-gray-900 dark:text-white line-clamp-1">
-                    {project.title}
-                </h3>
+                {/* Main Content Wrapper (title, description, tags) that will stretch */}
+                <div className="flex-grow flex flex-col justify-start mb-4">
+                    {/* Title */}
+                    <h3 className="text-base sm:text-lg font-bold mb-1.5 text-foreground line-clamp-1 font-sans">
+                        {project.title}
+                    </h3>
 
-                {/* Description */}
-                <p className="text-gray-600 dark:text-gray-400 text-xs sm:text-sm mb-3 line-clamp-2">
-                    {project.summary || project.description}
-                </p>
+                    {/* Description */}
+                    <p className="text-muted-foreground text-xs sm:text-sm mb-3 line-clamp-2">
+                        {project.summary || project.description}
+                    </p>
 
-                {/* Tags */}
-                <div className="flex flex-wrap gap-1.5 mb-3">
-                    {project.tags?.slice(0, 3).map((tag, i) => (
-                        <Badge
-                            key={i}
-                            variant="secondary"
-                            className="bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/50 border-none text-xs px-1.5 py-0"
-                        >
-                            {tag}
-                        </Badge>
-                    ))}
+                    {/* Tags */}
+                    <div className="flex flex-wrap gap-1.5 mt-auto">
+                        {project.tags?.slice(0, 3).map((tag, i) => (
+                            <Badge
+                                key={i}
+                                className={`border-0 text-xs px-2.5 py-0.5 rounded-md font-semibold transition-all duration-300 ${getTagColorClass(tag)}`}
+                            >
+                                {tag}
+                            </Badge>
+                        ))}
+                    </div>
                 </div>
 
                 {/* Members + duration row */}
-                <div className="flex justify-between items-center text-xs text-gray-400 mb-3">
+                <div className="flex justify-between items-center text-xs text-muted-foreground mb-3">
                     <div className="flex items-center gap-1.5">
                         <Users className="h-3.5 w-3.5" />
                         <span>
@@ -271,7 +308,7 @@ export function ProjectCard({ project, onApply, isAlreadyMember = false, hasAppl
                         </span>
                     </div>
                     {project.duration && (
-                        <span className="text-gray-500 dark:text-gray-400 truncate ml-2">
+                        <span className="text-muted-foreground truncate ml-2">
                             {/* Handle legacy "2" (no unit) vs proper "2 months" */}
                             {/^\d+$/.test(project.duration.trim())
                                 ? `${project.duration} months`
@@ -281,7 +318,7 @@ export function ProjectCard({ project, onApply, isAlreadyMember = false, hasAppl
                 </div>
 
                 {/* Footer row */}
-                <div className="flex justify-between items-center pt-3 border-t border-gray-200 dark:border-gray-800">
+                <div className="flex justify-between items-center pt-3 border-t border-border/30">
                     {/* Member avatars */}
                     <div className="flex -space-x-1.5 shrink-0">
                         {avatars.slice(0, 3).map((member, i) => {
@@ -305,7 +342,7 @@ export function ProjectCard({ project, onApply, isAlreadyMember = false, hasAppl
                                     key={i}
                                     src={avatarUrl}
                                     alt={displayName}
-                                    className="w-6 h-6 sm:w-7 sm:h-7 rounded-full border-2 border-white dark:border-[#0B1120] bg-gray-200 dark:bg-gray-700"
+                                    className="w-6 h-6 sm:w-7 sm:h-7 rounded-full border-2 border-card bg-muted"
                                 />
                             )
                         })}
@@ -317,10 +354,10 @@ export function ProjectCard({ project, onApply, isAlreadyMember = false, hasAppl
                         <button
                             onClick={toggleSave}
                             disabled={loading}
-                            className={`hover:text-gray-900 dark:hover:text-white transition-colors flex items-center gap-1 text-xs ${
+                            className={`hover:text-foreground transition-colors duration-200 flex items-center gap-1 text-xs ${
                                 isSaved
-                                    ? 'text-blue-500 dark:text-blue-400'
-                                    : 'text-gray-500 dark:text-gray-400'
+                                    ? 'text-foreground'
+                                    : 'text-muted-foreground'
                             }`}
                         >
                             <Bookmark className={`h-3.5 w-3.5 ${isSaved ? 'fill-current' : ''}`} />
@@ -333,7 +370,7 @@ export function ProjectCard({ project, onApply, isAlreadyMember = false, hasAppl
                         {/* View Details */}
                         <button
                             onClick={() => navigate(`/project/${project.id}`)}
-                            className="text-blue-400 hover:text-blue-300 text-xs font-medium"
+                            className="text-muted-foreground hover:text-foreground text-xs font-medium transition-colors duration-200"
                         >
                             View
                         </button>

@@ -523,7 +523,7 @@ export function ProjectCalendar({ readOnly = false }: ProjectCalendarProps) {
     }
 
     return (
-        <div className="h-[calc(100vh-12rem)] flex flex-col gap-3">
+        <div className="h-full flex flex-col gap-3">
 
             {/* ── Stats bar ── */}
             <div className="flex flex-wrap items-center gap-3 px-1 flex-shrink-0">
@@ -644,16 +644,23 @@ export function ProjectCalendar({ readOnly = false }: ProjectCalendarProps) {
             <div className="flex-1 min-h-0">
                 <style>{`
                     .rbc-calendar          { font-family: inherit; height: 100%; }
-                    .rbc-header            { padding: 10px 4px; font-weight: 600;
+                    .rbc-header            { padding: 12px 6px !important; font-weight: 600;
                                              color: hsl(var(--muted-foreground));
-                                             text-transform: uppercase; font-size: 0.7rem; }
-                    .rbc-today             { background-color: hsl(var(--muted)/0.5) !important; }
+                                             text-transform: uppercase; font-size: 0.75rem !important;
+                                             letter-spacing: 0.05em; border-bottom: 1px solid hsl(var(--border)); }
+                    .rbc-today             { background-color: hsl(var(--accent)/0.15) !important; }
                     .rbc-off-range-bg      { background-color: hsl(var(--background)); opacity: 0.6; }
                     .rbc-month-view        { border: 1px solid hsl(var(--border));
                                              border-radius: var(--radius); overflow: hidden; }
                     .rbc-header + .rbc-header,
                     .rbc-day-bg + .rbc-day-bg    { border-left: 1px solid hsl(var(--border)); }
                     .rbc-month-row + .rbc-month-row { border-top: 1px solid hsl(var(--border)); }
+                    .rbc-month-row         { min-height: 90px; }
+                    .rbc-event             { padding: 4px 8px !important; margin: 2px 4px !important;
+                                             font-size: 0.75rem !important; border-radius: 6px !important;
+                                             border: 0 !important; }
+                    .rbc-date-cell         { padding: 8px 10px !important; text-align: right;
+                                             font-size: 0.85rem; font-weight: 500; opacity: 0.8; }
                     .rbc-agenda-view table  { width: 100%; }
                     .rbc-agenda-date-cell,
                     .rbc-agenda-time-cell  { white-space: nowrap; color: hsl(var(--muted-foreground)); }
@@ -686,14 +693,13 @@ export function ProjectCalendar({ readOnly = false }: ProjectCalendarProps) {
                             />
                         ),
                     }}
-                    selectable={canEdit}
-                    onSelectSlot={handleSelectSlot}
+                    selectable={false}
                     onSelectEvent={handleSelectEvent}
                     popup
                     tooltipAccessor={(event: any) => {
                         if (event.eventType === 'meeting') {
                             const m = event.resource as CalendarMeeting
-                            return `📹 ${m.title} • ${format(m.scheduledAt, 'h:mm a')} – ${format(m.endTime, 'h:mm a')} • Click to join`
+                            return `📹 ${m.title} • ${format(m.scheduledAt, 'h:mm a')} • Click to join`
                         }
                         return `${event.title} • ${event.resource.priority ?? ''} priority • ${event.resource.status}`
                     }}

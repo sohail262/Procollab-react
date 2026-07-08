@@ -680,7 +680,7 @@ export function TeamChat() {
     const onlineMembers = Object.entries(members).filter(([uid]) => uid !== user?.uid)
 
     return (
-        <div className="flex flex-col h-[calc(100vh-210px)] max-h-[800px] rounded-2xl overflow-hidden relative border border-zinc-200/80 dark:border-zinc-800/80 bg-white/40 dark:bg-black/40 backdrop-blur-xl shadow-[0_8px_32px_0_rgba(0,0,0,0.06)] antialiased">
+        <div className="flex flex-col h-full rounded-2xl overflow-hidden relative border border-zinc-200/80 dark:border-zinc-800/80 bg-white/40 dark:bg-black/40 backdrop-blur-xl shadow-[0_8px_32px_0_rgba(0,0,0,0.06)] antialiased">
             <style dangerouslySetInnerHTML={{__html: `
                 @keyframes msgHighlight {
                     0% { background-color: rgba(24, 24, 27, 0.08); }

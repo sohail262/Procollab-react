@@ -345,6 +345,10 @@ export function Applications() {
     const handleWithdraw = async (application: Application) => {
         if (!auth.currentUser) return
 
+        // ── Optimistic update: remove from UI immediately ────────────────────
+        const previousApplications = applications
+        setApplications(prev => prev.filter(app => app.id !== application.id))
+
         try {
             await deleteDoc(doc(db, 'users', auth.currentUser.uid, 'applications', application.id))
 
@@ -361,11 +365,12 @@ export function Applications() {
 
             // Bust caches so next visit doesn't show the withdrawn application
             try { sessionStorage.removeItem(`apps_${auth.currentUser.uid}`) } catch { /* ignore */ }
-            setApplications(prev => prev.filter(app => app.id !== application.id))
             toast({ title: "Application withdrawn", description: "Your application has been withdrawn successfully" })
         } catch (error) {
+            // ── Rollback: restore previous state ─────────────────────────────
+            setApplications(previousApplications)
             console.error('Error withdrawing application:', error)
-            toast({ title: "Error", description: "Failed to withdraw application", variant: "destructive" })
+            toast({ title: "Changes couldn't be saved.", description: "Failed to withdraw application. Please try again.", variant: "destructive" })
         }
     }
 

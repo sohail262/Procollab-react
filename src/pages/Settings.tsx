@@ -13,6 +13,7 @@ import { Loader2, RefreshCw, Check, X, Plus } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import { PREDEFINED_SKILLS } from '@/config/predefinedSkills'
 import { trackProfileCompleted } from '@/services/analyticsService'
+import { isUsernameTaken } from '@/lib/urlUtils'
 
 
 // DiceBear avatar styles
@@ -49,6 +50,8 @@ export function Settings() {
     const [formData, setFormData] = useState({
         firstName: '',
         lastName: '',
+        username: '',
+        profileVisibility: 'public',
         role: '',
         discipline: '',
         bio: '',
@@ -122,6 +125,8 @@ export function Settings() {
                 setFormData({
                     firstName: data.firstName || '',
                     lastName: data.lastName || '',
+                    username: data.username || '',
+                    profileVisibility: data.profileVisibility || 'public',
                     role: data.role || '',
                     discipline: data.discipline || '',
                     bio: data.bio || '',
@@ -161,6 +166,44 @@ export function Settings() {
             setInitialLoading(false)
         }
     }
+
+    // Real-time Username checking state
+    const [usernameTaken, setUsernameTaken] = useState<boolean | null>(null)
+    const [usernameChecking, setUsernameChecking] = useState(false)
+    const [usernameError, setUsernameError] = useState<string | null>(null)
+
+    useEffect(() => {
+        const queryUsername = formData.username.toLowerCase().trim()
+        if (!queryUsername) {
+            setUsernameTaken(null)
+            setUsernameError(null)
+            return
+        }
+
+        // Validate format
+        const usernameRegex = /^[a-zA-Z0-9_-]{3,30}$/
+        if (!usernameRegex.test(queryUsername)) {
+            setUsernameError('Username must be 3-30 characters (letters, numbers, underscore, hyphen).')
+            setUsernameTaken(null)
+            return
+        }
+        
+        setUsernameError(null)
+
+        const debounceId = setTimeout(async () => {
+            setUsernameChecking(true)
+            try {
+                const isTaken = await isUsernameTaken(queryUsername, user?.uid)
+                setUsernameTaken(isTaken)
+            } catch (err) {
+                console.error(err)
+            } finally {
+                setUsernameChecking(false)
+            }
+        }, 400)
+
+        return () => clearTimeout(debounceId)
+    }, [formData.username, user?.uid])
 
     // Generate avatar URL
     const generateAvatarUrl = (style: string, seed: string) => {
@@ -262,6 +305,29 @@ export function Settings() {
         e.preventDefault()
         if (!user) return
 
+        const queryUsername = formData.username.toLowerCase().trim()
+        if (queryUsername) {
+            const usernameRegex = /^[a-zA-Z0-9_-]{3,30}$/
+            if (!usernameRegex.test(queryUsername)) {
+                toast({
+                    title: 'Invalid Username',
+                    description: 'Username must be 3-30 characters and contain only letters, numbers, underscores, and hyphens.',
+                    variant: 'destructive',
+                })
+                return
+            }
+
+            const taken = await isUsernameTaken(queryUsername, user.uid)
+            if (taken) {
+                toast({
+                    title: 'Username Already Taken',
+                    description: 'The username you requested is already in use. Please select a different one.',
+                    variant: 'destructive',
+                })
+                return
+            }
+        }
+
         setLoading(true)
         try {
             const userRef = doc(db, 'users', user.uid)
@@ -269,6 +335,7 @@ export function Settings() {
 
             await updateDoc(userRef, {
                 ...formData,
+                username: queryUsername,
                 skills: selectedSkills,
                 preferredRoles,
                 pastProjectsShowcase,
@@ -286,6 +353,9 @@ export function Settings() {
             })
 
             setCurrentAvatarUrl(newAvatarUrl)
+
+            // Bust profile sessionStorage cache so Profile.tsx shows fresh data immediately
+            try { sessionStorage.removeItem(`profile_${user.uid}`) } catch { /* ignore */ }
 
             toast({
                 title: 'Profile Updated',
@@ -427,6 +497,54 @@ export function Settings() {
                         </CardHeader>
                         <CardContent>
                             <div className="space-y-6">
+                                {/* Username and Privacy Visibility Settings */}
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pb-6 border-b border-gray-150 dark:border-gray-800">
+                                    <div>
+                                        <label className="block text-sm font-medium mb-2">Username *</label>
+                                        <div className="relative">
+                                            <Input
+                                                placeholder="e.g. john_doe"
+                                                value={formData.username}
+                                                onChange={e => setFormData({ ...formData, username: e.target.value.toLowerCase().trim() })}
+                                                className={`pr-10 ${usernameError || usernameTaken ? 'border-red-500 focus-visible:ring-red-500' : ''}`}
+                                            />
+                                            <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center">
+                                                {usernameChecking && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+                                                {!usernameChecking && formData.username && usernameTaken === false && !usernameError && (
+                                                    <Check className="h-4 w-4 text-green-500 font-bold" />
+                                                )}
+                                                {!usernameChecking && formData.username && (usernameTaken === true || usernameError) && (
+                                                    <X className="h-4 w-4 text-red-500" />
+                                                )}
+                                            </div>
+                                        </div>
+                                        {usernameError && (
+                                            <p className="text-xs text-red-500 mt-1">{usernameError}</p>
+                                        )}
+                                        {usernameTaken && (
+                                            <p className="text-xs text-red-500 mt-1">This username is already taken.</p>
+                                        )}
+                                        <p className="text-[11px] text-muted-foreground mt-1">
+                                            Your public URL will be: {window.location.origin}/u/{formData.username || 'username'}
+                                        </p>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium mb-2">Profile Privacy *</label>
+                                        <select
+                                            className="w-full px-3 py-2 border rounded-md bg-background text-foreground"
+                                            value={formData.profileVisibility}
+                                            onChange={e => setFormData({ ...formData, profileVisibility: e.target.value })}
+                                        >
+                                            <option value="public">Public (Everyone can view)</option>
+                                            <option value="connections_only">Connections Only (Only friends can view)</option>
+                                            <option value="private">Private (Only you can view)</option>
+                                        </select>
+                                        <p className="text-[11px] text-muted-foreground mt-1.5">
+                                            Control who can access your public profile and portfolio work.
+                                        </p>
+                                    </div>
+                                </div>
+
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                     <div>
                                         <label className="block text-sm font-medium mb-2">First Name</label>
@@ -481,70 +599,6 @@ export function Settings() {
                                         />
                                     </div>
 
-                                    {/* Availability */}
-                                    <div>
-                                        <label className="block text-sm font-medium mb-2">Availability (hours/week)</label>
-                                        <Input
-                                            type="number"
-                                            min="0"
-                                            max="168"
-                                            value={formData.availabilityHours}
-                                            onChange={e => setFormData({ ...formData, availabilityHours: parseInt(e.target.value) || 0 })}
-                                        />
-                                    </div>
-
-                                    {/* Timezone */}
-                                    <div>
-                                        <label className="block text-sm font-medium mb-2">Timezone</label>
-                                        <select
-                                            className="w-full px-3 py-2 border rounded-md bg-background text-foreground"
-                                            value={formData.timezone}
-                                            onChange={e => setFormData({ ...formData, timezone: e.target.value })}
-                                        >
-                                            {timezones.map(tz => (
-                                                <option key={tz} value={tz}>{tz}</option>
-                                            ))}
-                                        </select>
-                                    </div>
-
-                                    {/* Open to work check */}
-                                    <div className="flex items-center gap-3 pt-6">
-                                        <input
-                                            type="checkbox"
-                                            id="isOpenToWork"
-                                            checked={formData.isOpenToWork}
-                                            onChange={e => setFormData({ ...formData, isOpenToWork: e.target.checked })}
-                                            className="h-5 w-5 rounded bg-slate-900 border-slate-800 text-indigo-600 focus:ring-indigo-500"
-                                        />
-                                        <label htmlFor="isOpenToWork" className="text-sm font-medium text-slate-200 cursor-pointer">
-                                            Open To Work Status
-                                        </label>
-                                    </div>
-
-                                    {/* Preferred Roles tags */}
-                                    <div className="md:col-span-2">
-                                        <label className="block text-sm font-medium mb-2">Preferred Roles</label>
-                                        <div className="flex flex-wrap gap-2 mb-3">
-                                            {preferredRoles.map((role, i) => (
-                                                <Badge key={i} variant="secondary" className="flex items-center gap-1.5 py-1 px-2.5">
-                                                    {role}
-                                                    <button type="button" onClick={() => handleRemoveRole(role)} className="text-slate-500 hover:text-white">
-                                                        <X className="h-3 w-3" />
-                                                    </button>
-                                                </Badge>
-                                            ))}
-                                        </div>
-                                        <div className="flex gap-2">
-                                            <Input
-                                                placeholder="e.g. Lead Designer, Technical Founder"
-                                                value={roleInput}
-                                                onChange={e => setRoleInput(e.target.value)}
-                                                onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), handleAddRole())}
-                                            />
-                                            <Button type="button" variant="outline" onClick={handleAddRole}>Add</Button>
-                                        </div>
-                                    </div>
-
                                     <div className="relative md:col-span-2">
                                         <label className="block text-sm font-medium mb-2">Skills</label>
                                         
@@ -595,16 +649,16 @@ export function Settings() {
 
                                             {/* Dropdown Suggestions */}
                                             {showSuggestions && filteredSuggestions.length > 0 && (
-                                                <div className="absolute z-50 w-full mt-1.5 max-h-60 overflow-y-auto bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-md shadow-lg scrollbar-thin">
+                                                <div className="absolute z-50 w-full mt-1.5 max-h-60 overflow-y-auto bg-zinc-950 border border-zinc-800 rounded-md shadow-lg scrollbar-thin">
                                                     <div className="p-1.5">
                                                         {filteredSuggestions.map((suggestion) => (
                                                             <button
                                                                 key={suggestion}
                                                                 type="button"
                                                                 onClick={() => handleSelectSuggestion(suggestion)}
-                                                                className="w-full text-left px-3 py-2 text-sm rounded hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors focus:outline-none flex justify-between items-center"
+                                                                className="w-full text-left px-3 py-2 text-sm rounded hover:bg-zinc-800 transition-colors focus:outline-none flex justify-between items-center"
                                                             >
-                                                                <span className="text-gray-950 dark:text-gray-50">{suggestion}</span>
+                                                                <span className="text-zinc-100">{suggestion}</span>
                                                                 {selectedSkills.includes(suggestion) && (
                                                                     <Check className="h-4 w-4 text-green-500" />
                                                                 )}

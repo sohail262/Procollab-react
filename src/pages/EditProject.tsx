@@ -9,6 +9,7 @@ import { Label } from '@/components/ui/label'
 import { ArrowLeft, Loader2, Trash2, AlertCircle } from 'lucide-react'
 import { doc, getDoc, updateDoc, deleteDoc, serverTimestamp } from 'firebase/firestore'
 import { db, auth } from '@/lib/firebase'
+import { generateUniqueProjectSlug } from '@/lib/urlUtils'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { useToast } from '@/hooks/use-toast'
 
@@ -26,6 +27,7 @@ export function EditProject() {
         summary: '',
         description: '',
         status: 'recruiting',
+        projectVisibility: 'public',
         duration: '',
         durationUnit: 'months',
         teamSize: 4,
@@ -40,6 +42,9 @@ export function EditProject() {
         locationDetails: '',
         additionalNotes: ''
     })
+
+    const [originalTitle, setOriginalTitle] = useState('')
+    const [currentSlug, setCurrentSlug] = useState('')
 
     useEffect(() => {
         if (id && auth.currentUser) {
@@ -97,6 +102,7 @@ export function EditProject() {
                     summary: project.summary || '',
                     description: project.description || '',
                     status: project.status || 'recruiting',
+                    projectVisibility: project.projectVisibility || 'public',
                     duration: durationValue,
                     durationUnit: durationUnit,
                     teamSize: project.teamSize || 4,
@@ -111,6 +117,8 @@ export function EditProject() {
                     locationDetails: project.locationDetails || '',
                     additionalNotes: project.additionalNotes || ''
                 })
+                setOriginalTitle(project.title || '')
+                setCurrentSlug(project.slug || '')
             } else {
                 toast({
                     title: 'Not Found',
@@ -137,8 +145,15 @@ export function EditProject() {
 
         setSaving(true)
         try {
+            let finalSlug = currentSlug
+            if (formData.title !== originalTitle || !finalSlug) {
+                finalSlug = await generateUniqueProjectSlug(formData.title, id)
+            }
+
             const updateData = {
                 title: formData.title,
+                slug: finalSlug,
+                projectVisibility: formData.projectVisibility || 'public',
                 summary: formData.summary,
                 description: formData.description,
                 status: formData.status,
@@ -276,7 +291,7 @@ export function EditProject() {
                                 />
                             </div>
 
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                 <div className="space-y-2">
                                     <Label htmlFor="status">Status *</Label>
                                     <select
@@ -289,6 +304,20 @@ export function EditProject() {
                                         <option value="active">Active</option>
                                         <option value="completed">Completed</option>
                                         <option value="on-hold">On Hold</option>
+                                    </select>
+                                </div>
+
+                                <div className="space-y-2">
+                                    <Label htmlFor="projectVisibility">Project Visibility *</Label>
+                                    <select
+                                        id="projectVisibility"
+                                        className="w-full px-3 py-2 border rounded-md bg-background"
+                                        value={formData.projectVisibility}
+                                        onChange={e => setFormData({ ...formData, projectVisibility: e.target.value })}
+                                    >
+                                        <option value="public">Public (Everyone can view)</option>
+                                        <option value="connections_only">Connections Only (Only friends can view)</option>
+                                        <option value="private">Private (Only team can view)</option>
                                     </select>
                                 </div>
 

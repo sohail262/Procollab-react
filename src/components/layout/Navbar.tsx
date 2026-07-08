@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from "react"
 import { Link, useNavigate } from "react-router-dom"
+import { Logo } from "@/components/layout/Logo"
 import { Menu, LogOut, User, LayoutDashboard, Search, X, FolderKanban } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { ModeToggle } from "@/components/mode-toggle"
 import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetDescription } from "@/components/ui/sheet"
 import { VisuallyHidden } from "@/components/ui/visually-hidden"
 import { useAuth } from "@/contexts/AuthContext"
@@ -180,9 +180,7 @@ export function Navbar() {
             <div className="container flex h-16 items-center justify-between">
                 <div className="flex items-center gap-2">
                     <Link to="/" className="flex items-center">
-                        <span className="font-bold text-lg text-foreground">
-                            ProCollab
-                        </span>
+                        <Logo iconSize={42} />
                     </Link>
                 </div>
 
@@ -270,8 +268,6 @@ export function Navbar() {
                         )}
                     </div>
 
-                    <ModeToggle />
-
                     {/* Auth-aware buttons */}
                     {user ? (
                         <DropdownMenu>
@@ -332,7 +328,6 @@ export function Navbar() {
 
                 {/* Mobile Navigation */}
                 <div className="flex items-center gap-2 md:hidden">
-                    <ModeToggle />
                     <Sheet open={isOpen} onOpenChange={setIsOpen}>
                         <SheetTrigger asChild>
                             <Button variant="ghost" size="icon" className="md:hidden">

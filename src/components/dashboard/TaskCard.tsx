@@ -96,19 +96,19 @@ export function TaskCard({ task, onClick }: TaskCardProps) {
             style={{ borderLeftColor: task.priority === 'urgent' ? '#ef4444' : task.priority === 'high' ? '#f97316' : 'transparent' }}
             onClick={onClick}
         >
-            <CardContent className="p-4 space-y-3">
-                <div className="flex justify-between items-start">
-                    <Badge variant="outline" className={`${priorityColors[task.priority]} border-0`}>
+            <CardContent className="p-2.5 space-y-1.5">
+                <div className="flex justify-between items-center">
+                    <Badge variant="outline" className={`${priorityColors[task.priority]} border-0 text-[10px] px-1.5 py-0 h-4`}>
                         {task.priority}
                     </Badge>
                     {isCreator && (
                         <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                                 <button
-                                    className="text-muted-foreground hover:text-foreground p-1 rounded hover:bg-muted/50 transition-colors"
+                                    className="text-muted-foreground hover:text-foreground p-0.5 rounded hover:bg-muted/50 transition-colors"
                                     onClick={(e) => e.stopPropagation()}
                                 >
-                                    <MoreVertical className="h-4 w-4" />
+                                    <MoreVertical className="h-3.5 w-3.5" />
                                 </button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end" onClick={(e) => e.stopPropagation()}>
@@ -125,22 +125,24 @@ export function TaskCard({ task, onClick }: TaskCardProps) {
                 </div>
 
                 <div>
-                    <h4 className="font-semibold text-sm line-clamp-2">{task.title}</h4>
-                    <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{task.description}</p>
+                    <h4 className="font-semibold text-xs line-clamp-2 leading-snug">{task.title}</h4>
+                    {task.description && (
+                        <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-1">{task.description}</p>
+                    )}
                 </div>
 
-                <div className="flex items-center justify-between pt-2">
-                    <div className="flex items-center gap-2">
-                        <Avatar className="h-6 w-6">
+                <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                        <Avatar className="h-5 w-5">
                             <AvatarImage src={task.assignee?.avatar} />
-                            <AvatarFallback>{task.assignee?.name?.charAt(0) || 'U'}</AvatarFallback>
+                            <AvatarFallback className="text-[9px]">{task.assignee?.name?.charAt(0) || 'U'}</AvatarFallback>
                         </Avatar>
                         {task.dueDate && (
-                            <div className={`flex items-center text-xs ${(task.dueDate instanceof Date ? task.dueDate : (task.dueDate as any)?.toDate?.() || new Date(task.dueDate as any)) < new Date()
+                            <div className={`flex items-center text-[10px] ${(task.dueDate instanceof Date ? task.dueDate : (task.dueDate as any)?.toDate?.() || new Date(task.dueDate as any)) < new Date()
                                     ? 'text-red-500 font-medium'
                                     : 'text-muted-foreground'
                                 }`}>
-                                <Calendar className="h-3 w-3 mr-1" />
+                                <Calendar className="h-2.5 w-2.5 mr-0.5" />
                                 {(() => {
                                     const date = task.dueDate instanceof Date
                                         ? task.dueDate
@@ -154,9 +156,9 @@ export function TaskCard({ task, onClick }: TaskCardProps) {
                         )}
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1">
                         {task.linkedTools && task.linkedTools.length > 0 && (
-                            <div className="flex items-center gap-1">
+                            <div className="flex items-center gap-0.5">
                                 {task.linkedTools.map(toolId => {
                                     const tool = toolIcons[toolId]
                                     if (!tool) return null
@@ -167,9 +169,9 @@ export function TaskCard({ task, onClick }: TaskCardProps) {
                                             type="button"
                                             title={`Go to ${tool.label}`}
                                             onClick={(e) => handleToolClick(e, toolId)}
-                                            className="p-1 rounded bg-zinc-50 dark:bg-zinc-800 text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 border border-zinc-200 dark:border-zinc-700 transition-colors"
+                                            className="p-0.5 rounded bg-zinc-50 dark:bg-zinc-800 text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 border border-zinc-200 dark:border-zinc-700 transition-colors"
                                         >
-                                            <Icon className="h-3 w-3" />
+                                            <Icon className="h-2.5 w-2.5" />
                                         </button>
                                     )
                                 })}
@@ -177,7 +179,7 @@ export function TaskCard({ task, onClick }: TaskCardProps) {
                         )}
 
                         {task.subtasks && task.subtasks.length > 0 && (
-                            <div className="flex items-center text-xs text-muted-foreground bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded px-1.5 py-0.5 font-medium select-none">
+                            <div className="flex items-center text-[10px] text-muted-foreground bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded px-1 py-0.5 font-medium select-none">
                                 {task.subtasks.filter(t => t.completed).length}/{task.subtasks.length}
                             </div>
                         )}
