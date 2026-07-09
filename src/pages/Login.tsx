@@ -21,6 +21,8 @@ export function Login() {
     const [showWelcome, setShowWelcome] = useState(false)
     const [welcomeName, setWelcomeName] = useState("")
 
+    const [isLoggingIn, setIsLoggingIn] = useState(false)
+
     const { login, loginWithGoogle, loginWithGithub, user, loading: authLoading } = useAuth()
     const navigate = useNavigate()
     const [searchParams] = useSearchParams()
@@ -33,8 +35,8 @@ export function Login() {
         return displayName.split(' ')[0] || ''
     }
 
-    // Already logged in — send to dashboard (only if not showing welcome)
-    if (!authLoading && user && !showWelcome) {
+    // Already logged in — send to dashboard (only if not showing welcome and not actively logging in)
+    if (!authLoading && user && !showWelcome && !isLoggingIn) {
         return <Navigate to={getRedirectPath()} replace />
     }
 
@@ -43,6 +45,7 @@ export function Login() {
         e.preventDefault()
         setError("")
         setLoading(true)
+        setIsLoggingIn(true)
         try {
             await login(email, password)
             if (auth.currentUser) trackLogin(auth.currentUser.uid, 'email')
@@ -50,6 +53,7 @@ export function Login() {
             setShowWelcome(true)
         } catch (err: any) {
             setError(err.message)
+            setIsLoggingIn(false)
         } finally {
             setLoading(false)
         }
@@ -59,6 +63,7 @@ export function Login() {
     const handleGoogleLogin = async () => {
         setError("")
         setLoading(true)
+        setIsLoggingIn(true)
         try {
             await loginWithGoogle()
             if (auth.currentUser) trackLogin(auth.currentUser.uid, 'google')
@@ -66,6 +71,7 @@ export function Login() {
             setShowWelcome(true)
         } catch (err: any) {
             setError(err.message)
+            setIsLoggingIn(false)
         } finally {
             setLoading(false)
         }
@@ -75,6 +81,7 @@ export function Login() {
     const handleGithubLogin = async () => {
         setError("")
         setLoading(true)
+        setIsLoggingIn(true)
         try {
             await loginWithGithub()
             if (auth.currentUser) trackLogin(auth.currentUser.uid, 'github')
@@ -82,6 +89,7 @@ export function Login() {
             setShowWelcome(true)
         } catch (err: any) {
             setError(err.message)
+            setIsLoggingIn(false)
         } finally {
             setLoading(false)
         }

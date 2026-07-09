@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react"
 import * as THREE from "three"
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js"
 import { useTheme } from "./theme-provider"
+import { MapPin } from "lucide-react"
+import gsap from "gsap"
 
 // Team member data
 const TEAM = [
@@ -31,6 +33,17 @@ function getEffectiveTheme(theme: string): "light" | "dark" {
     return theme as "light" | "dark"
 }
 
+// Helper to get 3D vector from lat/lon on sphere of radius r
+function getVector(lat: number, lon: number, r: number) {
+    const phi = (90 - lat) * (Math.PI / 180)
+    const theta = (lon + 180) * (Math.PI / 180)
+    return new THREE.Vector3(
+        -(r * Math.sin(phi) * Math.cos(theta)),
+        (r * Math.cos(phi)),
+        (r * Math.sin(phi) * Math.sin(theta))
+    )
+}
+
 export function HeroGlobe() {
     const mountRef = useRef<HTMLDivElement>(null)
     const labelsRef = useRef<HTMLDivElement>(null)
@@ -38,6 +51,83 @@ export function HeroGlobe() {
     const [labels, setLabels] = useState<LabelData[]>([])
     const [loading, setLoading] = useState(true)
     const { theme } = useTheme()
+
+    const [locating, setLocating] = useState(false)
+    const [userLocation, setUserLocation] = useState<{ lat: number, lon: number, name?: string } | null>(null)
+    const [isZoomedIn, setIsZoomedIn] = useState(false)
+
+    const cameraRef = useRef<THREE.PerspectiveCamera | null>(null)
+    const controlsRef = useRef<OrbitControls | null>(null)
+
+    const handleShareLocation = () => {
+        if (!navigator.geolocation) {
+            alert("Geolocation is not supported by your browser.")
+            return
+        }
+        setLocating(true)
+        navigator.geolocation.getCurrentPosition(
+            (position) => {
+                const lat = position.coords.latitude
+                const lon = position.coords.longitude
+
+                // Fetch reverse geocoding to resolve city/region name
+                fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`, {
+                    headers: { 'Accept-Language': 'en' }
+                })
+                    .then(res => res.json())
+                    .then(data => {
+                        const cityName = data.address.city || data.address.town || data.address.village || data.address.state || data.address.country || "Innovator"
+                        setUserLocation({ lat, lon, name: cityName })
+                    })
+                    .catch(() => {
+                        setUserLocation({ lat, lon, name: "Innovator" })
+                    })
+                setIsZoomedIn(true)
+                setLocating(false)
+            },
+            (error) => {
+                console.error("Error getting location:", error)
+                setLocating(false)
+                alert("Could not retrieve your location. Please check browser permissions.")
+            },
+            { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+        )
+    }
+
+    // Smooth camera tracking when isZoomedIn toggles
+    useEffect(() => {
+        if (!cameraRef.current || !controlsRef.current || !userLocation) return
+
+        const camera = cameraRef.current
+        const controls = controlsRef.current
+
+        if (isZoomedIn) {
+            const userPos = getVector(userLocation.lat, userLocation.lon, 14) // 14 is CONFIG.radius
+            const targetCameraPos = userPos.clone().normalize().multiplyScalar(22)
+
+            controls.autoRotate = false
+
+            gsap.to(camera.position, {
+                x: targetCameraPos.x,
+                y: targetCameraPos.y,
+                z: targetCameraPos.z,
+                duration: 2.0,
+                ease: "power2.out",
+                onUpdate: () => controls.update()
+            })
+        } else {
+            controls.autoRotate = true
+
+            gsap.to(camera.position, {
+                x: 18,
+                y: 10,
+                z: 32,
+                duration: 1.5,
+                ease: "power2.out",
+                onUpdate: () => controls.update()
+            })
+        }
+    }, [isZoomedIn, userLocation])
 
     // Resolve effective theme
     const effectiveTheme = getEffectiveTheme(theme)
@@ -106,6 +196,7 @@ export function HeroGlobe() {
             1000
         )
         camera.position.set(18, 10, 32)
+        cameraRef.current = camera
 
         // --- RENDERER ---
         const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
@@ -121,6 +212,8 @@ export function HeroGlobe() {
         controls.minDistance = 20
         controls.maxDistance = 70
         controls.enablePan = false
+        controls.enableZoom = false
+        controlsRef.current = controls
 
         // --- TEXTURE LOADER ---
         const textureLoader = new THREE.TextureLoader()
@@ -196,37 +289,44 @@ export function HeroGlobe() {
         sunLight.position.set(50, 30, 50)
         scene.add(sunLight)
 
+        // Opposite fill light to keep both sides of the globe visible (avoiding a dark side)
+        const fillLight = new THREE.DirectionalLight(0xffffff, isDark ? 1.5 : 1.0)
+        fillLight.position.set(-50, -30, -50)
+        scene.add(fillLight)
+
         const blueSpot = new THREE.SpotLight(CONFIG.colorSpot, isDark ? 10 : 5)
         blueSpot.position.set(-50, 50, 0)
         scene.add(blueSpot)
 
         // --- MARKERS & CONNECTIONS ---
-        function getVector(lat: number, lon: number, r: number) {
-            const phi = (90 - lat) * (Math.PI / 180)
-            const theta = (lon + 180) * (Math.PI / 180)
-            return new THREE.Vector3(
-                -(r * Math.sin(phi) * Math.cos(theta)),
-                (r * Math.cos(phi)),
-                (r * Math.sin(phi) * Math.sin(theta))
-            )
+        const locations = [...TEAM]
+        if (userLocation) {
+            locations.push({
+                name: "You",
+                role: "Innovator",
+                loc: userLocation.name || "You",
+                lat: userLocation.lat,
+                lon: userLocation.lon
+            })
         }
 
         interface DomElement {
             mesh: THREE.Mesh
-            member: typeof TEAM[0]
+            member: typeof locations[0]
             id: number
         }
 
         const domElements: DomElement[] = []
         const packets: THREE.Mesh[] = []
 
-        TEAM.forEach((member, i) => {
+        locations.forEach((member, i) => {
             const pos = getVector(member.lat, member.lon, CONFIG.radius)
+            const isUser = member.name === "You"
 
             // A. The Dot
             const dot = new THREE.Mesh(
-                new THREE.SphereGeometry(0.2, 16, 16),
-                new THREE.MeshBasicMaterial({ color: CONFIG.colorDot })
+                new THREE.SphereGeometry(isUser ? 0.15 : 0.2, 16, 16),
+                new THREE.MeshBasicMaterial({ color: isUser ? 0xff3b30 : CONFIG.colorDot })
             )
             dot.position.copy(pos)
             globeGroup.add(dot)
@@ -236,44 +336,69 @@ export function HeroGlobe() {
 
             // B. The Ripple Ring
             const ring = new THREE.Mesh(
-                new THREE.RingGeometry(0.3, 0.5, 32),
+                new THREE.RingGeometry(isUser ? 0.25 : 0.3, isUser ? 0.45 : 0.5, 32),
                 new THREE.MeshBasicMaterial({
-                    color: CONFIG.colorLine,
+                    color: isUser ? 0xff3b30 : CONFIG.colorLine,
                     side: THREE.DoubleSide,
                     transparent: true,
-                    opacity: 0.6
+                    opacity: isUser ? 0.85 : 0.6
                 })
             )
             ring.position.copy(pos)
             ring.lookAt(new THREE.Vector3(0, 0, 0))
             globeGroup.add(ring)
 
-            // C. The Connection Line
-            const nextIdx = (i + 1) % TEAM.length
-            const nextPos = getVector(TEAM[nextIdx].lat, TEAM[nextIdx].lon, CONFIG.radius)
-            const dist = pos.distanceTo(nextPos)
+            // C. Connection Lines & Packets (Only for default team members loop to keep user's pin clear)
+            if (isUser) {
+                // Draw a 3D pointer pin/line pointing straight outward from the globe
+                const pinHeight = 4.0
+                const tipPos = pos.clone().normalize().multiplyScalar(CONFIG.radius + pinHeight)
 
-            const mid = pos.clone().add(nextPos).multiplyScalar(0.5)
-            mid.normalize().multiplyScalar(CONFIG.radius + (dist * 0.3))
+                // Pin Line
+                const linePoints = [pos, tipPos]
+                const pointerGeo = new THREE.BufferGeometry().setFromPoints(linePoints)
+                const pointerMat = new THREE.LineBasicMaterial({
+                    color: 0xff3b30,
+                    linewidth: 2
+                })
+                const pointerLine = new THREE.Line(pointerGeo, pointerMat)
+                globeGroup.add(pointerLine)
 
-            const curve = new THREE.QuadraticBezierCurve3(pos, mid, nextPos)
-            const lineGeo = new THREE.BufferGeometry().setFromPoints(curve.getPoints(50))
-            const lineMat = new THREE.LineBasicMaterial({
-                color: CONFIG.colorLine,
-                transparent: true,
-                opacity: isDark ? 0.2 : 0.4
-            })
-            const line = new THREE.Line(lineGeo, lineMat)
-            globeGroup.add(line)
+                // Pin Tip Sphere
+                const tipDot = new THREE.Mesh(
+                    new THREE.SphereGeometry(0.18, 16, 16),
+                    new THREE.MeshBasicMaterial({ color: 0xff3b30 })
+                )
+                tipDot.position.copy(tipPos)
+                globeGroup.add(tipDot)
+            } else {
+                const nextIdx = (i + 1) % TEAM.length
+                const nextMember = TEAM[nextIdx]
+                const nextPos = getVector(nextMember.lat, nextMember.lon, CONFIG.radius)
+                const dist = pos.distanceTo(nextPos)
 
-            // D. Traveling Packet
-            const packet = new THREE.Mesh(
-                new THREE.SphereGeometry(0.12),
-                new THREE.MeshBasicMaterial({ color: CONFIG.colorDot })
-            )
-            packet.userData = { curve: curve, pos: Math.random(), speed: 0.004 }
-            globeGroup.add(packet)
-            packets.push(packet)
+                const mid = pos.clone().add(nextPos).multiplyScalar(0.5)
+                mid.normalize().multiplyScalar(CONFIG.radius + (dist * 0.3))
+
+                const curve = new THREE.QuadraticBezierCurve3(pos, mid, nextPos)
+                const lineGeo = new THREE.BufferGeometry().setFromPoints(curve.getPoints(50))
+                const lineMat = new THREE.LineBasicMaterial({
+                    color: CONFIG.colorLine,
+                    transparent: true,
+                    opacity: isDark ? 0.2 : 0.4
+                })
+                const line = new THREE.Line(lineGeo, lineMat)
+                globeGroup.add(line)
+
+                // D. Traveling Packet
+                const packet = new THREE.Mesh(
+                    new THREE.SphereGeometry(0.12),
+                    new THREE.MeshBasicMaterial({ color: CONFIG.colorDot })
+                )
+                packet.userData = { curve: curve, pos: Math.random(), speed: 0.004 }
+                globeGroup.add(packet)
+                packets.push(packet)
+            }
         })
 
         // --- RAYCASTER FOR OCCLUSION ---
@@ -365,8 +490,10 @@ export function HeroGlobe() {
             atmosMat.dispose()
             renderer.dispose()
             rendererRef.current = null
+            cameraRef.current = null
+            controlsRef.current = null
         }
-    }, [isDark]) // Re-run effect when theme changes
+    }, [isDark, userLocation]) // Re-run effect when theme changes or user location changes
 
     return (
         <div className="relative w-full h-full min-h-[500px]">
@@ -392,16 +519,26 @@ export function HeroGlobe() {
                         }}
                     >
                         {/* Node Tag - Theme aware */}
-                        <div className={`relative backdrop-blur-sm px-3 py-2.5 rounded text-xs min-w-[140px] ${isDark
-                            ? 'bg-[rgba(10,20,35,0.85)] border border-cyan-400/30 text-white shadow-[0_10px_30px_rgba(0,0,0,0.5)]'
-                            : 'bg-white/90 border border-blue-300/50 text-gray-800 shadow-[0_4px_20px_rgba(0,0,0,0.1)]'
+                        <div className={`relative backdrop-blur-sm px-3 py-2.5 rounded text-xs min-w-[140px] ${
+                            label.name === "Innovator"
+                                ? 'bg-red-950/85 border border-red-500/50 text-white shadow-[0_4px_25px_rgba(239,68,68,0.25)] font-bold'
+                                : isDark
+                                    ? 'bg-[rgba(10,20,35,0.85)] border border-cyan-400/30 text-white shadow-[0_10px_30px_rgba(0,0,0,0.5)]'
+                                    : 'bg-white/90 border border-blue-300/50 text-gray-800 shadow-[0_4px_20px_rgba(0,0,0,0.1)]'
                             }`}>
                             {/* Header: Role & Location */}
-                            <div className="flex justify-between items-center mb-1">
-                                <span className={`text-[10px] font-bold uppercase tracking-wide ${isDark ? 'text-cyan-400' : 'text-blue-600'}`}>
-                                    {label.role}
+                            <div className="flex flex-wrap items-center gap-1 mb-1 text-[10px]">
+                                <span className={`font-bold uppercase tracking-wide ${
+                                    label.name === "You"
+                                        ? 'text-red-400'
+                                        : isDark
+                                            ? 'text-cyan-400'
+                                            : 'text-blue-600'
+                                }`}>
+                                    {label.name === "You" ? "Innovator" : label.role}
                                 </span>
-                                <span className={`text-[10px] ${isDark ? 'text-slate-500' : 'text-gray-500'}`}>
+                                <span className="text-slate-500">-</span>
+                                <span className={`${isDark ? 'text-slate-400' : 'text-gray-500'}`}>
                                     {label.loc}
                                 </span>
                             </div>
@@ -414,15 +551,51 @@ export function HeroGlobe() {
                             <div
                                 className="absolute left-1/2 bottom-[-20px] w-[1px] h-[20px]"
                                 style={{
-                                    background: isDark
-                                        ? 'linear-gradient(to bottom, #00f0ff, transparent)'
-                                        : 'linear-gradient(to bottom, #3b82f6, transparent)'
+                                    background: label.name === "Innovator"
+                                        ? 'linear-gradient(to bottom, #ef4444, transparent)'
+                                        : isDark
+                                            ? 'linear-gradient(to bottom, #00f0ff, transparent)'
+                                            : 'linear-gradient(to bottom, #3b82f6, transparent)'
                                 }}
                             />
                         </div>
                     </div>
                 ))}
             </div>
+
+            {/* Mark Location button */}
+            {!loading && (
+                <button
+                    onClick={() => {
+                        if (!userLocation) {
+                            handleShareLocation()
+                        } else {
+                            setIsZoomedIn(prev => !prev)
+                        }
+                    }}
+                    disabled={locating}
+                    className={`absolute bottom-4 left-1/2 -translate-x-1/2 z-20 font-mono text-[11px] tracking-wider uppercase px-4 py-2 transition-all rounded-full flex items-center gap-1.5 pointer-events-auto ${userLocation
+                            ? isDark
+                                ? 'bg-cyan-500/20 border border-cyan-400/40 text-cyan-300 shadow-[0_4px_15px_rgba(0,240,255,0.15)] hover:bg-cyan-500/30'
+                                : 'bg-blue-50/90 border border-blue-300 text-blue-800 shadow-[0_4px_15px_rgba(59,130,246,0.15)] hover:bg-blue-100'
+                            : locating
+                                ? 'bg-slate-800/80 border border-slate-700 text-slate-400 cursor-not-allowed'
+                                : isDark
+                                    ? 'bg-slate-950/70 border border-cyan-400/30 text-white shadow-[0_4px_15px_rgba(0,240,255,0.1)] hover:bg-cyan-500/10 active:bg-cyan-500/20'
+                                    : 'bg-white/80 border border-blue-300/50 text-blue-800 shadow-[0_4px_15px_rgba(59,130,246,0.15)] hover:bg-blue-50 hover:text-blue-900'
+                        }`}
+                >
+                    <MapPin className={`h-3.5 w-3.5 ${userLocation ? 'text-cyan-400' : 'text-primary'}`} />
+                    {userLocation
+                        ? isZoomedIn
+                            ? "Reset Globe View"
+                            : "Focus on Me"
+                        : locating
+                            ? "Locating..."
+                            : "Where are you? Pin location"
+                    }
+                </button>
+            )}
         </div>
     )
 }

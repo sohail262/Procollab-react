@@ -9,6 +9,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Eye, EyeOff, Loader2, Github, CheckCircle2 } from "lucide-react"
 import { WelcomeScreen } from "@/components/WelcomeScreen"
 import { trackSignupStarted, trackSignupCompleted } from "@/services/analyticsService"
+import { useToast } from "@/hooks/use-toast"
 
 export function Register() {
     const [formData, setFormData] = useState({
@@ -34,6 +35,22 @@ export function Register() {
     const { register, loginWithGoogle, loginWithGithub } = useAuth()
     const navigate = useNavigate()
     const [searchParams] = useSearchParams()   // ← ADD THIS
+    const { toast } = useToast()
+
+    const handleRegisterError = (err: any) => {
+        if (err.message === "User already exists. Please login.") {
+            toast({
+                title: "Account already exists",
+                description: "User already exists. Redirecting to login...",
+                variant: "destructive"
+            })
+            setTimeout(() => {
+                navigate("/login")
+            }, 1500)
+        } else {
+            setError(err.message)
+        }
+    }
 
     // Track signup funnel entry
     useEffect(() => { trackSignupStarted('email') }, [])
@@ -126,7 +143,7 @@ export function Register() {
             setWelcomeName(formData.firstName)
             setShowWelcome(true)
         } catch (err: any) {
-            setError(err.message)
+            handleRegisterError(err)
         } finally {
             setLoading(false)
         }
@@ -144,13 +161,13 @@ export function Register() {
         setLoading(true)
         saveRedirectBeforeOAuth()
         try {
-            await loginWithGoogle()
+            await loginWithGoogle(true)
             sessionStorage.removeItem('authRedirect')
             if (auth.currentUser) trackSignupCompleted(auth.currentUser.uid, 'google')
             setWelcomeName(getOAuthFirstName())
             setShowWelcome(true)
         } catch (err: any) {
-            setError(err.message)
+            handleRegisterError(err)
         } finally {
             setLoading(false)
         }
@@ -162,13 +179,13 @@ export function Register() {
         setLoading(true)
         saveRedirectBeforeOAuth()
         try {
-            await loginWithGithub()
+            await loginWithGithub(true)
             sessionStorage.removeItem('authRedirect')
             if (auth.currentUser) trackSignupCompleted(auth.currentUser.uid, 'github')
             setWelcomeName(getOAuthFirstName())
             setShowWelcome(true)
         } catch (err: any) {
-            setError(err.message)
+            handleRegisterError(err)
         } finally {
             setLoading(false)
         }

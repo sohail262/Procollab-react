@@ -37,11 +37,13 @@ export function WelcomeScreen({
     const timersRef = useRef<ReturnType<typeof setTimeout>[]>([])
 
     // Timings computed dynamically:
-    const enterMs = isReturning ? 800 : 1000
-    const pillarMs = isReturning ? 700 : 1100
-    const holdExtraMs = isReturning ? 100 : 600
-    const exitMs = 600
-    const navAfterMs = 350
+    // If returning, we adjust timings so they sum to exactly 5000ms:
+    // enterMs (1000) + 3 * pillarMs (2700) + holdExtraMs (400) + exitMs (500) + navAfterMs (400) = 5000ms
+    const enterMs = isReturning ? 1000 : 1000
+    const pillarMs = isReturning ? 900 : 1100
+    const holdExtraMs = isReturning ? 400 : 600
+    const exitMs = isReturning ? 500 : 600
+    const navAfterMs = isReturning ? 400 : 350
 
     const totalHold = PILLARS.length * pillarMs + holdExtraMs
 

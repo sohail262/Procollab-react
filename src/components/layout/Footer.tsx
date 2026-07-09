@@ -1,14 +1,15 @@
 import { Link } from "react-router-dom"
-import { Facebook, Instagram, Linkedin, Twitter } from "lucide-react"
+import { Instagram, Linkedin, Twitter } from "lucide-react"
+import { Logo } from "@/components/layout/Logo"
 
 export function Footer() {
     return (
-        <footer className="border-t bg-muted/40">
-            <div className="container py-12 md:py-16 lg:py-20">
-                <div className="grid grid-cols-1 gap-8 md:grid-cols-4">
+        <footer className="border-t border-white/[0.06] bg-background">
+            <div className="container max-w-7xl mx-auto px-4 py-16 md:py-20">
+                <div className="grid grid-cols-1 gap-10 md:grid-cols-4">
                     <div className="space-y-4">
-                        <img src="/images/header.png" alt="ProCollab" className="h-8 w-auto" />
-                        <p className="text-sm text-muted-foreground leading-relaxed">
+                        <Logo iconSize={38} showText={true} />
+                        <p className="text-sm text-muted-foreground leading-relaxed max-w-xs">
                             Connecting minds across disciplines for innovative collaboration and groundbreaking discoveries.
                         </p>
                     </div>
@@ -67,28 +68,25 @@ export function Footer() {
 
                     <div className="space-y-4">
                         <h4 className="text-sm font-semibold">Connect With Us</h4>
-                        <div className="flex space-x-4">
-                            <a href="#" className="text-muted-foreground hover:text-primary transition-colors">
-                                <Twitter className="h-5 w-5" />
+                        <div className="flex space-x-3">
+                            <a href="#" className="w-9 h-9 rounded-full border border-white/[0.08] flex items-center justify-center text-muted-foreground hover:text-primary hover:border-primary/30 transition-all">
+                                <Twitter className="h-4 w-4" />
                                 <span className="sr-only">Twitter</span>
                             </a>
-                            <a href="#" className="text-muted-foreground hover:text-primary transition-colors">
-                                <Facebook className="h-5 w-5" />
-                                <span className="sr-only">Facebook</span>
-                            </a>
-                            <a href="#" className="text-muted-foreground hover:text-primary transition-colors">
-                                <Linkedin className="h-5 w-5" />
+                            <a href="#" className="w-9 h-9 rounded-full border border-white/[0.08] flex items-center justify-center text-muted-foreground hover:text-primary hover:border-primary/30 transition-all">
+                                <Linkedin className="h-4 w-4" />
                                 <span className="sr-only">LinkedIn</span>
                             </a>
-                            <a href="#" className="text-muted-foreground hover:text-primary transition-colors">
-                                <Instagram className="h-5 w-5" />
+                            <a href="#" className="w-9 h-9 rounded-full border border-white/[0.08] flex items-center justify-center text-muted-foreground hover:text-primary hover:border-primary/30 transition-all">
+                                <Instagram className="h-4 w-4" />
                                 <span className="sr-only">Instagram</span>
                             </a>
                         </div>
                     </div>
                 </div>
-                <div className="mt-12 border-t pt-8 text-center">
-                    <p className="text-sm text-muted-foreground">
+
+                <div className="mt-14 pt-8 border-t border-white/[0.06] text-center">
+                    <p className="text-xs text-muted-foreground/60 font-mono tracking-wider">
                         &copy; {new Date().getFullYear()} ProCollab. All rights reserved. Built for innovators, by innovators.
                     </p>
                 </div>

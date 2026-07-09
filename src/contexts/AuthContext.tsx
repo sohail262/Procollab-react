@@ -51,8 +51,8 @@ interface AuthContextType {
         userData: UserData
     ) => Promise<void>
     logout: () => Promise<void>
-    loginWithGoogle: () => Promise<void>
-    loginWithGithub: () => Promise<void>
+    loginWithGoogle: (isSignUp?: boolean) => Promise<void>
+    loginWithGithub: (isSignUp?: boolean) => Promise<void>
     refreshUser: () => Promise<void>
 }
 
@@ -369,7 +369,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         }
     }
 
-    const loginWithGoogle = async () => {
+    const loginWithGoogle = async (isSignUp?: boolean) => {
         try {
             // NOTE: do NOT call setLoading(true) here — it unmounts children.
             const provider = new GoogleAuthProvider()
@@ -404,6 +404,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
                     lastCollaboratedAt: null,
                 })
             } else {
+                if (isSignUp) {
+                    await firebaseSignOut(auth)
+                    const error = new Error('User already exists. Please login.')
+                    error.code = 'auth/email-already-in-use'
+                    throw error
+                }
                 if (userDoc.data().disabled) {
                     await firebaseSignOut(auth)
                     throw new Error(
@@ -425,11 +431,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
             console.log('✅ Google login:', oauthUser.uid)
         } catch (error: any) {
             console.error('❌ Google login error:', error)
-            throw new Error(getAuthErrorMessage(error.code))
+            throw new Error(getAuthErrorMessage(error.code || error.message))
         }
     }
 
-    const loginWithGithub = async () => {
+    const loginWithGithub = async (isSignUp?: boolean) => {
         try {
             // NOTE: do NOT call setLoading(true) here — it unmounts children.
             const provider = new GithubAuthProvider()
@@ -464,6 +470,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
                     lastCollaboratedAt: null,
                 })
             } else {
+                if (isSignUp) {
+                    await firebaseSignOut(auth)
+                    const error = new Error('User already exists. Please login.')
+                    error.code = 'auth/email-already-in-use'
+                    throw error
+                }
                 if (userDoc.data().disabled) {
                     await firebaseSignOut(auth)
                     throw new Error(
@@ -485,7 +497,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
             console.log('✅ GitHub login:', oauthUser.uid)
         } catch (error: any) {
             console.error('❌ GitHub login error:', error)
-            throw new Error(getAuthErrorMessage(error.code))
+            throw new Error(getAuthErrorMessage(error.code || error.message))
         }
     }
 
@@ -546,7 +558,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 function getAuthErrorMessage(errorCode: string): string {
     switch (errorCode) {
         case 'auth/email-already-in-use':
-            return 'This email address is already registered. Please login instead.'
+            return 'User already exists. Please login.'
         case 'auth/invalid-email':
             return 'Invalid email address format.'
         case 'auth/operation-not-allowed':

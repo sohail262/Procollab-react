@@ -1,0 +1,505 @@
+import { useState, useEffect, useRef } from "react"
+import { Link, useNavigate } from "react-router-dom"
+import { Menu, LogOut, User, LayoutDashboard, Search, X, FolderKanban } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { Sheet, SheetContent, SheetTrigger, SheetTitle, SheetDescription } from "@/components/ui/sheet"
+import { useAuth } from "@/contexts/AuthContext"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
+import { Input } from "@/components/ui/input"
+import { Badge } from "@/components/ui/badge"
+import {
+    DropdownMenu,
+    DropdownMenuContent,
+    DropdownMenuItem,
+    DropdownMenuSeparator,
+    DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { collection, query, limit, getDocs, orderBy, doc, onSnapshot } from "firebase/firestore"
+import { db } from "@/lib/firebase"
+import gsap from "gsap"
+import { ScrollTrigger } from "gsap/ScrollTrigger"
+
+gsap.registerPlugin(ScrollTrigger)
+
+interface Project {
+    id: string
+    title: string
+    description: string
+    status: string
+    tags?: string[]
+}
+
+interface UserProfile {
+    photoURL?: string
+    avatarStyle?: string
+    avatarSeed?: string
+    firstName?: string
+    lastName?: string
+}
+
+export function LandingNavbar() {
+    const [isOpen, setIsOpen] = useState(false)
+    const [searchQuery, setSearchQuery] = useState("")
+    const [searchResults, setSearchResults] = useState<Project[]>([])
+    const [allProjects, setAllProjects] = useState<Project[]>([])
+    const [isSearchFocused, setIsSearchFocused] = useState(false)
+    const [userProfile, setUserProfile] = useState<UserProfile | null>(null)
+    const searchRef = useRef<HTMLDivElement>(null)
+    const navRef = useRef<HTMLElement>(null)
+
+    const { user, logout } = useAuth()
+    const navigate = useNavigate()
+
+    const navLinks = [
+        { name: "Home", href: "/" },
+        { name: "Projects", href: "/projects" },
+        { name: "Discover", href: "/discover" },
+        { name: "About", href: "/about" },
+    ]
+
+    // ── GSAP: Smart show/hide on scroll ───────────────────
+    useEffect(() => {
+        if (!navRef.current) return
+
+        let lastScrollY = 0
+
+        const ctx = gsap.context(() => {
+            // Initial entrance animation
+            gsap.fromTo(navRef.current,
+                { y: -100, opacity: 0 },
+                { y: 0, opacity: 1, duration: 1, ease: "power3.out", delay: 0.3 }
+            )
+
+            // Show/hide on scroll direction
+            ScrollTrigger.create({
+                start: "top top",
+                end: "max",
+                onUpdate: (self) => {
+                    const scrollY = self.scroll()
+                    const direction = scrollY > lastScrollY ? "down" : "up"
+                    const delta = Math.abs(scrollY - lastScrollY)
+
+                    if (delta < 5) return // ignore micro-scrolls
+
+                    if (direction === "down" && scrollY > 200) {
+                        gsap.to(navRef.current, {
+                            y: -100,
+                            opacity: 0,
+                            duration: 0.35,
+                            ease: "power2.in",
+                        })
+                    } else if (direction === "up") {
+                        gsap.to(navRef.current, {
+                            y: 0,
+                            opacity: 1,
+                            duration: 0.4,
+                            ease: "power3.out",
+                        })
+                    }
+
+                    lastScrollY = scrollY
+                },
+            })
+        })
+
+        return () => ctx.revert()
+    }, [])
+
+    // Load projects for search
+    useEffect(() => {
+        const loadProjects = async () => {
+            try {
+                const projectsRef = collection(db, 'projects')
+                const q = query(projectsRef, orderBy('createdAt', 'desc'), limit(50))
+                const snapshot = await getDocs(q)
+                const projectsData = snapshot.docs.map(doc => ({
+                    id: doc.id,
+                    ...doc.data()
+                })) as Project[]
+                setAllProjects(projectsData)
+            } catch (error) {
+                console.error('Error loading projects:', error)
+            }
+        }
+        loadProjects()
+    }, [])
+
+    // Fetch user profile from Firestore to get custom avatar (real-time updates)
+    useEffect(() => {
+        if (!user) {
+            setUserProfile(null)
+            return
+        }
+
+        // Use onSnapshot for real-time updates
+        const unsubscribe = onSnapshot(doc(db, 'users', user.uid), (docSnapshot) => {
+            if (docSnapshot.exists()) {
+                setUserProfile(docSnapshot.data() as UserProfile)
+            }
+        }, (error) => {
+            console.error('Error fetching user profile:', error)
+        })
+
+        return () => unsubscribe()
+    }, [user])
+
+    // Handle click outside to close search results
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (searchRef.current && !searchRef.current.contains(event.target as Node)) {
+                setIsSearchFocused(false)
+            }
+        }
+        document.addEventListener('mousedown', handleClickOutside)
+        return () => document.removeEventListener('mousedown', handleClickOutside)
+    }, [])
+
+    // Filter projects based on search query
+    useEffect(() => {
+        if (searchQuery.trim() === '') {
+            setSearchResults([])
+            return
+        }
+
+        const lowerQuery = searchQuery.toLowerCase()
+        const filtered = allProjects.filter(project =>
+            project.title?.toLowerCase().includes(lowerQuery) ||
+            project.description?.toLowerCase().includes(lowerQuery) ||
+            (project.tags || []).some(tag => tag?.toLowerCase().includes(lowerQuery))
+        ).slice(0, 5)
+
+        setSearchResults(filtered)
+    }, [searchQuery, allProjects])
+
+    const handleLogout = async () => {
+        try {
+            await logout()
+            navigate("/")
+        } catch (error) {
+            console.error("Error logging out:", error)
+        }
+    }
+
+    const handleProjectClick = (projectId: string) => {
+        setSearchQuery("")
+        setIsSearchFocused(false)
+        navigate(`/projects/${projectId}`)
+    }
+
+    const getUserInitials = () => {
+        if (user?.displayName) {
+            return user.displayName
+                .split(" ")
+                .map((n) => n[0])
+                .join("")
+                .toUpperCase()
+                .slice(0, 2)
+        }
+        if (user?.email) {
+            return user.email[0].toUpperCase()
+        }
+        return "U"
+    }
+
+    const getUserAvatarUrl = () => {
+        if (userProfile?.photoURL) {
+            return userProfile.photoURL
+        }
+        if (user?.photoURL) {
+            return user.photoURL
+        }
+        const seed = user?.email || user?.uid || 'default'
+        return `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(seed)}`
+    }
+
+    const getStatusColor = (status: string) => {
+        switch (status) {
+            case 'recruiting': return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400'
+            case 'active': return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
+            case 'completed': return 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400'
+            default: return 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400'
+        }
+    }
+
+    return (
+        <nav
+            ref={navRef}
+            className="fixed top-5 left-1/2 -translate-x-1/2 z-50 w-[calc(100%-2rem)] max-w-5xl"
+        >
+            <div className="floating-nav flex h-14 items-center justify-between px-4 md:px-6">
+
+                {/* Logo */}
+                <div className="flex items-center gap-2 flex-shrink-0">
+                    <Link to="/" className="flex items-center">
+                        <img src="/vite.svg" alt="ProCollab Logo" className="h-8 w-8 object-contain" />
+                    </Link>
+                </div>
+
+                {/* Desktop Navigation — centered links */}
+                <div className="hidden md:flex md:items-center md:gap-1 absolute left-1/2 -translate-x-1/2">
+                    {navLinks.map((link) => (
+                        <Link
+                            key={link.name}
+                            to={link.href}
+                            className="text-sm font-medium transition-colors hover:text-primary px-3 py-1.5 rounded-full hover:bg-white/[0.06]"
+                        >
+                            {link.name}
+                        </Link>
+                    ))}
+                </div>
+
+                {/* Right side: search + auth */}
+                <div className="hidden md:flex md:items-center md:gap-3">
+                    {/* Project Search Bar */}
+                    <div ref={searchRef} className="relative">
+                        <div className="relative">
+                            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                            <input
+                                type="text"
+                                placeholder="Search..."
+                                className="pl-8 pr-7 w-40 h-8 text-xs bg-white/[0.05] border border-white/[0.08] rounded-full text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary/40 focus:ring-1 focus:ring-primary/30 transition-all"
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                onFocus={() => setIsSearchFocused(true)}
+                            />
+                            {searchQuery && (
+                                <button
+                                    onClick={() => setSearchQuery("")}
+                                    className="absolute right-2 top-1/2 transform -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                                >
+                                    <X className="h-3 w-3" />
+                                </button>
+                            )}
+                        </div>
+
+                        {/* Search Results Dropdown */}
+                        {isSearchFocused && searchQuery && (
+                            <div className="absolute top-full mt-3 left-1/2 -translate-x-1/2 bg-background/95 backdrop-blur-xl border border-white/[0.08] rounded-xl shadow-2xl overflow-hidden z-50 w-[320px] md:w-[400px] max-w-[calc(100vw-2rem)]">
+                                {searchResults.length > 0 ? (
+                                    <div className="max-h-[300px] overflow-y-auto">
+                                        {searchResults.map((project) => (
+                                            <div
+                                                key={project.id}
+                                                onClick={() => handleProjectClick(project.id)}
+                                                className="flex items-center gap-3 p-3 hover:bg-white/[0.04] cursor-pointer border-b border-white/[0.04] last:border-b-0 transition-colors"
+                                            >
+                                                <div className="flex-shrink-0 w-9 h-9 bg-gradient-to-br from-primary/20 to-primary/5 rounded-lg flex items-center justify-center border border-primary/20">
+                                                    <FolderKanban className="h-4 w-4 text-primary" />
+                                                </div>
+                                                <div className="flex-1 min-w-0">
+                                                    <h4 className="font-medium text-sm truncate">{project.title}</h4>
+                                                    <p className="text-xs text-muted-foreground truncate">{project.description}</p>
+                                                </div>
+                                                <Badge variant="secondary" className={`text-[10px] flex-shrink-0 ${getStatusColor(project.status)}`}>
+                                                    {project.status}
+                                                </Badge>
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <div className="p-4 text-center text-sm text-muted-foreground">
+                                        <FolderKanban className="h-8 w-8 mx-auto mb-2 opacity-50" />
+                                        <p>No projects found for "{searchQuery}"</p>
+                                    </div>
+                                )}
+
+                                <div className="border-t border-white/[0.04] p-2">
+                                    <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="w-full text-xs rounded-lg"
+                                        onClick={() => {
+                                            navigate(`/projects?search=${encodeURIComponent(searchQuery)}`)
+                                            setSearchQuery("")
+                                            setIsSearchFocused(false)
+                                        }}
+                                    >
+                                        View all projects
+                                    </Button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Auth-aware buttons */}
+                    {user ? (
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" className="relative h-8 w-8 rounded-full">
+                                    <Avatar className="h-8 w-8" key={getUserAvatarUrl()}>
+                                        <AvatarImage src={getUserAvatarUrl()} alt={user.displayName || "User"} />
+                                        <AvatarFallback className="bg-primary text-primary-foreground text-xs">
+                                            {getUserInitials()}
+                                        </AvatarFallback>
+                                    </Avatar>
+                                </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent className="w-56" align="end" forceMount>
+                                <div className="flex items-center justify-start gap-2 p-2">
+                                    <div className="flex flex-col space-y-1 leading-none">
+                                        {user.displayName && (
+                                            <p className="font-medium">{user.displayName}</p>
+                                        )}
+                                        {user.email && (
+                                            <p className="text-xs text-muted-foreground truncate w-[200px]">
+                                                {user.email}
+                                            </p>
+                                        )}
+                                    </div>
+                                </div>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem asChild>
+                                    <Link to="/dashboard" className="cursor-pointer">
+                                        <LayoutDashboard className="mr-2 h-4 w-4" />
+                                        Dashboard
+                                    </Link>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem asChild>
+                                    <Link to={`/profile/${user.uid}`} className="cursor-pointer">
+                                        <User className="mr-2 h-4 w-4" />
+                                        Profile
+                                    </Link>
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem onClick={handleLogout} className="cursor-pointer text-red-600 focus:text-red-600">
+                                    <LogOut className="mr-2 h-4 w-4" />
+                                    Log out
+                                </DropdownMenuItem>
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+                    ) : (
+                        <div className="flex items-center gap-2">
+                            <Button variant="ghost" asChild size="sm" className="text-xs rounded-full px-4 h-8 hover:bg-white/[0.06]">
+                                <Link to="/login">Log in</Link>
+                            </Button>
+                            <Button asChild size="sm" className="text-xs rounded-full px-5 h-8">
+                                <Link to="/register">Sign up</Link>
+                            </Button>
+                        </div>
+                    )}
+                </div>
+
+                {/* Mobile Navigation */}
+                <div className="flex items-center gap-2 md:hidden">
+                    <Sheet open={isOpen} onOpenChange={setIsOpen}>
+                        <SheetTrigger asChild>
+                            <Button variant="ghost" size="icon" className="md:hidden h-8 w-8">
+                                <Menu className="h-5 w-5" />
+                                <span className="sr-only">Toggle menu</span>
+                            </Button>
+                        </SheetTrigger>
+                        <SheetContent side="right">
+                            <SheetTitle className="sr-only">Navigation Menu</SheetTitle>
+                            <SheetDescription className="sr-only">
+                                Mobile navigation menu with search and user options
+                            </SheetDescription>
+                            <div className="flex flex-col gap-4 py-4">
+                                {/* Mobile Search */}
+                                <div className="relative">
+                                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                                    <Input
+                                        type="text"
+                                        placeholder="Search projects..."
+                                        className="pl-9"
+                                        value={searchQuery}
+                                        onChange={(e) => setSearchQuery(e.target.value)}
+                                    />
+                                </div>
+
+                                {/* Mobile Search Results */}
+                                {searchQuery && searchResults.length > 0 && (
+                                    <div className="border rounded-lg divide-y">
+                                        {searchResults.slice(0, 3).map((project) => (
+                                            <div
+                                                key={project.id}
+                                                onClick={() => {
+                                                    handleProjectClick(project.id)
+                                                    setIsOpen(false)
+                                                }}
+                                                className="p-3 hover:bg-muted cursor-pointer"
+                                            >
+                                                <h4 className="font-medium text-sm truncate">{project.title}</h4>
+                                                <p className="text-xs text-muted-foreground truncate">{project.description}</p>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+
+                                {/* User info in mobile menu if logged in */}
+                                {user && (
+                                    <div className="flex items-center gap-3 pb-4 border-b">
+                                        <Avatar className="h-10 w-10" key={getUserAvatarUrl()}>
+                                            <AvatarImage src={getUserAvatarUrl()} alt={user.displayName || "User"} />
+                                            <AvatarFallback className="bg-primary text-primary-foreground">
+                                                {getUserInitials()}
+                                            </AvatarFallback>
+                                        </Avatar>
+                                        <div className="flex flex-col">
+                                            {user.displayName && (
+                                                <p className="font-medium text-sm">{user.displayName}</p>
+                                            )}
+                                            {user.email && (
+                                                <p className="text-xs text-muted-foreground truncate max-w-[180px]">
+                                                    {user.email}
+                                                </p>
+                                            )}
+                                        </div>
+                                    </div>
+                                )}
+
+                                {navLinks.map((link) => (
+                                    <Link
+                                        key={link.name}
+                                        to={link.href}
+                                        className="text-lg font-medium transition-colors hover:text-primary"
+                                        onClick={() => setIsOpen(false)}
+                                    >
+                                        {link.name}
+                                    </Link>
+                                ))}
+
+                                {/* Auth-aware mobile buttons */}
+                                {user ? (
+                                    <div className="flex flex-col gap-2 mt-4 pt-4 border-t">
+                                        <Button variant="outline" asChild className="w-full justify-start">
+                                            <Link to="/dashboard" onClick={() => setIsOpen(false)}>
+                                                <LayoutDashboard className="mr-2 h-4 w-4" />
+                                                Dashboard
+                                            </Link>
+                                        </Button>
+                                        <Button variant="outline" asChild className="w-full justify-start">
+                                            <Link to={`/profile/${user.uid}`} onClick={() => setIsOpen(false)}>
+                                                <User className="mr-2 h-4 w-4" />
+                                                Profile
+                                            </Link>
+                                        </Button>
+                                        <Button
+                                            variant="destructive"
+                                            className="w-full justify-start mt-2"
+                                            onClick={() => {
+                                                handleLogout()
+                                                setIsOpen(false)
+                                            }}
+                                        >
+                                            <LogOut className="mr-2 h-4 w-4" />
+                                            Log out
+                                        </Button>
+                                    </div>
+                                ) : (
+                                    <div className="flex flex-col gap-2 mt-4">
+                                        <Button variant="outline" asChild className="w-full justify-start">
+                                            <Link to="/login" onClick={() => setIsOpen(false)}>Log in</Link>
+                                        </Button>
+                                        <Button asChild className="w-full justify-start">
+                                            <Link to="/register" onClick={() => setIsOpen(false)}>Sign up</Link>
+                                        </Button>
+                                    </div>
+                                )}
+                            </div>
+                        </SheetContent>
+                    </Sheet>
+                </div>
+            </div>
+        </nav>
+    )
+}
