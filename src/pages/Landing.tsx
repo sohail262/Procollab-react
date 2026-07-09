@@ -295,21 +295,21 @@ export function Landing() {
                                     Connect with brilliant minds across disciplines. Build groundbreaking projects. Transform your ideas into reality with the perfect team.
                                 </p>
 
-                                <div className="flex flex-col sm:flex-row gap-3">
-                                    <Button asChild size="lg" className="hero-cta text-sm px-8 rounded-none font-mono tracking-wider uppercase btn-glow-amber">
-                                        <Link to="/register">
+                                <div className="flex flex-row flex-wrap gap-2 md:gap-3 w-full sm:w-auto items-center">
+                                    <Button asChild size="lg" className="hero-cta w-[145px] xs:w-44 sm:w-auto text-xs sm:text-sm px-4 sm:px-8 h-10 sm:h-12 rounded-none font-mono tracking-wider uppercase btn-glow-amber">
+                                        <Link to="/register" className="justify-center">
                                             Get Started
-                                            <ArrowRight className="ml-2 h-4 w-4" />
+                                            <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
                                         </Link>
                                     </Button>
-                                    <Button asChild variant="outline" size="lg" className="hero-cta text-sm px-8 rounded-none font-mono tracking-wider uppercase">
-                                        <Link to="/projects">Explore Projects</Link>
+                                    <Button asChild variant="outline" size="lg" className="hero-cta w-[145px] xs:w-44 sm:w-auto text-xs sm:text-sm px-4 sm:px-8 h-10 sm:h-12 rounded-none font-mono tracking-wider uppercase">
+                                        <Link to="/projects" className="justify-center">Explore Projects</Link>
                                     </Button>
-                                </div>
+                               </div>
                             </div>
 
                             {/* Right column: Globe */}
-                            <div className="hero-globe relative h-[400px] lg:h-[560px] w-full flex items-center justify-center">
+                            <div className="hero-globe relative h-[500px] lg:h-[560px] w-full mt-6 lg:mt-0 flex items-center justify-center">
                                 <Suspense fallback={<GlobePlaceholder />}>
                                     <HeroGlobe />
                                 </Suspense>
@@ -517,7 +517,7 @@ export function Landing() {
                                 />
                             </div>
 
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-16 md:gap-8">
                                 {[
                                     {
                                         step: "01",
@@ -541,15 +541,13 @@ export function Landing() {
                                         detail: "All tools in one place",
                                     },
                                 ].map((item, i) => (
-                                    <div key={i} className="step-card group">
+                                    <div key={i} className="step-card group flex flex-col items-center">
                                         {/* Step number node */}
-                                        <div className="flex justify-center mb-8">
-                                            <div className="w-12 h-12 rounded-full border-2 border-border group-hover:border-primary bg-background flex items-center justify-center font-mono text-sm font-bold text-muted-foreground group-hover:text-primary transition-all duration-500 relative z-20">
-                                                {item.step}
-                                            </div>
+                                        <div className="w-12 h-12 rounded-full border-2 border-border group-hover:border-primary bg-background flex items-center justify-center font-mono text-sm font-bold text-muted-foreground group-hover:text-primary transition-all duration-500 relative z-20">
+                                            {item.step}
                                         </div>
 
-                                        <div className="glass-card p-8 h-full group-hover:border-primary/20 transition-all duration-500">
+                                        <div className="glass-card p-8 w-full mt-6 group-hover:border-primary/20 transition-all duration-500 flex-1">
                                             <span className="glass-sheen" />
 
                                             <div className="w-10 h-10 border border-border group-hover:border-primary flex items-center justify-center mb-5 transition-colors">

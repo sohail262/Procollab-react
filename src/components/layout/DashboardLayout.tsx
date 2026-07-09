@@ -269,44 +269,47 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                 className={`fixed top-0 left-0 z-40 w-64 h-screen pt-20 transition-transform duration-300 ease-premium ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'
                     } glass border-r border-border/40 lg:translate-x-0`}
             >
-                <div className="h-full px-3 pb-4 overflow-y-auto flex flex-col">
-                    <ul className="space-y-0.5 font-medium flex-1 mt-2">
-                        {navigation.map((item, index) => {
-                            const isActive = location.pathname === item.href
-                            return (
-                                <motion.li
-                                    key={item.name}
-                                    initial={{ opacity: 0, x: -8 }}
-                                    animate={{ opacity: 1, x: 0 }}
-                                    transition={{ delay: index * 0.04, duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-                                >
-                                    <Link
-                                        to={item.href}
-                                        onClick={() => setSidebarOpen(false)}
-                                        className={`relative flex items-center px-3 py-2.5 rounded-lg group transition-all duration-200 ${isActive
-                                            ? 'bg-foreground/[0.06] text-foreground'
-                                            : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
-                                            }`}
+                <div className="h-full flex flex-col justify-between pb-4">
+                    {/* Scrollable Navigation List */}
+                    <div className="flex-1 overflow-y-auto px-3 mt-2">
+                        <ul className="space-y-0.5 font-medium">
+                            {navigation.map((item, index) => {
+                                const isActive = location.pathname === item.href
+                                return (
+                                    <motion.li
+                                        key={item.name}
+                                        initial={{ opacity: 0, x: -8 }}
+                                        animate={{ opacity: 1, x: 0 }}
+                                        transition={{ delay: index * 0.04, duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
                                     >
-                                        {/* Active indicator bar */}
-                                        {isActive && (
-                                            <motion.div
-                                                layoutId="sidebar-active"
-                                                className="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] h-4 bg-foreground rounded-full"
-                                                transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-                                            />
-                                        )}
-                                        <item.icon className={`w-[18px] h-[18px] transition-colors duration-200 ${isActive ? 'text-foreground' : 'text-muted-foreground group-hover:text-foreground'
-                                            }`} strokeWidth={1.5} />
-                                        <span className="ml-3 text-[13px]">{item.name}</span>
-                                    </Link>
-                                </motion.li>
-                            )
-                        })}
-                    </ul>
+                                        <Link
+                                            to={item.href}
+                                            onClick={() => setSidebarOpen(false)}
+                                            className={`relative flex items-center px-3 py-2.5 rounded-lg group transition-all duration-200 ${isActive
+                                                ? 'bg-foreground/[0.06] text-foreground'
+                                                : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
+                                                }`}
+                                        >
+                                            {/* Active indicator bar */}
+                                            {isActive && (
+                                                <motion.div
+                                                    layoutId="sidebar-active"
+                                                    className="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] h-4 bg-foreground rounded-full"
+                                                    transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+                                                />
+                                            )}
+                                            <item.icon className={`w-[18px] h-[18px] transition-colors duration-200 ${isActive ? 'text-foreground' : 'text-muted-foreground group-hover:text-foreground'
+                                                }`} strokeWidth={1.5} />
+                                            <span className="ml-3 text-[13px]">{item.name}</span>
+                                        </Link>
+                                    </motion.li>
+                                )
+                            })}
+                        </ul>
+                    </div>
 
-                    {/* Logout — mobile sidebar only */}
-                    <div className="pt-3 mt-3 border-t border-border/30 lg:hidden">
+                    {/* Logout — mobile sidebar only (fixed at bottom, non-scrollable) */}
+                    <div className="px-3 pt-3 mt-2 border-t border-border/30 lg:hidden">
                         <button
                             onClick={handleLogout}
                             className="w-full flex items-center px-3 py-2.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-all duration-200"
