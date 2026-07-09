@@ -406,7 +406,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
             } else {
                 if (isSignUp) {
                     await firebaseSignOut(auth)
-                    const error = new Error('User already exists. Please login.')
+                    const error = new Error('User already exists. Please login.') as any
                     error.code = 'auth/email-already-in-use'
                     throw error
                 }
@@ -472,7 +472,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
             } else {
                 if (isSignUp) {
                     await firebaseSignOut(auth)
-                    const error = new Error('User already exists. Please login.')
+                    const error = new Error('User already exists. Please login.') as any
                     error.code = 'auth/email-already-in-use'
                     throw error
                 }
