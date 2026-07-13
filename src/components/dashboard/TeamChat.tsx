@@ -76,6 +76,35 @@ export function TeamChat() {
 
     // Track clicked mentions to hide the `@` scroll indicator once tapped
     const [clickedMentionIds, setClickedMentionIds] = useState<Set<string>>(new Set())
+    const hasLoadedRef = useRef(false)
+
+    // Load read mentions once user and project ID are available
+    useEffect(() => {
+        if (!user?.uid || !projectId) return
+        try {
+            const saved = localStorage.getItem(`read_mentions_${projectId}_${user.uid}`)
+            if (saved) {
+                setClickedMentionIds(new Set(JSON.parse(saved)))
+            }
+        } catch (err) {
+            console.error('Error loading read mentions:', err)
+        } finally {
+            hasLoadedRef.current = true
+        }
+    }, [projectId, user?.uid])
+
+    // Save to localStorage when it changes
+    useEffect(() => {
+        if (!user?.uid || !projectId || !hasLoadedRef.current) return
+        try {
+            localStorage.setItem(
+                `read_mentions_${projectId}_${user.uid}`,
+                JSON.stringify(Array.from(clickedMentionIds))
+            )
+        } catch (err) {
+            console.error('Error saving read mentions:', err)
+        }
+    }, [clickedMentionIds, projectId, user?.uid])
 
     // Emoji reactions
     const [activeReactionPickerMsgId, setActiveReactionPickerMsgId] = useState<string | null>(null)
@@ -432,6 +461,9 @@ export function TeamChat() {
             })
         } finally {
             setSending(false)
+            setTimeout(() => {
+                inputRef.current?.focus()
+            }, 50)
         }
     }
 

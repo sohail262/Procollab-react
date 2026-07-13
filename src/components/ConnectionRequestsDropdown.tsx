@@ -167,7 +167,7 @@ export function ConnectionRequestsDropdown() {
         }
     }
 
-    const badgeCount = incoming.length + outgoing.length
+    const badgeCount = incoming.length
     const needsAction = incoming.length > 0
 
     return (
@@ -251,6 +251,11 @@ export function ConnectionRequestsDropdown() {
                                                         {request.fromUserData?.discipline && (
                                                             <p className="text-xs text-muted-foreground truncate">
                                                                 {request.fromUserData.discipline}
+                                                            </p>
+                                                        )}
+                                                        {request.message && (
+                                                            <p className="text-xs italic bg-accent/40 text-muted-foreground px-2 py-1 border border-border/30 rounded mt-1.5 max-h-12 overflow-y-auto whitespace-pre-wrap">
+                                                                "{request.message}"
                                                             </p>
                                                         )}
                                                         <div className="flex gap-2 mt-2">

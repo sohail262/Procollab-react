@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { SEOHead, buildBreadcrumbSchema } from '@/components/seo/SEOHead'
 import { DashboardLayout } from '@/components/layout/DashboardLayout'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -37,8 +38,9 @@ import {
     HeartPulse,
     Scale,
     MessageCircle,
-    type LucideIcon
+    X
 } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import {
     collection,
     query,
@@ -52,6 +54,7 @@ import { db, auth } from '@/lib/firebase'
 import { cachedQuery } from '@/lib/queryUtils'
 import {
     sendConnectionRequest,
+    removeConnection,
 } from '@/services/connectionService'
 import { useToast } from '@/hooks/use-toast'
 import { InviteToProjectDropdown, InviteButton } from '@/components/InviteToProjectDropdown'
@@ -122,6 +125,7 @@ export function Discover() {
     const [inviteOpenForUserId, setInviteOpenForUserId] = useState<string | null>(null)
     /** Set of `${targetUserId}_${projectId}` keys for already-sent invites */
     const [sentInvites, setSentInvites] = useState<Set<string>>(new Set())
+
 
     // ── Search / filter state ──────────────────────────────────────────────────
     const [peopleSearch, setPeopleSearch] = useState('')
@@ -598,6 +602,24 @@ export function Discover() {
         }
     }
 
+    const handleDisconnect = async (userId: string) => {
+        if (!auth.currentUser) return
+        try {
+            await removeConnection(auth.currentUser.uid, userId)
+            setFriendIds(prev => {
+                const next = new Set(prev)
+                next.delete(userId)
+                return next
+            })
+            toast({ title: 'Connection removed' })
+        } catch (error) {
+            console.error('Error removing connection:', error)
+            toast({ title: 'Could not remove connection', variant: 'destructive' })
+        }
+    }
+
+
+
     // ── Invite-to-project handler ───────────────────────────────────────
     const handleInvite = async (targetUserId: string, projectId: string, projectTitle: string, message?: string) => {
         if (!auth.currentUser) return
@@ -643,7 +665,7 @@ export function Discover() {
     const filteredPeople = useMemo(() => peopleState.items.filter(person => {
         // Hide self
         if (auth.currentUser && person.id === auth.currentUser.uid) return false
-        // Hide confirmed friends
+        // Hide confirmed connections from Discover suggestions (manage them via Profile > My Connections)
         if (friendIds.has(person.id)) return false
         // ✅ Hide outgoing pending — already sent, no action needed in Discover
         if (outgoingPendingIds.has(person.id)) return false
@@ -669,6 +691,31 @@ export function Discover() {
     // ── Render ────────────────────────────────────────────────────────────────
     return (
         <DashboardLayout>
+            <SEOHead
+                title="Discover Projects & Collaborators"
+                description="Discover student projects by domain and skill. Find teammates, connect with developers, and explore trending tech projects. Search by technology, discipline, or skill to find your next collaboration."
+                keywords={[
+                    'discover student projects',
+                    'find project collaborators',
+                    'find teammates online',
+                    'student networking platform',
+                    'connect with developers',
+                    'domain wise project discovery',
+                    'skill wise project search',
+                    'find project partner India',
+                    'developer collaboration',
+                    'tech team finder',
+                    'engineering student network',
+                    'project mate finder',
+                    'trending tech projects',
+                    'open to collaborate students',
+                ]}
+                canonical="https://procollab.in/discover"
+                structuredData={buildBreadcrumbSchema([
+                    { name: 'Home', url: '/' },
+                    { name: 'Discover', url: '/discover' },
+                ])}
+            />
             <div className="mb-6 sm:mb-8">
                 <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white mb-2">
                     Discover
@@ -739,6 +786,7 @@ export function Discover() {
                             const isOutgoing = outgoingPendingIds.has(person.id)
                             const isIncoming = incomingPendingIds.has(person.id)
                             const isFading = fadingUsers.has(person.id)
+                            const isConnected = friendIds.has(person.id)
 
                             return (
                                 <Card
@@ -773,8 +821,17 @@ export function Discover() {
                                             </div>
 
                                             {/* Connection button */}
-                                            <div className="shrink-0">
-                                                {isOutgoing || isFading ? (
+                                            <div className="shrink-0 flex items-center gap-1.5">
+                                                {isConnected ? (
+                                                    <Button
+                                                        size="sm"
+                                                        variant="outline"
+                                                        className="h-7 px-2 text-xs text-red-400 hover:text-red-500 hover:bg-red-500/10 border-red-500/20"
+                                                        onClick={() => handleDisconnect(person.id)}
+                                                    >
+                                                        Disconnect
+                                                    </Button>
+                                                ) : isOutgoing || isFading ? (
                                                     <Button
                                                         size="sm"
                                                         variant="outline"
@@ -1008,6 +1065,7 @@ export function Discover() {
                     )}
                 </div>
             </section>
+
         </DashboardLayout>
     )
 }

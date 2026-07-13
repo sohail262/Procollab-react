@@ -1,0 +1,48 @@
+# ProCollab - robots.txt
+# https://procollab.in
+
+# Explicit permissions for AI Crawlers (AEO / GEO Optimization)
+User-agent: GPTBot
+Allow: /llms.txt
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /llms.txt
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /llms.txt
+Allow: /
+
+User-agent: Google-Extended
+Allow: /llms.txt
+Allow: /
+
+# General rules
+User-agent: *
+Allow: /
+Allow: /llms.txt
+Allow: /discover
+Allow: /projects/
+Allow: /project/public/
+Allow: /u/
+Allow: /login
+Allow: /register
+
+# Block auth-only and admin pages
+Disallow: /dashboard
+Disallow: /dashboard/
+Disallow: /admin
+Disallow: /settings
+Disallow: /settings/
+Disallow: /profile
+Disallow: /create-project
+Disallow: /edit-project/
+Disallow: /project/*/dashboard
+Disallow: /project/*/manage-team
+Disallow: /manage-team/
+Disallow: /saved-projects
+Disallow: /invite
+
+# Sitemap and LLM resources
+Sitemap: https://procollab.in/sitemap.xml

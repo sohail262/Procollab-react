@@ -51,8 +51,8 @@ export function Navbar() {
         { name: "Home", href: "/" },
         { name: "Projects", href: "/projects" },
         { name: "Discover", href: "/discover" },
-        { name: "About", href: "/about" },
     ]
+
 
     // Load projects for search
     useEffect(() => {

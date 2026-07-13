@@ -1,4 +1,11 @@
 import { useState, useEffect } from 'react'
+import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@/contexts/AuthContext'
 import { DashboardLayout } from '@/components/layout/DashboardLayout'
@@ -126,7 +133,7 @@ export function Settings() {
                     firstName: data.firstName || '',
                     lastName: data.lastName || '',
                     username: data.username || '',
-                    profileVisibility: data.profileVisibility || 'public',
+                    profileVisibility: ['public', 'connections_only', 'private'].includes(data.profileVisibility) ? data.profileVisibility : 'public',
                     role: data.role || '',
                     discipline: data.discipline || '',
                     bio: data.bio || '',
@@ -530,15 +537,19 @@ export function Settings() {
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium mb-2">Profile Privacy *</label>
-                                        <select
-                                            className="w-full px-3 py-2 border rounded-md bg-background text-foreground"
-                                            value={formData.profileVisibility}
-                                            onChange={e => setFormData({ ...formData, profileVisibility: e.target.value })}
+                                        <Select
+                                            value={['public', 'connections_only', 'private'].includes(formData.profileVisibility) ? formData.profileVisibility : 'public'}
+                                            onValueChange={value => setFormData({ ...formData, profileVisibility: value })}
                                         >
-                                            <option value="public">Public (Everyone can view)</option>
-                                            <option value="connections_only">Connections Only (Only friends can view)</option>
-                                            <option value="private">Private (Only you can view)</option>
-                                        </select>
+                                            <SelectTrigger className="w-full">
+                                                <SelectValue placeholder="Select Privacy" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="public">Public (Everyone can view)</SelectItem>
+                                                <SelectItem value="connections_only">Connections Only (Only friends can view)</SelectItem>
+                                                <SelectItem value="private">Private (Only you can view)</SelectItem>
+                                            </SelectContent>
+                                        </Select>
                                         <p className="text-[11px] text-muted-foreground mt-1.5">
                                             Control who can access your public profile and portfolio work.
                                         </p>
@@ -570,16 +581,19 @@ export function Settings() {
                                     </div>
                                     <div>
                                         <label className="block text-sm font-medium mb-2">Discipline</label>
-                                        <select
-                                            className="w-full px-3 py-2 border rounded-md bg-background text-foreground"
-                                            value={formData.discipline}
-                                            onChange={e => setFormData({ ...formData, discipline: e.target.value })}
+                                        <Select
+                                            value={formData.discipline || undefined}
+                                            onValueChange={value => setFormData({ ...formData, discipline: value })}
                                         >
-                                            <option value="">Select Discipline</option>
-                                            {disciplines.map(d => (
-                                                <option key={d} value={d}>{d}</option>
-                                            ))}
-                                        </select>
+                                            <SelectTrigger className="w-full">
+                                                <SelectValue placeholder="Select Discipline" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {disciplines.map(d => (
+                                                    <SelectItem key={d} value={d}>{d}</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
                                     </div>
                                     <div className="md:col-span-2">
                                         <label className="block text-sm font-medium mb-2">Bio</label>

@@ -3,29 +3,204 @@
 
 <head>
   <meta charset="UTF-8" />
-  <link rel="icon" type="image/svg+xml" href="/vite.svg" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-  <!-- Performance optimizations -->
+  <!-- ── Favicon & App Icons ──────────────────────────────── -->
+  <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+  <link rel="apple-touch-icon" href="/vite.svg" />
+  <meta name="theme-color" content="#6366f1" />
+  <meta name="msapplication-TileColor" content="#6366f1" />
+
+  <!-- ── Primary SEO ──────────────────────────────────────── -->
+  <title>ProCollab — Student Project Collaboration & Showcase Platform</title>
+  <meta name="description" content="ProCollab is India's leading platform for students to showcase final year projects, discover domain-wise & skill-wise projects, find teammates, collaborate in real time, and build their developer portfolio. Join 10,000+ students." />
+  <meta name="keywords" content="ProCollab, procollab.in, student projects, final year projects, FYP, capstone projects, engineering projects, CS projects, project collaboration platform, find teammates for project, team up for project, student collaboration, project management, learning platform for students, share projects online, showcase student projects, domain-wise projects, skill-wise projects, tech project ideas, software project showcase, project repository, student developer portfolio, college projects, university projects, hackathon teams, internship projects, open source student projects, project ideas for students, collaborate on projects, student team finder, project partner, coding projects, web development projects, machine learning projects, AI projects, IoT projects, blockchain projects, mobile app projects, data science projects, full stack projects, computer science projects, project showcase India, student networking platform, developer community, GitHub alternative for students, project management tool, agile student projects, real-time collaboration, project tracker, milestone tracking, team management, peer learning, mentorship platform" />
+  <meta name="author" content="ProCollab Team" />
+  <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1" />
+  <link rel="canonical" href="https://procollab.in/" />
+
+  <!-- ── Geo & Regional ────────────────────────────────────── -->
+  <meta name="geo.region" content="IN" />
+  <meta name="geo.country" content="India" />
+  <meta name="language" content="English" />
+  <meta name="rating" content="general" />
+
+  <!-- ── Open Graph ────────────────────────────────────────── -->
+  <meta property="og:site_name" content="ProCollab" />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="ProCollab — Student Project Collaboration & Showcase Platform" />
+  <meta property="og:description" content="Showcase your final year project, discover skill-wise & domain-wise projects, find teammates, and collaborate in real time. India's #1 student project platform." />
+  <meta property="og:url" content="https://procollab.in/" />
+  <meta property="og:image" content="https://procollab.in/og-default.png" />
+  <meta property="og:image:alt" content="ProCollab — Student Project Platform" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:locale" content="en_IN" />
+
+  <!-- ── Twitter Card ──────────────────────────────────────── -->
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:site" content="@ProCollab_in" />
+  <meta name="twitter:creator" content="@ProCollab_in" />
+  <meta name="twitter:title" content="ProCollab — Student Project Collaboration & Showcase Platform" />
+  <meta name="twitter:description" content="Showcase your final year project, discover skill-wise & domain-wise projects, find teammates, and collaborate in real time." />
+  <meta name="twitter:image" content="https://procollab.in/og-default.png" />
+
+  <!-- ── PWA / Mobile ──────────────────────────────────────── -->
+  <meta name="application-name" content="ProCollab" />
+  <meta name="apple-mobile-web-app-title" content="ProCollab" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="mobile-web-app-capable" content="yes" />
+
+  <!-- ── Performance ────────────────────────────────────────── -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="dns-prefetch" href="https://firebaseapp.com">
   <link rel="dns-prefetch" href="https://googleapis.com">
 
-  <!-- Premium typography — Plus Jakarta Sans + DM Sans -->
+  <!-- ── Premium typography — Plus Jakarta Sans + DM Sans ──── -->
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,300..800;1,300..800&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&display=swap" rel="stylesheet">
 
-  <!-- Preload critical resources -->
+  <!-- ── Preload critical resources ────────────────────────── -->
   <link rel="modulepreload" href="/src/main.tsx">
 
-  <title>Procollab - Collaborative Project Platform</title>
-  <meta name="description" content="Connect, collaborate, and create amazing projects with Procollab">
+  <!-- ── Global JSON-LD: WebSite + Organization ─────────────── -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebSite",
+        "@id": "https://procollab.in/#website",
+        "name": "ProCollab",
+        "url": "https://procollab.in",
+        "description": "ProCollab is India's leading platform for students to discover, showcase, and collaborate on final year projects, domain-wise projects, and skill-based projects.",
+        "inLanguage": "en-IN",
+        "potentialAction": {
+          "@type": "SearchAction",
+          "target": {
+            "@type": "EntryPoint",
+            "urlTemplate": "https://procollab.in/discover?q={search_term_string}"
+          },
+          "query-input": "required name=search_term_string"
+        }
+      },
+      {
+        "@type": "Organization",
+        "@id": "https://procollab.in/#organization",
+        "name": "ProCollab",
+        "url": "https://procollab.in",
+        "logo": {
+          "@type": "ImageObject",
+          "url": "https://procollab.in/logo.png",
+          "width": 512,
+          "height": 512
+        },
+        "description": "Student project collaboration and showcase platform",
+        "sameAs": [
+          "https://twitter.com/ProCollab_in",
+          "https://www.linkedin.com/company/procollab",
+          "https://github.com/procollab"
+        ]
+      },
+      {
+        "@type": "SoftwareApplication",
+        "name": "ProCollab",
+        "operatingSystem": "Web",
+        "applicationCategory": "EducationApplication",
+        "description": "Platform for students to showcase final year projects, find teammates, manage projects and collaborate in real time.",
+        "url": "https://procollab.in",
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "INR"
+        },
+        "featureList": [
+          "Final Year Project Showcase",
+          "Student Project Collaboration",
+          "Domain-wise Project Discovery",
+          "Skill-wise Team Matching",
+          "Real-time Project Management",
+          "Developer Portfolio",
+          "Peer Learning Community",
+          "Project Milestone Tracking",
+          "Team Management"
+        ]
+      }
+    ]
+  }
+  </script>
+
   <script src="/suppress-extension-errors.js"></script>
 </head>
 
 <body>
-  <div id="root"></div>
+  <div id="root">
+    <!-- Premium Inline Initial Loader (FCP Optimization) -->
+    <style>
+      .pc-init-loader {
+        position: fixed;
+        inset: 0;
+        z-index: 99999;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        background-color: #080a0e;
+        margin: 0;
+        padding: 0;
+      }
+      .pc-init-brand {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 30px;
+      }
+      .pc-init-mark {
+        width: 30px;
+        height: 30px;
+        border-radius: 8px;
+        background: #ffffff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .pc-init-mark span {
+        font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+        font-size: 15px;
+        font-weight: 700;
+        color: #080a0e;
+        line-height: 1;
+      }
+      .pc-init-name {
+        font-size: 11px;
+        font-weight: 400;
+        letter-spacing: 0.22em;
+        text-transform: uppercase;
+        color: rgba(255, 255, 255, 0.4);
+        font-family: 'DM Sans', system-ui, sans-serif;
+      }
+      .pc-init-spinner {
+        position: relative;
+        width: 40px;
+        height: 40px;
+        border: 2px solid rgba(99, 102, 241, 0.15);
+        border-top-color: #6366f1;
+        border-radius: 50%;
+        animation: pc-spin 0.8s linear infinite;
+      }
+      @keyframes pc-spin {
+        to { transform: rotate(360deg); }
+      }
+    </style>
+    <div class="pc-init-loader">
+      <div class="pc-init-brand">
+        <div class="pc-init-mark"><span>P</span></div>
+        <span class="pc-init-name">ProCollab</span>
+      </div>
+      <div class="pc-init-spinner"></div>
+    </div>
+  </div>
   <script type="module" src="/src/main.tsx"></script>
 </body>
-
 </html>

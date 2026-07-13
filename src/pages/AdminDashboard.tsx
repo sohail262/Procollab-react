@@ -1042,7 +1042,7 @@ export function AdminDashboard() {
             </div>
 
             <Tabs value={activeTab} onValueChange={setActiveTab}>
-                <TabsList className="mb-6 flex-wrap gap-1">
+                <TabsList className="mb-6 w-full justify-start overflow-x-auto flex-nowrap gap-1 scrollbar-none h-11">
                     {/* Overview */}
                     <TabsTrigger value="overview">
                         <BarChart3 className="h-4 w-4 mr-2" />

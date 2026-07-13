@@ -45,6 +45,7 @@ interface Project {
     maxMembers?:       number
     members?:          string[]
     openRoles?:        string[]
+    projectVisibility?: string
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -210,7 +211,7 @@ export function Projects() {
 
             const matchesDiscipline =
                 disciplineFilter === 'all' ||
-                project.primaryDiscipline
+                (project.primaryDiscipline || '')
                     .toLowerCase()
                     .replace(/ & /g, '-')
                     .replace(/ /g, '-') === disciplineFilter
@@ -219,7 +220,20 @@ export function Projects() {
             const isNotOwnProject =
                 !user || project.createdBy !== user.uid
 
-            return matchesSearch && matchesStatus && matchesDiscipline && isNotOwnProject
+            // Hide private projects
+            const isVisible = project.projectVisibility !== 'private'
+
+            // Hide if team is full
+            const membersList = project.members || []
+            const hasOwner = project.createdBy && membersList.includes(project.createdBy)
+            const currentCount = membersList.length + (hasOwner ? 0 : 1)
+            const maxCount = project.maxMembers || project.teamSize || 4
+            const isNotFull = currentCount < maxCount
+
+            // Hide if completed
+            const isNotCompleted = project.status !== 'completed'
+
+            return matchesSearch && matchesStatus && matchesDiscipline && isNotOwnProject && isVisible && isNotFull && isNotCompleted
         })
         .sort((a, b) => {
             switch (sortBy) {

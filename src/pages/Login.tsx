@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { SEOHead } from "@/components/seo/SEOHead"
 import type { FormEvent } from "react"
 import { Link, useNavigate, useSearchParams, Navigate } from "react-router-dom"
 import { Logo } from "@/components/layout/Logo"
@@ -108,6 +109,16 @@ export function Login() {
 
     return (
         <>
+            <SEOHead
+                title="Login to ProCollab"
+                description="Sign in to ProCollab to access your student project dashboard, collaborate with teammates, manage your final year project, and discover new collaborators."
+                keywords={[
+                    'login ProCollab',
+                    'student project platform login',
+                    'sign in to collaborate',
+                ]}
+                canonical="https://procollab.in/login"
+            />
             <style>{`
                 .auth-bg {
                     position: fixed;

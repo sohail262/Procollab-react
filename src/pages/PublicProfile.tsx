@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import { Helmet } from 'react-helmet-async'
+import { SEOHead, buildPersonSchema, buildBreadcrumbSchema } from '@/components/seo/SEOHead'
 import { 
     collection, 
     query, 
@@ -292,9 +292,10 @@ export default function PublicProfile() {
         const initials = ((profileUser.displayName || `${profileUser.firstName || ''} ${profileUser.lastName || ''}`) || 'U').split(' ').map((n: string) => n[0]).join('').toUpperCase()
         return (
             <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center px-4">
-                <Helmet>
-                    <title>Restricted Profile | ProCollab</title>
-                </Helmet>
+                <SEOHead
+                    title="Restricted Profile"
+                    noIndex
+                />
                 
                 <Card className="max-w-md w-full bg-slate-900/60 border-slate-800 backdrop-blur-xl p-6 text-center space-y-6">
                     <div className="flex flex-col items-center">
@@ -369,22 +370,38 @@ export default function PublicProfile() {
 
     return (
         <div className="min-h-screen bg-slate-950 text-slate-100 py-10 px-4 sm:px-6 lg:px-8 font-sans selection:bg-blue-600/40">
-            <Helmet>
-                <title>{`${profileUser.displayName || 'Collaborator'} Profile | ProCollab`}</title>
-                <meta name="description" content={profileUser.bio || `View ${profileUser.displayName}'s portfolio, badges, ratings, and projects on ProCollab.`} />
-                
-                {/* Open Graph Tags */}
-                <meta property="og:title" content={`${profileUser.displayName || 'Collaborator'} Profile | ProCollab`} />
-                <meta property="og:description" content={profileUser.bio || `View ${profileUser.displayName}'s portfolio, badges, ratings, and projects on ProCollab.`} />
-                <meta property="og:image" content={avatarUrl} />
-                <meta property="og:type" content="profile" />
-                <meta property="og:url" content={window.location.href} />
-                
-                {/* Structured JSON-LD */}
-                <script type="application/ld+json">
-                    {JSON.stringify(structuredData)}
-                </script>
-            </Helmet>
+            <SEOHead
+                title={`${profileUser.displayName || 'Collaborator'} — Student Developer Profile`}
+                description={profileUser.bio || `View ${profileUser.displayName}'s developer portfolio, skills, project collaborations, badges and ratings on ProCollab — the student project platform.`}
+                keywords={[
+                    ...(profileUser.skills || []),
+                    profileUser.discipline || '',
+                    profileUser.role || 'student developer',
+                    'student developer profile',
+                    'project collaborator',
+                    'developer portfolio',
+                    'student portfolio',
+                    'engineering student',
+                ].filter(Boolean) as string[]}
+                canonical={`https://procollab.in/u/${username}`}
+                image={avatarUrl || undefined}
+                type="profile"
+                author={profileUser.displayName}
+                structuredData={[
+                    buildPersonSchema({
+                        name: profileUser.displayName || `${profileUser.firstName || ''} ${profileUser.lastName || ''}`,
+                        username: username || '',
+                        bio: profileUser.bio,
+                        image: avatarUrl || undefined,
+                        skills: profileUser.skills,
+                    }),
+                    buildBreadcrumbSchema([
+                        { name: 'Home', url: '/' },
+                        { name: 'Discover', url: '/discover' },
+                        { name: profileUser.displayName || 'Profile', url: `/u/${username}` },
+                    ]),
+                ]}
+            />
 
             <div className="max-w-6xl mx-auto space-y-8">
                 

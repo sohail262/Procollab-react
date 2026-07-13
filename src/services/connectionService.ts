@@ -56,7 +56,8 @@ export async function getConnectionStatus(
 
 export async function sendConnectionRequest(
     senderUid: string,
-    targetUid: string
+    targetUid: string,
+    message?: string
 ): Promise<void> {
     // Guard: already connected or pending
     const status = await getConnectionStatus(senderUid, targetUid)
@@ -81,6 +82,7 @@ export async function sendConnectionRequest(
             fromEmail: senderData?.email ?? '',
             sentAt: serverTimestamp(),
             status: 'pending',
+            ...(message ? { message } : {}),
         }
     )
 
@@ -92,6 +94,7 @@ export async function sendConnectionRequest(
             to: targetUid,
             sentAt: serverTimestamp(),
             status: 'pending',
+            ...(message ? { message } : {}),
         }
     )
 
@@ -105,6 +108,23 @@ export async function sendConnectionRequest(
         targetUid,
         buildConnectionRequestNotif(senderName, senderUid, senderData?.photoURL ?? null)
     )
+}
+
+export async function updateConnectionRequestNote(
+    senderUid: string,
+    targetUid: string,
+    message: string
+): Promise<void> {
+    const batch = writeBatch(db)
+    batch.update(
+        doc(db, 'users', targetUid, 'connectionRequests', senderUid),
+        { message }
+    )
+    batch.update(
+        doc(db, 'users', senderUid, 'sentRequests', targetUid),
+        { message }
+    )
+    await batch.commit()
 }
 
 // ─── Accept ───────────────────────────────────────────────────────────────────

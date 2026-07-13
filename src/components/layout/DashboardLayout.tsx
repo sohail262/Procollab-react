@@ -285,17 +285,16 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                                         <Link
                                             to={item.href}
                                             onClick={() => setSidebarOpen(false)}
-                                            className={`relative flex items-center px-3 py-2.5 rounded-lg group transition-all duration-200 ${isActive
-                                                ? 'bg-foreground/[0.06] text-foreground'
-                                                : 'text-muted-foreground hover:text-foreground hover:bg-accent/50'
+                                            className={`relative flex items-center px-3.5 py-2.5 rounded-lg group transition-all duration-200 border border-transparent ${isActive
+                                                ? 'bg-white/[0.06] dark:bg-zinc-800/40 text-foreground border-white/[0.06] dark:border-zinc-800/60 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur-md font-semibold'
+                                                : 'text-muted-foreground hover:text-foreground hover:bg-zinc-500/[0.03] dark:hover:bg-zinc-800/20 hover:border-zinc-500/[0.03] dark:hover:border-zinc-800/10'
                                                 }`}
                                         >
                                             {/* Active indicator bar */}
                                             {isActive && (
-                                                <motion.div
-                                                    layoutId="sidebar-active"
-                                                    className="absolute left-0 top-1/2 -translate-y-1/2 w-[2px] h-4 bg-foreground rounded-full"
-                                                    transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+                                                <div
+                                                    className="absolute left-1.5 top-1/2 w-[3px] h-4 bg-white rounded-full shadow-[0_0_8px_rgba(255,255,255,0.4)]"
+                                                    style={{ transform: 'translateY(-50%)' }}
                                                 />
                                             )}
                                             <item.icon className={`w-[18px] h-[18px] transition-colors duration-200 ${isActive ? 'text-foreground' : 'text-muted-foreground group-hover:text-foreground'

@@ -303,7 +303,11 @@ export function ProjectCard({ project, onApply, isAlreadyMember = false, hasAppl
                     <div className="flex items-center gap-1.5">
                         <Users className="h-3.5 w-3.5" />
                         <span>
-                            {project.currentMembers || 1}/
+                            {(() => {
+                                const membersList = project.members || [];
+                                const hasOwner = project.createdBy && membersList.includes(project.createdBy);
+                                return membersList.length + (hasOwner ? 0 : 1);
+                            })()}/
                             {project.maxMembers || project.teamSize || 4}
                         </span>
                     </div>

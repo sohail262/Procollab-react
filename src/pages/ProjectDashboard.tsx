@@ -1559,13 +1559,21 @@ export function ProjectDashboard() {
                         </DialogDescription>
                     </DialogHeader>
                     <div className="space-y-4 pt-3">
-                        <div className="flex items-center gap-2 p-3 bg-zinc-900/60 dark:bg-zinc-900/60 rounded-lg border border-zinc-800 w-full min-w-0 overflow-hidden">
-                            <Link2 className="h-4 w-4 text-zinc-500 flex-shrink-0" />
-                            <span className="text-xs text-zinc-300 truncate flex-1 font-mono selection:bg-primary/20 min-w-0">
-                                {project?.slug ? `${window.location.origin}/projects/${project.slug}` : `${window.location.origin}/project/public/${id}`}
-                            </span>
-                            <Button size="sm" variant="outline" className="h-7 text-xs border-zinc-800 bg-zinc-950 text-zinc-300 hover:text-white hover:bg-zinc-900 shadow-sm transition-colors shrink-0" onClick={handleCopyLink}>
-                                <Copy className="h-3 w-3 mr-1" />
+                        <div className="relative flex items-center w-full">
+                            <input
+                                type="text"
+                                readOnly
+                                value={project?.slug ? `${window.location.origin}/projects/${project.slug}` : `${window.location.origin}/project/public/${id}`}
+                                className="w-full pr-20 pl-10 py-2.5 bg-zinc-900/60 border border-zinc-800 rounded-lg text-xs font-mono text-zinc-300 truncate focus:outline-none select-all"
+                            />
+                            <Link2 className="absolute left-3 h-4 w-4 text-zinc-500 pointer-events-none" />
+                            <Button
+                                size="sm"
+                                variant="ghost"
+                                className="absolute right-1.5 h-8 text-xs flex items-center gap-1 hover:bg-zinc-800 text-zinc-300 hover:text-white"
+                                onClick={handleCopyLink}
+                            >
+                                <Copy className="h-3.5 w-3.5" />
                                 Copy
                             </Button>
                         </div>

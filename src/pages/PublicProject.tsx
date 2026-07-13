@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
-import { Helmet } from 'react-helmet-async'
+import { SEOHead, buildProjectSchema, buildBreadcrumbSchema } from '@/components/seo/SEOHead'
 import { 
     collection, 
     query, 
@@ -250,9 +250,10 @@ export default function PublicProject() {
     if (isRestricted) {
         return (
             <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col items-center justify-center px-4">
-                <Helmet>
-                    <title>Restricted Project | ProCollab</title>
-                </Helmet>
+            <SEOHead
+                title="Restricted Project"
+                noIndex
+            />
                 
                 <Card className="max-w-md w-full bg-slate-900/60 border-slate-800 backdrop-blur-xl p-6 text-center space-y-6">
                     <div className="flex flex-col items-center">
@@ -306,21 +307,35 @@ export default function PublicProject() {
 
     return (
         <div className="min-h-screen bg-background text-foreground py-10 px-4 sm:px-6 lg:px-8 font-sans selection:bg-primary/30">
-            <Helmet>
-                <title>{`${project.title} | ProCollab Showcase`}</title>
-                <meta name="description" content={project.summary || project.description.substring(0, 150)} />
-                
-                {/* Open Graph Tags */}
-                <meta property="og:title" content={`${project.title} | ProCollab Showcase`} />
-                <meta property="og:description" content={project.summary || project.description.substring(0, 150)} />
-                <meta property="og:type" content="website" />
-                <meta property="og:url" content={window.location.href} />
-                
-                {/* Structured JSON-LD */}
-                <script type="application/ld+json">
-                    {JSON.stringify(structuredData)}
-                </script>
-            </Helmet>
+            <SEOHead
+                title={`${project.title} | ${project.primaryDiscipline || 'Student'} Project`}
+                description={`${project.summary || project.description.substring(0, 200)} — A ${project.primaryDiscipline || 'student'} project on ProCollab.`}
+                keywords={[
+                    ...(project.tags || []),
+                    project.primaryDiscipline,
+                    'student project',
+                    'project showcase',
+                    'project collaboration',
+                    project.status === 'recruiting' ? 'looking for teammates' : '',
+                ].filter(Boolean) as string[]}
+                canonical={`https://procollab.in/projects/${slug}`}
+                type="article"
+                structuredData={[
+                    buildProjectSchema({
+                        title: project.title,
+                        description: project.summary || project.description,
+                        url: `https://procollab.in/projects/${slug}`,
+                        tags: project.tags,
+                        datePublished: createdDate.toISOString(),
+                        status: project.status,
+                    }),
+                    buildBreadcrumbSchema([
+                        { name: 'Home', url: '/' },
+                        { name: 'Projects', url: '/discover' },
+                        { name: project.title, url: `/projects/${slug}` },
+                    ]),
+                ]}
+            />
 
             <div className="max-w-5xl mx-auto space-y-8">
                 

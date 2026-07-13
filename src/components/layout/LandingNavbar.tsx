@@ -53,9 +53,8 @@ export function LandingNavbar() {
     const navLinks = [
         { name: "Home", href: "/" },
         { name: "Projects", href: "/projects" },
-        { name: "Discover", href: "/discover" },
-        { name: "About", href: "/about" },
     ]
+
 
     // ── GSAP: Smart show/hide on scroll ───────────────────
     useEffect(() => {

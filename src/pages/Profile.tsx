@@ -5,12 +5,13 @@ import { DashboardLayout } from '@/components/layout/DashboardLayout'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
 import {
     Loader2, MapPin, Link as LinkIcon, Github, Linkedin, Twitter,
     Mail, Calendar, UserPlus, Check, BookOpen, Trash2,
     LayoutDashboard, FileText, Users, ImageIcon, X, Award, Star,
     Zap, CheckCircle, ShieldAlert, Crown, Heart, Code2, Compass, Shield,
-    ShieldCheck, Clock, GitBranch, Layers, Briefcase, BarChart3, Share2
+    ShieldCheck, Clock, GitBranch, Layers, Briefcase, BarChart3, Share2, Search
 } from 'lucide-react'
 import {
     doc, getDoc, collection, query, where,
@@ -29,6 +30,8 @@ import {
     rejectConnectionRequest,
     withdrawConnectionRequest,
     getConnectionStatus,
+    updateConnectionRequestNote,
+    removeConnection,
 } from '@/services/connectionService'
 import { BANNER_PRESETS, DEFAULT_BANNER, type BannerPreset } from '@/components/BannerPresets'
 import { InviteToProjectDropdown, InviteButton } from '@/components/InviteToProjectDropdown'
@@ -39,7 +42,13 @@ import {
     TooltipProvider,
     TooltipTrigger,
 } from '@/components/ui/tooltip'
-
+import {
+    Dialog,
+    DialogContent,
+    DialogHeader,
+    DialogTitle,
+    DialogTrigger,
+} from '@/components/ui/dialog'
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface UserProfile {
     id: string
@@ -162,6 +171,8 @@ export default function Profile() {
     const [showAllNetwork, setShowAllNetwork] = useState(false)
     const [showBannerPicker, setShowBannerPicker] = useState(false)
     const [savingBanner, setSavingBanner] = useState(false)
+    const [connectionsSearch, setConnectionsSearch] = useState('')
+
 
     // Invite-to-project state
     const [myProjects, setMyProjects] = useState<{ id: string; title: string }[]>([])
@@ -659,7 +670,7 @@ export default function Profile() {
     }, [currentUser, profileId, isOwnProfile, refreshConnectionStatus])
 
     // ── Action handlers ───────────────────────────────────────────────────────
-    const handleConnect = async () => {
+    const handleConnectClick = async () => {
         if (!currentUser || !profile || isOwnProfile) return
         try {
             setActionLoading(true)
@@ -674,6 +685,8 @@ export default function Profile() {
         }
     }
 
+
+
     const handleWithdraw = async () => {
         if (!currentUser || !profile) return
         try {
@@ -684,6 +697,21 @@ export default function Profile() {
         } catch (error) {
             console.error(error)
             toast({ title: 'Could not withdraw', variant: 'destructive' })
+        } finally {
+            setActionLoading(false)
+        }
+    }
+
+    const handleDisconnect = async () => {
+        if (!currentUser || !profile) return
+        try {
+            setActionLoading(true)
+            await removeConnection(currentUser.uid, profile.id)
+            await refreshConnectionStatus()
+            toast({ title: 'Connection removed' })
+        } catch (error) {
+            console.error('Error removing connection:', error)
+            toast({ title: 'Could not remove connection', variant: 'destructive' })
         } finally {
             setActionLoading(false)
         }
@@ -763,11 +791,17 @@ export default function Profile() {
             return (
                 <Button
                     variant="outline"
-                    className="text-green-600 border-green-200 bg-green-50"
-                    disabled
+                    className="text-green-655 dark:text-green-400 border-green-200 dark:border-green-900/50 bg-green-50 dark:bg-green-950/20 hover:text-red-500 hover:border-red-200 hover:bg-red-50 dark:hover:bg-red-950/30 group transition-all duration-200"
+                    onClick={() => {
+                        if (profile && confirm(`Are you sure you want to disconnect from ${profile.firstName}?`)) {
+                            handleDisconnect()
+                        }
+                    }}
+                    disabled={actionLoading}
                 >
-                    <Check className="h-4 w-4 mr-2" />
-                    Connected
+                    <Check className="h-4 w-4 mr-2 group-hover:hidden" />
+                    <span className="group-hover:hidden">Connected</span>
+                    <span className="hidden group-hover:inline">Disconnect</span>
                 </Button>
             )
         }
@@ -813,7 +847,7 @@ export default function Profile() {
 
         // 'none'
         return (
-            <Button onClick={handleConnect} disabled={actionLoading}>
+            <Button onClick={handleConnectClick} disabled={actionLoading}>
                 {actionLoading
                     ? <Loader2 className="h-4 w-4 animate-spin" />
                     : <><UserPlus className="h-4 w-4 mr-2" />Connect</>
@@ -874,43 +908,7 @@ export default function Profile() {
                         )}
                     </div>
 
-                    {/* Banner picker overlay */}
-                    {showBannerPicker && (
-                        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-                            <div className="bg-zinc-950 border border-zinc-800 rounded-xl shadow-2xl p-4 w-full max-w-2xl">
-                                <div className="flex items-center justify-between mb-3">
-                                    <h3 className="font-semibold text-sm">Choose a banner</h3>
-                                    <button
-                                        onClick={() => setShowBannerPicker(false)}
-                                        className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
-                                    >
-                                        <X className="h-4 w-4" />
-                                    </button>
-                                </div>
-                                <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 max-h-[60vh] overflow-y-auto pr-1">
-                                    {BANNER_PRESETS.map(preset => (
-                                        <button
-                                            key={preset.id}
-                                            onClick={() => handleBannerSelect(preset)}
-                                            disabled={savingBanner}
-                                            className={`relative h-16 sm:h-20 rounded-lg overflow-hidden ring-2 transition-all hover:scale-105 ${
-                                                currentBanner.id === preset.id
-                                                    ? 'ring-blue-500 scale-105'
-                                                    : 'ring-transparent hover:ring-gray-300 dark:hover:ring-gray-600'
-                                            }`}
-                                        >
-                                            {preset.render()}
-                                            {currentBanner.id === preset.id && (
-                                                <div className="absolute inset-0 flex items-center justify-center bg-black/30">
-                                                    <Check className="h-5 w-5 text-white drop-shadow" />
-                                                </div>
-                                            )}
-                                        </button>
-                                    ))}
-                                </div>
-                            </div>
-                        </div>
-                    )}
+
 
                     <div className="px-4 sm:px-6 pb-5">
                         {/* Avatar + actions row */}
@@ -1018,11 +1016,15 @@ export default function Profile() {
                                 <p className="text-base sm:text-lg font-bold text-gray-900 dark:text-white">{projects.length}</p>
                                 <p className="text-xs text-gray-500 dark:text-gray-400">Projects</p>
                             </div>
-                            <div className="w-px h-8 bg-gray-200 dark:bg-gray-700" />
-                            <div className="text-center">
-                                <p className="text-base sm:text-lg font-bold text-gray-900 dark:text-white">{networkFriends.length}</p>
-                                <p className="text-xs text-gray-500 dark:text-gray-400">Connections</p>
-                            </div>
+                            {isOwnProfile && networkFriends.length > 0 && (
+                                <>
+                                    <div className="w-px h-8 bg-gray-200 dark:bg-gray-700" />
+                                    <div className="text-center">
+                                        <p className="text-base sm:text-lg font-bold text-gray-900 dark:text-white">{networkFriends.length}</p>
+                                        <p className="text-xs text-gray-500 dark:text-gray-400">Connections</p>
+                                    </div>
+                                </>
+                            )}
                             {isOwnProfile && applications.length > 0 && (
                                 <>
                                     <div className="w-px h-8 bg-gray-200 dark:bg-gray-700" />
@@ -1175,67 +1177,7 @@ export default function Profile() {
                             </CardContent>
                         </Card>
 
-                        {/* Network */}
-                        <Card>
-                            <CardHeader>
-                                <CardTitle className="text-lg flex items-center gap-2">
-                                    <Users className="h-4 w-4" />
-                                    Network
-                                    {networkFriends.length > 0 && (
-                                        <span className="text-sm font-normal text-muted-foreground ml-1">
-                                            ({networkFriends.length})
-                                        </span>
-                                    )}
-                                </CardTitle>
-                            </CardHeader>
-                            <CardContent>
-                                {networkFriends.length === 0 ? (
-                                    <p className="text-sm text-muted-foreground">
-                                        {isOwnProfile
-                                            ? 'Accepted collaborators appear here. Send requests from Discover or profiles.'
-                                            : 'No public connections to show.'}
-                                    </p>
-                                ) : (
-                                    <>
-                                        <div className="grid grid-cols-4 sm:grid-cols-5 gap-2">
-                                            {(showAllNetwork
-                                                ? networkFriends
-                                                : networkFriends.slice(0, NETWORK_LIMIT)
-                                            ).map(f => (
-                                                <button
-                                                    key={f.uid}
-                                                    type="button"
-                                                    onClick={() => navigate(`/profile/${f.uid}`)}
-                                                    className="flex flex-col items-center gap-1 group"
-                                                >
-                                                    <img
-                                                        src={
-                                                            f.photoURL ||
-                                                            `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(f.uid)}`
-                                                        }
-                                                        alt=""
-                                                        className="w-10 h-10 sm:w-12 sm:h-12 rounded-full border border-border object-cover group-hover:border-primary transition-colors"
-                                                    />
-                                                    <span className="text-[10px] sm:text-xs text-center line-clamp-2 w-full group-hover:text-primary leading-tight">
-                                                        {f.displayName}
-                                                    </span>
-                                                </button>
-                                            ))}
-                                        </div>
-                                        {networkFriends.length > NETWORK_LIMIT && (
-                                            <button
-                                                onClick={() => setShowAllNetwork(v => !v)}
-                                                className="mt-3 text-xs text-blue-600 dark:text-blue-400 hover:underline w-full text-center"
-                                            >
-                                                {showAllNetwork
-                                                    ? 'Show less'
-                                                    : `View all ${networkFriends.length} connections`}
-                                            </button>
-                                        )}
-                                    </>
-                                )}
-                            </CardContent>
-                        </Card>
+
 
                         {/* Reputation & Reviews */}
                         {computedReputation && computedReputation.totalReviews > 0 && (
@@ -1482,6 +1424,145 @@ export default function Profile() {
                                 </div>
                             </CardContent>
                         </Card>
+
+                        {/* My Connections — own profile only */}
+                        {isOwnProfile && (
+                            <Card className="border border-white/[0.06]">
+                                <CardHeader className="pb-2 pt-4 px-4">
+                                    <CardTitle className="text-sm font-semibold flex items-center justify-between gap-2">
+                                        <span className="flex items-center gap-2 text-white/80">
+                                            <Users className="h-4 w-4 text-blue-400 shrink-0" />
+                                            My Connections
+                                        </span>
+                                        {networkFriends.length > 0 && (
+                                            <span className="text-xs font-normal px-2 py-0.5 rounded-full bg-white/5 text-white/40 border border-white/[0.06]">
+                                                {networkFriends.length}
+                                            </span>
+                                        )}
+                                    </CardTitle>
+                                </CardHeader>
+                                <CardContent className="px-2 pb-3 pt-0">
+                                    {networkFriends.length === 0 ? (
+                                        <div className="flex flex-col items-center justify-center py-6 text-center gap-2">
+                                            <div className="w-10 h-10 rounded-full bg-white/5 flex items-center justify-center">
+                                                <Users className="h-4 w-4 text-white/20" />
+                                            </div>
+                                            <p className="text-xs text-white/30">No connections yet</p>
+                                        </div>
+                                    ) : (
+                                        <>
+                                            <div className="space-y-0.5">
+                                                {networkFriends.slice(0, 5).map((friend) => (
+                                                    <div
+                                                        key={friend.uid}
+                                                        className="flex items-center gap-2.5 px-2 py-2 rounded-lg group hover:bg-white/[0.04] transition-colors cursor-pointer"
+                                                        onClick={() => navigate(`/profile/${friend.uid}`)}
+                                                    >
+                                                        <img
+                                                            src={
+                                                                friend.photoURL ||
+                                                                `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(friend.uid)}`
+                                                            }
+                                                            alt={friend.displayName}
+                                                            className="w-7 h-7 rounded-full border border-white/10 shrink-0 group-hover:border-blue-400/40 transition-colors"
+                                                        />
+                                                        <span className="text-sm text-white/70 group-hover:text-white flex-1 truncate transition-colors">
+                                                            {friend.displayName}
+                                                        </span>
+                                                        <button
+                                                            className="text-[10px] text-red-400/60 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all shrink-0 px-1.5 py-0.5 rounded hover:bg-red-500/10"
+                                                            onClick={async (e) => {
+                                                                e.stopPropagation()
+                                                                if (!currentUser) return
+                                                                if (confirm(`Disconnect from ${friend.displayName}?`)) {
+                                                                    try {
+                                                                        await removeConnection(currentUser.uid, friend.uid)
+                                                                        toast({ title: 'Connection removed' })
+                                                                    } catch {
+                                                                        toast({ title: 'Could not remove', variant: 'destructive' })
+                                                                    }
+                                                                }
+                                                            }}
+                                                        >
+                                                            Remove
+                                                        </button>
+                                                    </div>
+                                                ))}
+                                            </div>
+
+                                            {networkFriends.length > 5 && (
+                                                <Dialog>
+                                                    <DialogTrigger asChild>
+                                                        <Button
+                                                            variant="ghost"
+                                                            className="w-full text-xs text-blue-400 hover:text-blue-300 hover:bg-white/5 mt-2 h-8"
+                                                        >
+                                                            View All {networkFriends.length} Connections
+                                                        </Button>
+                                                    </DialogTrigger>
+                                                    <DialogContent className="max-w-md bg-zinc-950 border-zinc-800 text-white">
+                                                        <DialogHeader>
+                                                            <DialogTitle className="flex items-center gap-2 text-base font-bold">
+                                                                <Users className="h-5 w-5 text-blue-400" />
+                                                                My Connections ({networkFriends.length})
+                                                            </DialogTitle>
+                                                        </DialogHeader>
+                                                        <div className="relative my-2">
+                                                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-white/40" />
+                                                            <Input
+                                                                type="text"
+                                                                placeholder="Search connections..."
+                                                                className="pl-9 bg-zinc-900 border-zinc-800 text-white"
+                                                                value={connectionsSearch}
+                                                                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setConnectionsSearch(e.target.value)}
+                                                            />
+                                                        </div>
+                                                        <div className="max-h-[300px] overflow-y-auto space-y-1 pr-1 scrollbar-thin">
+                                                            {networkFriends
+                                                                .filter(f => f.displayName.toLowerCase().includes(connectionsSearch.toLowerCase()))
+                                                                .map(friend => (
+                                                                    <div
+                                                                        key={friend.uid}
+                                                                        className="flex items-center gap-3 px-2 py-2 rounded-lg hover:bg-white/5 cursor-pointer"
+                                                                        onClick={() => navigate(`/profile/${friend.uid}`)}
+                                                                    >
+                                                                        <img
+                                                                            src={friend.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${friend.uid}`}
+                                                                            alt={friend.displayName}
+                                                                            className="w-8 h-8 rounded-full border border-white/10"
+                                                                        />
+                                                                        <span className="text-sm font-medium flex-1 truncate">{friend.displayName}</span>
+                                                                        <Button
+                                                                            variant="ghost"
+                                                                            size="sm"
+                                                                            className="text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10 h-7"
+                                                                            onClick={async (e) => {
+                                                                                e.stopPropagation()
+                                                                                if (!currentUser) return
+                                                                                if (confirm(`Disconnect from ${friend.displayName}?`)) {
+                                                                                    try {
+                                                                                        await removeConnection(currentUser.uid, friend.uid)
+                                                                                        toast({ title: 'Connection removed' })
+                                                                                    } catch {
+                                                                                        toast({ title: 'Could not remove', variant: 'destructive' })
+                                                                                    }
+                                                                                }
+                                                                            }}
+                                                                        >
+                                                                            Remove
+                                                                        </Button>
+                                                                    </div>
+                                                                ))
+                                                            }
+                                                        </div>
+                                                    </DialogContent>
+                                                </Dialog>
+                                            )}
+                                        </>
+                                    )}
+                                </CardContent>
+                            </Card>
+                        )}
 
                     </div>{/* end left column */}
 
@@ -1770,6 +1851,45 @@ export default function Profile() {
                     </div>
                 </div>
             )}
+
+            {/* Banner picker overlay (moved to page root to avoid container-bound z-index issues) */}
+            {showBannerPicker && (
+                <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+                    <div className="bg-zinc-950 border border-zinc-800 rounded-xl shadow-2xl p-4 w-full max-w-2xl">
+                        <div className="flex items-center justify-between mb-3">
+                            <h3 className="font-semibold text-sm">Choose a banner</h3>
+                            <button
+                                onClick={() => setShowBannerPicker(false)}
+                                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
+                            >
+                                <X className="h-4 w-4" />
+                            </button>
+                        </div>
+                        <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 max-h-[60vh] overflow-y-auto pr-1">
+                            {BANNER_PRESETS.map(preset => (
+                                <button
+                                    key={preset.id}
+                                    onClick={() => handleBannerSelect(preset)}
+                                    disabled={savingBanner}
+                                    className={`relative h-16 sm:h-20 rounded-lg overflow-hidden ring-2 transition-all hover:scale-105 ${
+                                        currentBanner.id === preset.id
+                                            ? 'ring-blue-500 scale-105'
+                                            : 'ring-transparent hover:ring-gray-300 dark:hover:ring-gray-600'
+                                    }`}
+                                >
+                                    {preset.render()}
+                                    {currentBanner.id === preset.id && (
+                                        <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+                                            <Check className="h-5 w-5 text-white drop-shadow" />
+                                        </div>
+                                    )}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            )}
+
         </DashboardLayout>
     )
 }

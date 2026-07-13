@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react"
+import { SEOHead } from "@/components/seo/SEOHead"
 import type { FormEvent } from "react"
 import { Link, useNavigate, useSearchParams } from "react-router-dom"
 import { Logo } from "@/components/layout/Logo"
@@ -203,6 +204,19 @@ export function Register() {
 
     return (
         <div style={{ position: 'relative', minHeight: '100vh', background: '#080a0e' }}>
+            <SEOHead
+                title="Sign Up — Join ProCollab"
+                description="Create your free ProCollab account to showcase student projects, find teammates for final year projects, collaborate on domain-wise projects, and build your developer portfolio."
+                keywords={[
+                    'sign up ProCollab',
+                    'join student project platform',
+                    'create account project collaboration',
+                    'student project community India',
+                    'register to collaborate on projects',
+                    'free project management students',
+                ]}
+                canonical="https://procollab.in/register"
+            />
             <style>{`
                 .auth-input {
                     width: 100%;

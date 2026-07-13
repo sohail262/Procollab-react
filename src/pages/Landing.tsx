@@ -1,4 +1,5 @@
 import { Link, useNavigate } from "react-router-dom"
+import { SEOHead, buildWebsiteSchema, buildOrganizationSchema, buildSoftwareAppSchema } from "@/components/seo/SEOHead"
 import { Users, Lightbulb, ListTodo, Shield, TrendingUp, Zap, Terminal, Activity, ArrowRight, CheckCircle2, Rocket, Layers, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { LandingNavbar } from "@/components/layout/LandingNavbar"
@@ -265,11 +266,44 @@ export function Landing() {
         return () => ctx.revert()
     }, [loading])
 
-    // Don't render until auth state is known
-    if (loading) return null
+    // Render immediately to maximize FCP / Speed Index performance; auth redirect executes in background
+
 
     return (
         <div className="flex min-h-screen flex-col bg-background">
+            <SEOHead
+                title="ProCollab — Student Project Collaboration & Showcase Platform"
+                noSuffix
+                description="ProCollab is India's #1 platform for students to showcase final year projects, discover domain-wise & skill-wise projects, find teammates, and collaborate in real time. Start your project journey today."
+                keywords={[
+                    'student project platform India',
+                    'final year project showcase',
+                    'FYP collaboration tool',
+                    'find teammates for project India',
+                    'student developer platform',
+                    'project ideas for engineering students',
+                    'college project sharing platform',
+                    'best student project website',
+                    'project collaboration for students',
+                    'free project management for students',
+                    'share project portfolio online',
+                    'discover student projects',
+                    'domain wise projects',
+                    'skill wise projects',
+                    'AI ML projects for students',
+                    'web dev projects showcase',
+                    'IoT projects students',
+                    'blockchain student projects',
+                    'hackathon team finder',
+                    'project partner finder',
+                ]}
+                canonical="https://procollab.in/"
+                structuredData={[
+                    buildWebsiteSchema(),
+                    buildOrganizationSchema(),
+                    buildSoftwareAppSchema(),
+                ]}
+            />
             <LandingNavbar />
 
             <main className="flex-1">

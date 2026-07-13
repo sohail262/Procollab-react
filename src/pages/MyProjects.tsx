@@ -28,6 +28,7 @@ interface Project {
     teamSize?: number
     createdBy: string
     primaryDiscipline?: string
+    members?: string[]
 }
 
 export default function MyProjects() {
@@ -191,7 +192,9 @@ export default function MyProjects() {
     }
 
     const ProjectCard = ({ project, type }: { project: Project; type: 'created' | 'joined' | 'past' }) => {
-        const currentMembers = project.currentMembers || 1
+        const membersList = project.members || []
+        const hasOwner = project.createdBy && membersList.includes(project.createdBy)
+        const currentMembers = membersList.length + (hasOwner ? 0 : 1)
         const maxMembers = project.maxMembers || project.teamSize || 5
         const isOwner = project.createdBy === user?.uid
 

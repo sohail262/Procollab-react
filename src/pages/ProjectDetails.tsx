@@ -18,6 +18,13 @@ import {
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import {
+    Select,
+    SelectContent,
+    SelectItem,
+    SelectTrigger,
+    SelectValue,
+} from '@/components/ui/select'
+import {
     doc, getDoc, collection, query, where, limit,
     getDocs, addDoc, deleteDoc, serverTimestamp,
     updateDoc, increment, Timestamp, writeBatch,
@@ -697,17 +704,26 @@ export function ProjectDetails() {
     // ── Derived state ─────────────────────────────────────
     const isOwner = !!currentUser && project.createdBy === currentUser.uid
 
-    const actualMemberCount =
-        Object.keys(project.teamMembers || {}).length ||
-        (project.members?.length ?? 0) ||
-        project.currentMembers ||
-        1
+    const actualMemberCount = (() => {
+        const membersList = project.members || []
+        const hasOwner = project.createdBy && membersList.includes(project.createdBy)
+        const membersArrayCount = membersList.length + (hasOwner ? 0 : 1)
+
+        if (project.teamMembers && typeof project.teamMembers === 'object') {
+            const activeMembers = Object.entries(project.teamMembers).filter(
+                ([, member]: [string, any]) => member && member.role !== 'removed'
+            )
+            const teamHasOwner = project.createdBy && project.teamMembers[project.createdBy] && project.teamMembers[project.createdBy].role !== 'removed'
+            return activeMembers.length + (teamHasOwner ? 0 : 1)
+        }
+        return membersArrayCount
+    })()
 
     const maxMembers = project.maxMembers || project.teamSize || 999
     const isTeamFull = actualMemberCount >= maxMembers
 
     const canApply =
-        (project.status === 'recruiting' || project.status === 'active') &&
+        (project.status === 'planning' || project.status === 'recruiting' || project.status === 'active') &&
         !isTeamFull &&
         !isOwner &&
         !isMember
@@ -1054,25 +1070,7 @@ export function ProjectDetails() {
                         </Card>
                     )}
 
-                    {/* Discussion */}
-                    <Card>
-                        <CardHeader><CardTitle>Discussion</CardTitle></CardHeader>
-                        <CardContent>
-                            <div className="text-center py-8 text-gray-500">
-                                <MessageSquare className="h-12 w-12 mx-auto mb-2 opacity-20" />
-                                {isMember || isOwner ? (
-                                    <Button
-                                        variant="outline"
-                                        onClick={() => navigate(`/project/${id}/dashboard`)}
-                                    >
-                                        Go to Project Chat
-                                    </Button>
-                                ) : (
-                                    <p>Join the project to participate in discussions.</p>
-                                )}
-                            </div>
-                        </CardContent>
-                    </Card>
+
                 </div>
 
                 {/* ── Sidebar ── */}
@@ -1280,13 +1278,21 @@ export function ProjectDetails() {
                         </DialogDescription>
                     </DialogHeader>
                     <div className="space-y-4 py-2">
-                        <div className="flex items-center gap-2 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg border">
-                            <Link className="h-4 w-4 text-gray-500 flex-shrink-0" />
-                            <span className="text-sm text-gray-600 dark:text-gray-400 truncate flex-1">
-                                {window.location.href}
-                            </span>
-                            <Button size="sm" variant="outline" onClick={handleCopyLink}>
-                                <Copy className="h-4 w-4 mr-1" />
+                        <div className="relative flex items-center w-full">
+                            <input
+                                type="text"
+                                readOnly
+                                value={window.location.href}
+                                className="w-full pr-20 pl-10 py-2.5 bg-gray-50 dark:bg-gray-800/60 border border-border rounded-lg text-sm truncate focus:outline-none select-all"
+                            />
+                            <Link className="absolute left-3 h-4 w-4 text-gray-500 pointer-events-none" />
+                            <Button
+                                size="sm"
+                                variant="ghost"
+                                className="absolute right-1.5 h-8 text-xs flex items-center gap-1 hover:bg-gray-200 dark:hover:bg-gray-700/80"
+                                onClick={handleCopyLink}
+                            >
+                                <Copy className="h-3.5 w-3.5" />
                                 Copy
                             </Button>
                         </div>
@@ -1325,19 +1331,22 @@ export function ProjectDetails() {
                     <div className="space-y-4 py-2">
                         <div className="space-y-2">
                             <Label>Reason *</Label>
-                            <select
-                                className="w-full px-3 py-2 border border-zinc-800 rounded-md bg-zinc-900 text-zinc-100 text-sm focus:outline-none focus:ring-1 focus:ring-red-500"
+                            <Select
                                 value={reportReason}
-                                onChange={e => setReportReason(e.target.value)}
+                                onValueChange={value => setReportReason(value)}
                             >
-                                <option value="">Select a reason...</option>
-                                <option value="Spam or misleading">Spam or misleading</option>
-                                <option value="Inappropriate content">Inappropriate content</option>
-                                <option value="Fake or scam project">Fake or scam project</option>
-                                <option value="Plagiarism">Plagiarism</option>
-                                <option value="Harassment or abuse">Harassment or abuse</option>
-                                <option value="Other">Other</option>
-                            </select>
+                                <SelectTrigger className="w-full bg-zinc-900 border-zinc-800 text-zinc-100 focus:ring-1 focus:ring-red-500">
+                                    <SelectValue placeholder="Select a reason..." />
+                                </SelectTrigger>
+                                <SelectContent className="bg-zinc-950 border-zinc-800 text-zinc-100">
+                                    <SelectItem value="Spam or misleading">Spam or misleading</SelectItem>
+                                    <SelectItem value="Inappropriate content">Inappropriate content</SelectItem>
+                                    <SelectItem value="Fake or scam project">Fake or scam project</SelectItem>
+                                    <SelectItem value="Plagiarism">Plagiarism</SelectItem>
+                                    <SelectItem value="Harassment or abuse">Harassment or abuse</SelectItem>
+                                    <SelectItem value="Other">Other</SelectItem>
+                                </SelectContent>
+                            </Select>
                         </div>
                         <div className="space-y-2">
                             <Label>

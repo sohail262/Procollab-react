@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
+import { SEOHead, buildProjectSchema, buildBreadcrumbSchema } from '@/components/seo/SEOHead'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
@@ -219,6 +220,37 @@ export default function PublicProjectShowcase() {
 
     return (
         <div className="min-h-screen bg-[#0a0a0f] text-slate-200 font-sans">
+            <SEOHead
+                title={`${project.title} — Completed ${project.primaryDiscipline || 'Student'} Project Showcase`}
+                description={`${project.summary || project.description?.substring(0, 200)} | Completed project built by ${team.length} collaborators on ProCollab. Tech: ${(project.techStack || project.tags || []).slice(0, 5).join(', ')}.`}
+                keywords={[
+                    ...(project.techStack || project.tags || []),
+                    project.primaryDiscipline,
+                    'completed project',
+                    'student project showcase',
+                    'project portfolio',
+                    'final year project',
+                    'engineering project showcase',
+                    'project deliverables',
+                ].filter(Boolean) as string[]}
+                canonical={`https://procollab.in/project/public/${projectId}`}
+                type="article"
+                structuredData={[
+                    buildProjectSchema({
+                        title: project.title,
+                        description: project.summary || project.description,
+                        url: `https://procollab.in/project/public/${projectId}`,
+                        tags: project.techStack || project.tags,
+                        datePublished: createdDate.toISOString(),
+                        status: 'completed',
+                    }),
+                    buildBreadcrumbSchema([
+                        { name: 'Home', url: '/' },
+                        { name: 'Discover', url: '/discover' },
+                        { name: project.title, url: `/project/public/${projectId}` },
+                    ]),
+                ]}
+            />
             <div className={`fixed inset-0 bg-gradient-to-br ${disciplineGradient} pointer-events-none`} />
 
             <div className="relative max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-10">
