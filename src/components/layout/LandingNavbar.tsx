@@ -182,7 +182,11 @@ export function LandingNavbar() {
     const handleProjectClick = (projectId: string) => {
         setSearchQuery("")
         setIsSearchFocused(false)
-        navigate(`/projects/${projectId}`)
+        if (user) {
+            navigate(`/project/${projectId}`)
+        } else {
+            navigate(`/login?redirect=/project/${projectId}`)
+        }
     }
 
     const getUserInitials = () => {
@@ -234,21 +238,21 @@ export function LandingNavbar() {
                     </Link>
                 </div>
 
-                {/* Desktop Navigation — centered links */}
-                <div className="hidden md:flex md:items-center md:gap-1 absolute left-1/2 -translate-x-1/2">
-                    {navLinks.map((link) => (
-                        <Link
-                            key={link.name}
-                            to={link.href}
-                            className="text-sm font-medium transition-colors hover:text-primary px-3 py-1.5 rounded-full hover:bg-white/[0.06]"
-                        >
-                            {link.name}
-                        </Link>
-                    ))}
-                </div>
-
-                {/* Right side: search + auth */}
+                {/* Right side: navigation links + search + auth */}
                 <div className="hidden md:flex md:items-center md:gap-3">
+                    {/* Navigation links (directly on the left of the search bar) */}
+                    <div className="flex items-center gap-1 mr-2">
+                        {navLinks.map((link) => (
+                            <Link
+                                key={link.name}
+                                to={link.href}
+                                className="text-sm font-medium transition-colors hover:text-primary px-3 py-1.5 rounded-full hover:bg-white/[0.06]"
+                            >
+                                {link.name}
+                            </Link>
+                        ))}
+                    </div>
+
                     {/* Project Search Bar */}
                     <div ref={searchRef} className="relative">
                         <div className="relative">

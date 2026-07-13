@@ -793,6 +793,15 @@ export function ProjectDetails() {
                     >
                         Go to Project Dashboard
                     </Button>
+                    {memberRole === 'admin' && (
+                        <Button
+                            variant="outline"
+                            className="w-full"
+                            onClick={() => navigate(`/project/${id}/manage-team`)}
+                        >
+                            Manage Team
+                        </Button>
+                    )}
                 </div>
             )
         }

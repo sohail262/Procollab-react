@@ -243,19 +243,53 @@ export function Discover() {
         loadMyProjects()
     }, [])
 
-    // ── Load current user's owned projects (for invite dropdown) ────────────
+    // ── Load current user's owned and admin projects (for invite dropdown) ────────────
     const loadMyProjects = async () => {
         if (!auth.currentUser) return
         try {
-            const q = query(
+            const currentUid = auth.currentUser.uid
+            
+            // Query 1: Projects created by the user
+            const qOwned = query(
                 collection(db, 'projects'),
-                where('createdBy', '==', auth.currentUser.uid)
+                where('createdBy', '==', currentUid)
             )
-            const snap = await getDocs(q)
-            const projects = snap.docs.map(d => ({ id: d.id, title: d.data().title || 'Untitled' }))
-            setMyProjects(projects)
+            
+            // Query 2: Projects where user is a member
+            const qMember = query(
+                collection(db, 'projects'),
+                where('members', 'array-contains', currentUid)
+            )
+            
+            const [snapOwned, snapMember] = await Promise.all([
+                getDocs(qOwned),
+                getDocs(qMember)
+            ])
+            
+            // Combine both results and deduplicate by project ID
+            const projectMap = new Map<string, { id: string; title: string }>()
+            
+            // Add owned projects
+            snapOwned.docs.forEach(d => {
+                projectMap.set(d.id, { id: d.id, title: d.data().title || 'Untitled' })
+            })
+            
+            // Add member projects where user role is 'admin' or they are the owner
+            snapMember.docs.forEach(d => {
+                const data = d.data()
+                const memberInfo = data.teamMembers?.[currentUid]
+                const role = memberInfo?.role
+                const isOwner = data.createdBy === currentUid
+                const isAdmin = role === 'admin'
+                
+                if (isOwner || isAdmin) {
+                    projectMap.set(d.id, { id: d.id, title: data.title || 'Untitled' })
+                }
+            })
+            
+            setMyProjects(Array.from(projectMap.values()))
         } catch (err) {
-            console.error('Failed to load own projects for invite:', err)
+            console.error('Failed to load owned/admin projects for invite:', err)
         }
     }
 

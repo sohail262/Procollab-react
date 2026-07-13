@@ -95,7 +95,6 @@ export function analyzeProjectContent(projectData: ProjectData): ModerationAnaly
     // Combine all text fields for analysis
     const allText = [
         projectData.title,
-        projectData.summary,
         projectData.description,
         ...(projectData.goals || []),
         ...(projectData.tags || []),
@@ -179,29 +178,13 @@ export function analyzeProjectContent(projectData: ProjectData): ModerationAnaly
         analysis.riskScore += spamMatches.length * 8
     }
 
-    // 6. Check for minimal content (MEDIUM SEVERITY)
-    const totalLength = allText.length
-    if (totalLength < 50) {
-        analysis.flags.push({
-            type: 'minimal_content',
-            message: 'Project content is extremely short (less than 50 characters)',
-            severity: 'high'
-        })
-        analysis.riskScore += 25
-    } else if (totalLength < 100) {
-        analysis.flags.push({
-            type: 'minimal_content',
-            message: 'Project content is very short (less than 100 characters)',
-            severity: 'medium'
-        })
-        analysis.riskScore += 15
-    }
+    // 6. Check for minimal content (REMOVED: character limits are now removed)
+    // No minimum length warnings are applied anymore.
 
     // 7. Check for missing required fields (MEDIUM SEVERITY)
     const missingFields: string[] = []
-    if (!projectData.title || projectData.title.trim().length < 3) missingFields.push('title')
-    if (!projectData.summary || projectData.summary.trim().length < 10) missingFields.push('summary')
-    if (!projectData.description || projectData.description.trim().length < 20) missingFields.push('description')
+    if (!projectData.title || !projectData.title.trim()) missingFields.push('title')
+    if (!projectData.description || !projectData.description.trim()) missingFields.push('description')
     if (!projectData.primaryDiscipline && (!projectData.disciplines || projectData.disciplines.length === 0)) {
         missingFields.push('discipline')
     }

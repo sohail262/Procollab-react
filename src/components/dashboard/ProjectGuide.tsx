@@ -14,7 +14,7 @@ import {
 } from "lucide-react"
 import { motion, AnimatePresence } from "framer-motion"
 
-type GuideTab = 'overview' | 'kanban' | 'timeline' | 'docs' | 'budget' | 'whiteboard' | 'rbac'
+type GuideTab = 'overview' | 'kanban' | 'timeline' | 'docs' | 'budget' | 'rbac'
 
 interface TabOption {
     id: GuideTab
@@ -53,12 +53,6 @@ const TABS: TabOption[] = [
         label: 'Budget Tracking',
         icon: IndianRupee,
         description: 'Project finances, expense approval and category analysis.'
-    },
-    {
-        id: 'whiteboard',
-        label: 'Whiteboard',
-        icon: PenTool,
-        description: 'Real-time collaborative drawing and brainstorming.'
     },
     {
         id: 'rbac',
@@ -160,7 +154,6 @@ export function ProjectGuide() {
                                     {activeTab === 'timeline' && <TimelineGuide />}
                                     {activeTab === 'docs' && <DocsGuide />}
                                     {activeTab === 'budget' && <BudgetGuide />}
-                                    {activeTab === 'whiteboard' && <WhiteboardGuide />}
                                     {activeTab === 'rbac' && <RbacGuide />}
                                 </motion.div>
                             </AnimatePresence>
@@ -693,77 +686,7 @@ function BudgetGuide() {
     )
 }
 
-function WhiteboardGuide() {
-    return (
-        <div className="space-y-6">
-            <div>
-                <h3 className="text-lg font-bold tracking-tight">Whiteboard & Diagram Spaces</h3>
-                <p className="text-sm text-muted-foreground mt-1">
-                    An endless collaborative canvas enabling design modeling, flow mapping, and architectural diagramming.
-                </p>
-            </div>
 
-            {/* Animation Visualizer - Whiteboard shapes drawing */}
-            <div className="border border-border/60 rounded-xl p-6 bg-muted/10 overflow-hidden relative">
-                <div className="absolute top-2 right-2 flex items-center gap-1.5 text-[10px] text-muted-foreground font-mono">
-                    <span className="h-2 w-2 rounded-full bg-indigo-500 animate-pulse"></span>
-                    <span>Canvas Loop</span>
-                </div>
-
-                <div className="h-24 max-w-sm mx-auto bg-background border border-border/80 rounded-lg flex items-center justify-center relative overflow-hidden">
-                    <svg className="h-full w-full" viewBox="0 0 300 100">
-                        {/* Box 1 */}
-                        <motion.rect 
-                            initial={{ pathLength: 0 }}
-                            animate={{ pathLength: [0, 1, 1, 0] }}
-                            transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
-                            x="20" y="30" width="60" height="40" rx="4"
-                            fill="none" stroke="#6366f1" strokeWidth="2"
-                        />
-                        <text x="32" y="54" fontSize="8" fill="#6366f1" className="font-semibold font-mono">Client</text>
-
-                        {/* Arrow */}
-                        <motion.line 
-                            initial={{ pathLength: 0 }}
-                            animate={{ pathLength: [0, 1, 1, 0] }}
-                            transition={{ duration: 6, delay: 1, repeat: Infinity, ease: "easeInOut" }}
-                            x1="85" y1="50" x2="140" y2="50"
-                            stroke="#94a3b8" strokeWidth="2"
-                        />
-
-                        {/* Box 2 */}
-                        <motion.rect 
-                            initial={{ pathLength: 0 }}
-                            animate={{ pathLength: [0, 1, 1, 0] }}
-                            transition={{ duration: 6, delay: 2, repeat: Infinity, ease: "easeInOut" }}
-                            x="145" y="30" width="70" height="40" rx="4"
-                            fill="none" stroke="#10b981" strokeWidth="2"
-                        />
-                        <text x="156" y="54" fontSize="8" fill="#10b981" className="font-semibold font-mono">App API</text>
-                    </svg>
-                </div>
-            </div>
-
-            <div className="space-y-4">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-primary">Technical Specs</h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-1.5">
-                        <span className="text-xs font-bold text-foreground block">Collaborative Synchronization</span>
-                        <p className="text-xs leading-relaxed text-muted-foreground">
-                            Utilizes real-time database endpoints to capture element vectors, synchronization states, shapes, and brush strokes. This lets team members sketch ideas collaboratively.
-                        </p>
-                    </div>
-                    <div className="space-y-1.5">
-                        <span className="text-xs font-bold text-foreground block">Element Vector Libraries</span>
-                        <p className="text-xs leading-relaxed text-muted-foreground">
-                            Includes tools for creating vector shapes (rectangles, ellipses, arrows), freehand brush strokes, text objects, and sticky notes to help map flows.
-                        </p>
-                    </div>
-                </div>
-            </div>
-        </div>
-    )
-}
 
 function RbacGuide() {
     return (

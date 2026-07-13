@@ -12,6 +12,8 @@ import { db, auth } from '@/lib/firebase'
 import { generateUniqueProjectSlug } from '@/lib/urlUtils'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { useToast } from '@/hooks/use-toast'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { invalidateMyProjectsCache } from '@/services/dashboardService'
 
 export function EditProject() {
     const { id } = useParams()
@@ -24,7 +26,6 @@ export function EditProject() {
 
     const [formData, setFormData] = useState({
         title: '',
-        summary: '',
         description: '',
         status: 'recruiting',
         projectVisibility: 'public',
@@ -99,7 +100,6 @@ export function EditProject() {
 
                 setFormData({
                     title: project.title || '',
-                    summary: project.summary || '',
                     description: project.description || '',
                     status: project.status || 'recruiting',
                     projectVisibility: project.projectVisibility || 'public',
@@ -154,7 +154,6 @@ export function EditProject() {
                 title: formData.title,
                 slug: finalSlug,
                 projectVisibility: formData.projectVisibility || 'public',
-                summary: formData.summary,
                 description: formData.description,
                 status: formData.status,
 
@@ -184,6 +183,11 @@ export function EditProject() {
             }
 
             await updateDoc(doc(db, 'projects', id), updateData)
+
+            if (auth.currentUser) {
+                invalidateMyProjectsCache(auth.currentUser.uid)
+            }
+
             toast({
                 title: 'Project Updated',
                 description: 'Your project has been updated successfully!',
@@ -269,18 +273,6 @@ export function EditProject() {
                             </div>
 
                             <div className="space-y-2">
-                                <Label htmlFor="summary">Summary *</Label>
-                                <Input
-                                    id="summary"
-                                    required
-                                    value={formData.summary}
-                                    onChange={e => setFormData({ ...formData, summary: e.target.value })}
-                                    maxLength={150}
-                                />
-                                <p className="text-xs text-gray-500">{formData.summary.length}/150</p>
-                            </div>
-
-                            <div className="space-y-2">
                                 <Label htmlFor="description">Description *</Label>
                                 <Textarea
                                     id="description"
@@ -294,53 +286,60 @@ export function EditProject() {
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                 <div className="space-y-2">
                                     <Label htmlFor="status">Status *</Label>
-                                    <select
-                                        id="status"
-                                        className="w-full px-3 py-2 border rounded-md bg-background"
+                                    <Select
                                         value={formData.status}
-                                        onChange={e => setFormData({ ...formData, status: e.target.value })}
+                                        onValueChange={value => setFormData({ ...formData, status: value })}
                                     >
-                                        <option value="recruiting">Recruiting</option>
-                                        <option value="active">Active</option>
-                                        <option value="completed">Completed</option>
-                                        <option value="on-hold">On Hold</option>
-                                    </select>
+                                        <SelectTrigger id="status" className="w-full">
+                                            <SelectValue placeholder="Select status" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="recruiting">Recruiting</SelectItem>
+                                            <SelectItem value="active">Active</SelectItem>
+                                            <SelectItem value="completed">Completed</SelectItem>
+                                            <SelectItem value="on-hold">On Hold</SelectItem>
+                                        </SelectContent>
+                                    </Select>
                                 </div>
 
                                 <div className="space-y-2">
                                     <Label htmlFor="projectVisibility">Project Visibility *</Label>
-                                    <select
-                                        id="projectVisibility"
-                                        className="w-full px-3 py-2 border rounded-md bg-background"
+                                    <Select
                                         value={formData.projectVisibility}
-                                        onChange={e => setFormData({ ...formData, projectVisibility: e.target.value })}
+                                        onValueChange={value => setFormData({ ...formData, projectVisibility: value })}
                                     >
-                                        <option value="public">Public (Everyone can view)</option>
-                                        <option value="connections_only">Connections Only (Only friends can view)</option>
-                                        <option value="private">Private (Only team can view)</option>
-                                    </select>
+                                        <SelectTrigger id="projectVisibility" className="w-full">
+                                            <SelectValue placeholder="Select visibility" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="public">Public (Everyone can view)</SelectItem>
+                                            <SelectItem value="connections_only">Connections Only (Only friends can view)</SelectItem>
+                                            <SelectItem value="private">Private (Only team can view)</SelectItem>
+                                        </SelectContent>
+                                    </Select>
                                 </div>
 
                                 <div className="space-y-2">
                                     <Label htmlFor="discipline">Primary Discipline *</Label>
-                                    <select
-                                        id="discipline"
-                                        className="w-full px-3 py-2 border rounded-md bg-background"
-                                        required
+                                    <Select
                                         value={formData.primaryDiscipline}
-                                        onChange={e => setFormData({ ...formData, primaryDiscipline: e.target.value })}
+                                        onValueChange={value => setFormData({ ...formData, primaryDiscipline: value })}
                                     >
-                                        <option value="">Select discipline</option>
-                                        <option value="computer-science">Computer Science</option>
-                                        <option value="engineering">Engineering</option>
-                                        <option value="medicine">Medicine & Health</option>
-                                        <option value="business">Business & Economics</option>
-                                        <option value="arts">Arts & Humanities</option>
-                                        <option value="social-sciences">Social Sciences</option>
-                                        <option value="natural-sciences">Natural Sciences</option>
-                                        <option value="education">Education</option>
-                                        <option value="other">Other</option>
-                                    </select>
+                                        <SelectTrigger id="discipline" className="w-full">
+                                            <SelectValue placeholder="Select discipline" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="computer-science">Computer Science</SelectItem>
+                                            <SelectItem value="engineering">Engineering</SelectItem>
+                                            <SelectItem value="medicine">Medicine & Health</SelectItem>
+                                            <SelectItem value="business">Business & Economics</SelectItem>
+                                            <SelectItem value="arts">Arts & Humanities</SelectItem>
+                                            <SelectItem value="social-sciences">Social Sciences</SelectItem>
+                                            <SelectItem value="natural-sciences">Natural Sciences</SelectItem>
+                                            <SelectItem value="education">Education</SelectItem>
+                                            <SelectItem value="other">Other</SelectItem>
+                                        </SelectContent>
+                                    </Select>
                                 </div>
                             </div>
                         </CardContent>
@@ -384,41 +383,41 @@ export function EditProject() {
                                     />
                                 </div>
 
-                                <div className="space-y-2">
+                                 <div className="space-y-2">
                                     <Label htmlFor="durationUnit">Unit</Label>
-                                    <select
-                                        id="durationUnit"
-                                        className="w-full px-3 py-2 border rounded-md bg-background"
+                                    <Select
                                         value={formData.durationUnit}
-                                        onChange={e => setFormData({
-                                            ...formData,
-                                            durationUnit: e.target.value
-                                        })}
+                                        onValueChange={value => setFormData({ ...formData, durationUnit: value })}
                                     >
-                                        <option value="weeks">Weeks</option>
-                                        <option value="months">Months</option>
-                                        <option value="years">Years</option>
-                                    </select>
+                                        <SelectTrigger id="durationUnit" className="w-full">
+                                            <SelectValue placeholder="Select unit" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="weeks">Weeks</SelectItem>
+                                            <SelectItem value="months">Months</SelectItem>
+                                            <SelectItem value="years">Years</SelectItem>
+                                        </SelectContent>
+                                    </Select>
                                 </div>
                             </div>
 
                             <div className="space-y-2">
                                 <Label htmlFor="timeCommitment">Time Commitment</Label>
-                                <select
-                                    id="timeCommitment"
-                                    className="w-full px-3 py-2 border rounded-md bg-background"
+                                <Select
                                     value={formData.timeCommitment}
-                                    onChange={e => setFormData({
-                                        ...formData,
-                                        timeCommitment: e.target.value
-                                    })}
+                                    onValueChange={value => setFormData({ ...formData, timeCommitment: value })}
                                 >
-                                    <option value="1-5 hours/week">1-5 hours/week</option>
-                                    <option value="5-10 hours/week">5-10 hours/week</option>
-                                    <option value="10-20 hours/week">10-20 hours/week</option>
-                                    <option value="20+ hours/week">20+ hours/week</option>
-                                    <option value="Flexible">Flexible</option>
-                                </select>
+                                    <SelectTrigger id="timeCommitment" className="w-full">
+                                        <SelectValue placeholder="Select time commitment" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="1-5 hours/week">1-5 hours/week</SelectItem>
+                                        <SelectItem value="5-10 hours/week">5-10 hours/week</SelectItem>
+                                        <SelectItem value="10-20 hours/week">10-20 hours/week</SelectItem>
+                                        <SelectItem value="20+ hours/week">20+ hours/week</SelectItem>
+                                        <SelectItem value="Flexible">Flexible</SelectItem>
+                                    </SelectContent>
+                                </Select>
                             </div>
                         </CardContent>
                     </Card>
@@ -515,21 +514,21 @@ export function EditProject() {
                             <CardTitle>Location</CardTitle>
                         </CardHeader>
                         <CardContent className="space-y-4">
-                            <div className="space-y-2">
+                             <div className="space-y-2">
                                 <Label htmlFor="location">Project Location *</Label>
-                                <select
-                                    id="location"
-                                    className="w-full px-3 py-2 border rounded-md bg-background"
+                                <Select
                                     value={formData.location}
-                                    onChange={e => setFormData({
-                                        ...formData,
-                                        location: e.target.value
-                                    })}
+                                    onValueChange={value => setFormData({ ...formData, location: value })}
                                 >
-                                    <option value="remote">Remote/Virtual</option>
-                                    <option value="in-person">In-Person</option>
-                                    <option value="hybrid">Hybrid</option>
-                                </select>
+                                    <SelectTrigger id="location" className="w-full">
+                                        <SelectValue placeholder="Select location type" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="remote">Remote/Virtual</SelectItem>
+                                        <SelectItem value="in-person">In-Person</SelectItem>
+                                        <SelectItem value="hybrid">Hybrid</SelectItem>
+                                    </SelectContent>
+                                </Select>
                             </div>
 
                             {formData.location !== 'remote' && (

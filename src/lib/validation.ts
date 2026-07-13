@@ -184,8 +184,6 @@ export function validateFormData(data: Record<string, any>, schema: ValidationSc
 export const projectValidationSchema: ValidationSchema = {
     title: {
         required: true,
-        minLength: 3,
-        maxLength: 100,
         pattern: /^[a-zA-Z0-9\s\-_.,!?()]+$/,
         custom: (value) => {
             const suspiciousPatterns = [
@@ -201,24 +199,18 @@ export const projectValidationSchema: ValidationSchema = {
             return null;
         }
     },
-    summary: {
-        required: true,
-        minLength: 10,
-        maxLength: 150,
-        custom: (value) => {
-            if (value.split(' ').length < 5) {
-                return 'Summary must contain at least 5 words';
-            }
-            return null;
-        }
-    },
     description: {
         required: true,
-        minLength: 50,
-        maxLength: 5000,
         custom: (value) => {
-            if (value.split(' ').length < 20) {
-                return 'Description must contain at least 20 words';
+            const suspiciousPatterns = [
+                /test|placeholder|lorem|ipsum|tbd|n\/a|xxx|asdf|qwerty/i,
+                /(.)\1{4,}/, // Repeated characters
+            ];
+            
+            for (const pattern of suspiciousPatterns) {
+                if (pattern.test(value)) {
+                    return 'Description appears to be placeholder text or invalid';
+                }
             }
             return null;
         }

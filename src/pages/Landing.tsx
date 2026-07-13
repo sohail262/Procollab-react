@@ -266,8 +266,8 @@ export function Landing() {
         return () => ctx.revert()
     }, [loading])
 
-    // Render immediately to maximize FCP / Speed Index performance; auth redirect executes in background
-
+    // Don't render until auth state is known
+    if (loading) return null
 
     return (
         <div className="flex min-h-screen flex-col bg-background">
@@ -339,7 +339,7 @@ export function Landing() {
                                     <Button asChild variant="outline" size="lg" className="hero-cta w-[145px] xs:w-44 sm:w-auto text-xs sm:text-sm px-4 sm:px-8 h-10 sm:h-12 rounded-none font-mono tracking-wider uppercase">
                                         <Link to="/projects" className="justify-center">Explore Projects</Link>
                                     </Button>
-                               </div>
+                                </div>
                             </div>
 
                             {/* Right column: Globe */}
@@ -619,15 +619,9 @@ export function Landing() {
                             <div className="cta-animate flex flex-col sm:flex-row gap-3 justify-center">
                                 <Button asChild size="lg" className="rounded-none font-mono text-xs tracking-wider uppercase px-10 btn-glow-amber">
                                     <Link to="/register">
-                                        Get Started Free
+                                        Get Started
                                         <ArrowRight className="ml-2 h-4 w-4" />
                                     </Link>
-                                </Button>
-                                <Button
-                                    asChild size="lg" variant="outline"
-                                    className="rounded-none font-mono text-xs tracking-wider uppercase px-10"
-                                >
-                                    <Link to="/about">Learn More</Link>
                                 </Button>
                             </div>
                         </div>

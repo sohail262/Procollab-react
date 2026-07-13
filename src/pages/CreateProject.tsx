@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Label } from '@/components/ui/label'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ArrowLeft, Loader2, ShieldAlert, CheckCircle, Info, Shield, XCircle, Check } from 'lucide-react'
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore'
 import { db, auth } from '@/lib/firebase'
@@ -37,7 +38,6 @@ export function CreateProject() {
 
     const [formData, setFormData] = useState({
         title: '',
-        summary: '',
         description: '',
         status: 'recruiting',
         projectVisibility: 'public',
@@ -83,6 +83,9 @@ export function CreateProject() {
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
+        if (currentStep !== TOTAL_STEPS) {
+            return
+        }
         if (!auth.currentUser) {
             toast({
                 title: 'Authentication Required',
@@ -110,13 +113,12 @@ export function CreateProject() {
             // Prepare project data for moderation check
             const projectDataForModeration = {
                 title: validation.sanitizedData.title,
-                summary: validation.sanitizedData.summary,
                 description: validation.sanitizedData.description,
-                goals: validation.sanitizedData.goals?.split('\n').map((g: string) => g.trim()).filter(Boolean) || [],
-                tags: validation.sanitizedData.tags?.split(',').map((t: string) => t.trim()).filter(Boolean) || [],
-                requiredSkills: validation.sanitizedData.requiredSkills?.split(',').map((s: string) => s.trim()).filter(Boolean) || [],
-                openRoles: validation.sanitizedData.openRoles?.split('\n').map((r: string) => r.trim()).filter(Boolean) || [],
-                additionalNotes: validation.sanitizedData.additionalNotes,
+                goals: formData.goals?.split('\n').map((g: string) => g.trim()).filter(Boolean) || [],
+                tags: formData.tags?.split(',').map((t: string) => t.trim()).filter(Boolean) || [],
+                requiredSkills: formData.requiredSkills?.split(',').map((s: string) => s.trim()).filter(Boolean) || [],
+                openRoles: formData.openRoles?.split('\n').map((r: string) => r.trim()).filter(Boolean) || [],
+                additionalNotes: formData.additionalNotes,
                 primaryDiscipline: validation.sanitizedData.primaryDiscipline,
                 teamSize: validation.sanitizedData.teamSize,
                 duration: validation.sanitizedData.duration
@@ -209,10 +211,12 @@ export function CreateProject() {
                 maxMembers: parseInt(validation.sanitizedData.teamSize.toString()),
                 currentMembers: 1,
                 disciplines: [validation.sanitizedData.primaryDiscipline].filter(Boolean),
-                requiredSkills: validation.sanitizedData.requiredSkills?.split(',').map((s: string) => s.trim()).filter(Boolean) || [],
-                tags: validation.sanitizedData.tags?.split(',').map((t: string) => t.trim()).filter(Boolean) || [],
-                openRoles: validation.sanitizedData.openRoles?.split('\n').map((r: string) => r.trim()).filter(Boolean) || [],
-                goals: validation.sanitizedData.goals?.split('\n').map((g: string) => g.trim()).filter(Boolean) || [],
+                requiredSkills: formData.requiredSkills?.split(',').map((s: string) => s.trim()).filter(Boolean) || [],
+                tags: formData.tags?.split(',').map((t: string) => t.trim()).filter(Boolean) || [],
+                openRoles: formData.openRoles?.split('\n').map((r: string) => r.trim()).filter(Boolean) || [],
+                goals: formData.goals?.split('\n').map((g: string) => g.trim()).filter(Boolean) || [],
+                timeline: formData.timeline || '',
+                additionalNotes: formData.additionalNotes || '',
                 // ✅ Combine duration value + unit into a readable string (e.g. "2 months")
                 duration: validation.sanitizedData.duration && validation.sanitizedData.durationUnit
                     ? `${validation.sanitizedData.duration} ${validation.sanitizedData.durationUnit}`
@@ -289,9 +293,22 @@ export function CreateProject() {
     // Validate step 1 fields before advancing
     const canAdvanceStep1 = (): boolean => {
         const errs: Record<string, string> = {}
-        if (!formData.title.trim()) errs.title = 'Title is required'
-        if (!formData.summary.trim() || formData.summary.length < 10) errs.summary = 'Summary must be at least 10 characters'
-        if (!formData.description.trim() || formData.description.length < 50) errs.description = 'Description must be at least 50 characters'
+        if (!formData.title.trim()) {
+            errs.title = 'Title is required'
+        } else {
+            const suspiciousPatterns = [/test|placeholder|lorem|ipsum|tbd|n\/a|xxx|asdf|qwerty/i, /(.)\1{4,}/]
+            if (suspiciousPatterns.some(p => p.test(formData.title))) {
+                errs.title = 'Title appears to be placeholder text or invalid'
+            }
+        }
+        if (!formData.description.trim()) {
+            errs.description = 'Description is required'
+        } else {
+            const suspiciousPatterns = [/test|placeholder|lorem|ipsum|tbd|n\/a|xxx|asdf|qwerty/i, /(.)\1{4,}/]
+            if (suspiciousPatterns.some(p => p.test(formData.description))) {
+                errs.description = 'Description appears to be placeholder text or invalid'
+            }
+        }
         if (!formData.primaryDiscipline) errs.primaryDiscipline = 'Please select a discipline'
         setValidationErrors(errs)
         return Object.keys(errs).length === 0
@@ -316,6 +333,15 @@ export function CreateProject() {
         setCurrentStep(s => Math.max(s - 1, 1))
         window.scrollTo({ top: 0, behavior: 'smooth' })
     }
+
+    const handleFormKeyDown = (e: React.KeyboardEvent<HTMLFormElement>) => {
+        if (e.key === 'Enter') {
+            const target = e.target as HTMLElement;
+            if (target.tagName !== 'TEXTAREA') {
+                e.preventDefault();
+            }
+        }
+    };
 
     return (
         <ErrorBoundary>
@@ -391,7 +417,7 @@ export function CreateProject() {
                         </Alert>
                     )}
 
-                    <form onSubmit={handleSubmit} className="space-y-6">
+                    <form onSubmit={handleSubmit} onKeyDown={handleFormKeyDown} className="space-y-6">
 
                         {/* ───────────────────────────────────────────────────
                             STEP 1 — Basics
@@ -419,24 +445,6 @@ export function CreateProject() {
                                 </div>
 
                                 <div className="space-y-2">
-                                    <Label htmlFor="summary">Summary *</Label>
-                                    <Input
-                                        id="summary"
-                                        required
-                                        value={formData.summary}
-                                        onChange={e => handleInputChange('summary', e.target.value)}
-                                        placeholder="Brief description (10-150 characters)"
-                                        maxLength={150}
-                                        className={validationErrors.summary ? 'border-red-500' : ''}
-                                    />
-                                    <div className="flex justify-between text-xs">
-                                        <span className={validationErrors.summary ? 'text-red-500' : 'text-gray-500'}>
-                                            {validationErrors.summary || `${formData.summary.length}/150`}
-                                        </span>
-                                    </div>
-                                </div>
-
-                                <div className="space-y-2">
                                     <Label htmlFor="description">Description *</Label>
                                     <Textarea
                                         id="description"
@@ -444,7 +452,7 @@ export function CreateProject() {
                                         rows={5}
                                         value={formData.description}
                                         onChange={e => handleInputChange('description', e.target.value)}
-                                        placeholder="Detailed description of your project (minimum 50 characters)"
+                                        placeholder="Enter a detailed description of your project"
                                         className={validationErrors.description ? 'border-red-500' : ''}
                                     />
                                     {validationErrors.description && (
@@ -455,55 +463,62 @@ export function CreateProject() {
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                     <div className="space-y-2">
                                         <Label htmlFor="status">Status *</Label>
-                                        <select
-                                            id="status"
-                                            className="w-full px-3 py-2 border rounded-md bg-background"
+                                        <Select
                                             value={formData.status}
-                                            onChange={e => handleInputChange('status', e.target.value)}
+                                            onValueChange={value => handleInputChange('status', value)}
                                         >
-                                            <option value="recruiting">Recruiting</option>
-                                            <option value="active">Active</option>
-                                            <option value="planning">Planning</option>
-                                        </select>
+                                            <SelectTrigger id="status" className="w-full">
+                                                <SelectValue placeholder="Select status" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="recruiting">Recruiting</SelectItem>
+                                                <SelectItem value="active">Active</SelectItem>
+                                                <SelectItem value="planning">Planning</SelectItem>
+                                            </SelectContent>
+                                        </Select>
                                     </div>
 
                                     <div className="space-y-2">
                                         <Label htmlFor="projectVisibility">Project Visibility *</Label>
-                                        <select
-                                            id="projectVisibility"
-                                            className="w-full px-3 py-2 border rounded-md bg-background"
+                                        <Select
                                             value={formData.projectVisibility}
-                                            onChange={e => handleInputChange('projectVisibility', e.target.value)}
+                                            onValueChange={value => handleInputChange('projectVisibility', value)}
                                         >
-                                            <option value="public">Public (Everyone can view)</option>
-                                            <option value="connections_only">Connections Only (Only friends can view)</option>
-                                            <option value="private">Private (Only team can view)</option>
-                                        </select>
+                                            <SelectTrigger id="projectVisibility" className="w-full">
+                                                <SelectValue placeholder="Select visibility" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="public">Public (Everyone can view)</SelectItem>
+                                                <SelectItem value="connections_only">Connections Only (Only friends can view)</SelectItem>
+                                                <SelectItem value="private">Private (Only team can view)</SelectItem>
+                                            </SelectContent>
+                                        </Select>
                                     </div>
 
                                     <div className="space-y-2">
                                         <Label htmlFor="discipline">Primary Discipline *</Label>
-                                        <select
-                                            id="discipline"
-                                            className={`w-full px-3 py-2 border rounded-md bg-background ${validationErrors.primaryDiscipline ? 'border-red-500' : ''}`}
-                                            required
+                                        <Select
                                             value={formData.primaryDiscipline}
-                                            onChange={e => handleInputChange('primaryDiscipline', e.target.value)}
+                                            onValueChange={value => handleInputChange('primaryDiscipline', value)}
                                         >
-                                            <option value="">Select discipline</option>
-                                            <option value="computer-science">Computer Science</option>
-                                            <option value="engineering">Engineering</option>
-                                            <option value="medicine">Medicine & Health</option>
-                                            <option value="business">Business & Economics</option>
-                                            <option value="arts">Arts & Humanities</option>
-                                            <option value="social-sciences">Social Sciences</option>
-                                            <option value="natural-sciences">Natural Sciences</option>
-                                            <option value="education">Education</option>
-                                            <option value="other">Other</option>
-                                        </select>
+                                            <SelectTrigger id="discipline" className={`w-full ${validationErrors.primaryDiscipline ? 'border-red-500' : ''}`}>
+                                                <SelectValue placeholder="Select discipline" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="computer-science">Computer Science</SelectItem>
+                                                <SelectItem value="engineering">Engineering</SelectItem>
+                                                <SelectItem value="medicine">Medicine & Health</SelectItem>
+                                                <SelectItem value="business">Business & Economics</SelectItem>
+                                                <SelectItem value="arts">Arts & Humanities</SelectItem>
+                                                <SelectItem value="social-sciences">Social Sciences</SelectItem>
+                                                <SelectItem value="natural-sciences">Natural Sciences</SelectItem>
+                                                <SelectItem value="education">Education</SelectItem>
+                                                <SelectItem value="other">Other</SelectItem>
+                                            </SelectContent>
+                                        </Select>
                                         {validationErrors.primaryDiscipline && (
-                                        <p className="text-sm text-red-500">{validationErrors.primaryDiscipline}</p>
-                                    )}
+                                            <p className="text-sm text-red-500">{validationErrors.primaryDiscipline}</p>
+                                        )}
                                     </div>
                                 </div>
                                 </CardContent>
@@ -558,33 +573,39 @@ export function CreateProject() {
 
                                     <div className="space-y-2">
                                         <Label htmlFor="durationUnit">Unit</Label>
-                                        <select
-                                            id="durationUnit"
-                                            className="w-full px-3 py-2 border rounded-md bg-background"
+                                        <Select
                                             value={formData.durationUnit}
-                                            onChange={e => handleInputChange('durationUnit', e.target.value)}
+                                            onValueChange={value => handleInputChange('durationUnit', value)}
                                         >
-                                            <option value="weeks">Weeks</option>
-                                            <option value="months">Months</option>
-                                            <option value="years">Years</option>
-                                        </select>
+                                            <SelectTrigger id="durationUnit" className="w-full">
+                                                <SelectValue placeholder="Select unit" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="weeks">Weeks</SelectItem>
+                                                <SelectItem value="months">Months</SelectItem>
+                                                <SelectItem value="years">Years</SelectItem>
+                                            </SelectContent>
+                                        </Select>
                                     </div>
                                 </div>
 
                                 <div className="space-y-2">
                                     <Label htmlFor="timeCommitment">Time Commitment</Label>
-                                    <select
-                                        id="timeCommitment"
-                                        className="w-full px-3 py-2 border rounded-md bg-background"
+                                    <Select
                                         value={formData.timeCommitment}
-                                        onChange={e => handleInputChange('timeCommitment', e.target.value)}
+                                        onValueChange={value => handleInputChange('timeCommitment', value)}
                                     >
-                                        <option value="1-5 hours/week">1-5 hours/week</option>
-                                        <option value="5-10 hours/week">5-10 hours/week</option>
-                                        <option value="10-20 hours/week">10-20 hours/week</option>
-                                        <option value="20+ hours/week">20+ hours/week</option>
-                                        <option value="Flexible">Flexible</option>
-                                    </select>
+                                        <SelectTrigger id="timeCommitment" className="w-full">
+                                            <SelectValue placeholder="Select time commitment" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="1-5 hours/week">1-5 hours/week</SelectItem>
+                                            <SelectItem value="5-10 hours/week">5-10 hours/week</SelectItem>
+                                            <SelectItem value="10-20 hours/week">10-20 hours/week</SelectItem>
+                                            <SelectItem value="20+ hours/week">20+ hours/week</SelectItem>
+                                            <SelectItem value="Flexible">Flexible</SelectItem>
+                                        </SelectContent>
+                                    </Select>
                                 </div>
                             </CardContent>
                             </Card>
@@ -678,16 +699,19 @@ export function CreateProject() {
                             <CardContent className="space-y-4">
                                 <div className="space-y-2">
                                     <Label htmlFor="location">Project Location *</Label>
-                                    <select
-                                        id="location"
-                                        className="w-full px-3 py-2 border rounded-md bg-background"
+                                    <Select
                                         value={formData.location}
-                                        onChange={e => handleInputChange('location', e.target.value)}
+                                        onValueChange={value => handleInputChange('location', value)}
                                     >
-                                        <option value="remote">Remote/Virtual</option>
-                                        <option value="in-person">In-Person</option>
-                                        <option value="hybrid">Hybrid</option>
-                                    </select>
+                                        <SelectTrigger id="location" className="w-full">
+                                            <SelectValue placeholder="Select location type" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="remote">Remote/Virtual</SelectItem>
+                                            <SelectItem value="in-person">In-Person</SelectItem>
+                                            <SelectItem value="hybrid">Hybrid</SelectItem>
+                                        </SelectContent>
+                                    </Select>
                                 </div>
 
                                 {formData.location !== 'remote' && (
@@ -732,11 +756,12 @@ export function CreateProject() {
                             </div>
 
                             {currentStep < TOTAL_STEPS ? (
-                                <Button type="button" onClick={handleNext}>
+                                <Button key="next-btn" type="button" onClick={handleNext}>
                                     Next →
                                 </Button>
                             ) : (
                                 <Button
+                                    key="submit-btn"
                                     type="submit"
                                     disabled={loading || Object.keys(validationErrors).length > 0}
                                 >
@@ -790,8 +815,7 @@ export function CreateProject() {
                                 <ul className="space-y-1 text-sm text-gray-600 dark:text-gray-400 ml-7">
                                     <li>• Placeholder text (lorem ipsum, TBD, N/A)</li>
                                     <li>• Vague descriptions ("just for fun", "idk", "test")</li>
-                                    <li>• Very short content (less than 100 characters)</li>
-                                    <li>• Spam-like language ("click here", "urgent")</li>
+                                    <li>• Spam-like language or repetitive characters</li>
                                     <li>• Inappropriate or offensive content</li>
                                     <li>• Unrealistic requirements ("unpaid", "free work")</li>
                                 </ul>

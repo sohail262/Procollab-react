@@ -54,9 +54,7 @@ const TaskDialog = lazy(() => import('@/components/dashboard/TaskDialog').then(m
 const GanttChart = lazy(() => import('@/components/dashboard/GanttChart').then(m => ({ default: m.GanttChart })))
 const ProjectCalendar = lazy(() => import('@/components/dashboard/ProjectCalendar').then(m => ({ default: m.ProjectCalendar })))
 const ResourceManagement = lazy(() => import('@/components/dashboard/ResourceManagement').then(m => ({ default: m.ResourceManagement })))
-const AIInsights = lazy(() => import('@/components/dashboard/AIInsights').then(m => ({ default: m.AIInsights })))
 const Analytics = lazy(() => import('@/components/dashboard/Analytics').then(m => ({ default: m.Analytics })))
-const Whiteboard = lazy(() => import('@/components/dashboard/Whiteboard').then(m => ({ default: m.Whiteboard })))
 const GoogleDocsPanel = lazy(() => import('@/components/dashboard/GoogleDocsPanel').then(m => ({ default: m.GoogleDocsPanel })))
 const BudgetTracker = lazy(() => import('@/components/dashboard/BudgetTracker').then(m => ({ default: m.BudgetTracker })))
 const GalleryView = lazy(() => import('@/components/dashboard/GalleryView').then(m => ({ default: m.GalleryView })))
@@ -857,7 +855,7 @@ export function ProjectDashboard() {
                     onValueChange={setActiveTab}
                     className="flex-1 flex flex-col"
                 >
-                    <div className="border-b overflow-x-auto">
+                    <div className="border-b overflow-x-auto pretty-scrollbar pb-1">
                         <TabsList className="w-full justify-start h-12 bg-transparent p-0 min-w-max">
 
                             {canViewTab('overview') && (
@@ -944,17 +942,7 @@ export function ProjectDashboard() {
                                 </TabsTrigger>
                             )}
 
-                            {canViewTab('whiteboard') && (
-                                <TabsTrigger value="whiteboard"
-                                    className="data-[state=active]:bg-transparent
-                                               data-[state=active]:border-b-2
-                                               data-[state=active]:border-primary
-                                               data-[state=active]:shadow-none
-                                               rounded-none h-full px-3 sm:px-4">
-                                    <Pencil className="h-4 w-4 sm:mr-2" />
-                                    <span className="hidden sm:inline">Whiteboard</span>
-                                </TabsTrigger>
-                            )}
+
 
                             {canViewTab('documents') && (
                                 <TabsTrigger value="documents"
@@ -1130,7 +1118,7 @@ export function ProjectDashboard() {
                                         </div>
 
                                         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                                            <Card className="col-span-1 lg:col-span-2">
+                                            <Card className="col-span-1 lg:col-span-3">
                                                 <CardHeader className="flex flex-row items-start
                                                                     justify-between gap-2">
                                                     <div>
@@ -1304,11 +1292,6 @@ export function ProjectDashboard() {
                                                     </ScrollArea>
                                                 </SheetContent>
                                             </Sheet>
-
-                                            {/* ── Project Info sidebar ── */}
-                                            <div className="flex flex-col gap-4">
-                                                <AIInsights tasks={tasks} />
-                                            </div>
                                         </div>
                                     </>
                                 )}
@@ -1379,17 +1362,7 @@ export function ProjectDashboard() {
                                 )}
                             </TabsContent>
 
-                            {/* Whiteboard */}
-                            <TabsContent value="whiteboard" className="focus-visible:outline-none h-[calc(100vh-11rem)] overflow-hidden">
-                                {!canViewTab('whiteboard') ? (
-                                    <AccessDenied feature="Whiteboard" />
-                                ) : (
-                                    <>
-                                        {!canWriteTab('whiteboard') && <ReadOnlyNotice />}
-                                        <Whiteboard readOnly={!canWriteTab('whiteboard')} />
-                                    </>
-                                )}
-                            </TabsContent>
+
 
                             {/* Google Drive Docs */}
                             <TabsContent value="documents" className="focus-visible:outline-none h-[calc(100vh-11rem)] overflow-hidden">

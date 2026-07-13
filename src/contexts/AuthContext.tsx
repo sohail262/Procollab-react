@@ -371,7 +371,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     const loginWithGoogle = async (isSignUp?: boolean) => {
         try {
-            // NOTE: do NOT call setLoading(true) here — it unmounts children.
             const provider = new GoogleAuthProvider()
             provider.setCustomParameters({ prompt: 'select_account' })
 
@@ -412,9 +411,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
                 }
                 if (userDoc.data().disabled) {
                     await firebaseSignOut(auth)
-                    throw new Error(
-                        'Account has been disabled. Please contact support.'
-                    )
+                    throw new Error('Account has been disabled. Please contact support.')
                 }
                 await setDoc(
                     doc(db, 'users', oauthUser.uid),
@@ -437,7 +434,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     const loginWithGithub = async (isSignUp?: boolean) => {
         try {
-            // NOTE: do NOT call setLoading(true) here — it unmounts children.
             const provider = new GithubAuthProvider()
             provider.setCustomParameters({ allow_signup: 'true' })
 
@@ -478,9 +474,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
                 }
                 if (userDoc.data().disabled) {
                     await firebaseSignOut(auth)
-                    throw new Error(
-                        'Account has been disabled. Please contact support.'
-                    )
+                    throw new Error('Account has been disabled. Please contact support.')
                 }
                 await setDoc(
                     doc(db, 'users', oauthUser.uid),

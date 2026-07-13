@@ -581,6 +581,25 @@
     background-color: hsl(var(--foreground) / 0.18);
   }
 
+  /* ── Accessible, premium scrollbar utility ─────────────── */
+  .pretty-scrollbar::-webkit-scrollbar {
+    height: 8px;
+    width: 8px;
+  }
+  .pretty-scrollbar::-webkit-scrollbar-track {
+    background: hsl(var(--muted) / 0.3);
+    border-radius: 9999px;
+  }
+  .pretty-scrollbar::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--primary) / 0.45);
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  .pretty-scrollbar::-webkit-scrollbar-thumb:hover {
+    background-color: hsl(var(--primary) / 0.7);
+  }
+
   /* ── No scrollbar utility ──────────────────────────────── */
   .no-scrollbar::-webkit-scrollbar {
     display: none;

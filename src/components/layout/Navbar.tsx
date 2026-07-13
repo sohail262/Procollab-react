@@ -132,8 +132,8 @@ export function Navbar() {
     const handleProjectClick = (projectId: string) => {
         setSearchQuery("")
         setIsSearchFocused(false)
-        navigate(`/projects/${projectId}`)
-    }
+        navigate(`/project/${projectId}`)
+     }
 
     // Get user initials for avatar fallback
     const getUserInitials = () => {
