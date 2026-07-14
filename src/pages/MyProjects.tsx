@@ -39,7 +39,7 @@ export default function MyProjects() {
     const [joinedProjects, setJoinedProjects] = useState<Project[]>([])
     const [pastProjects, setPastProjects] = useState<Project[]>([])
     const [loading, setLoading] = useState(true)
-    const [activeTab, setActiveTab] = useState<'created' | 'joined' | 'past' | 'applications'>('created')
+    const [activeTab, setActiveTab] = useState<'created' | 'joined' | 'past'>('created')
 
     useEffect(() => {
         if (user) {
@@ -356,7 +356,7 @@ export default function MyProjects() {
                         }`}
                     onClick={() => setActiveTab('joined')}
                 >
-                    Joined Projects
+                    Ongoing Projects
                 </button>
                 <button
                     className={`px-3 sm:px-4 py-2 font-medium transition-colors border-b-2 whitespace-nowrap text-sm sm:text-base ${activeTab === 'past'
@@ -366,15 +366,6 @@ export default function MyProjects() {
                     onClick={() => setActiveTab('past')}
                 >
                     Past Projects / History
-                </button>
-                <button
-                    className={`px-3 sm:px-4 py-2 font-medium transition-colors border-b-2 whitespace-nowrap text-sm sm:text-base ${activeTab === 'applications'
-                        ? 'border-primary text-primary'
-                        : 'border-transparent text-white/50 hover:text-white'
-                        }`}
-                    onClick={() => setActiveTab('applications')}
-                >
-                    My Applications
                 </button>
             </div>
 
@@ -388,12 +379,12 @@ export default function MyProjects() {
                     {activeTab === 'created' && (
                         <div>
                             {createdProjects.length === 0 ? (
-                                <div className="text-center py-12 bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800">
-                                    <FolderKanban className="h-12 w-12 mx-auto text-gray-400 mb-4" />
-                                    <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
+                                <div className="text-center py-12 rounded-lg border border-white/10 bg-white/5">
+                                    <FolderKanban className="h-12 w-12 mx-auto text-white/30 mb-4" />
+                                    <h3 className="text-lg font-medium text-white mb-2">
                                         No projects created yet
                                     </h3>
-                                    <p className="text-gray-500 dark:text-gray-400 mb-6">
+                                    <p className="text-white/50 mb-6">
                                         Start your first project and find collaborators
                                     </p>
                                     <Button onClick={() => navigate('/create-project')}>
@@ -414,12 +405,12 @@ export default function MyProjects() {
                     {activeTab === 'joined' && (
                         <div>
                             {joinedProjects.length === 0 ? (
-                                <div className="text-center py-12 bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800">
-                                    <FolderKanban className="h-12 w-12 mx-auto text-gray-400 mb-4" />
-                                    <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
-                                        You haven't joined any projects yet
+                                <div className="text-center py-12 rounded-lg border border-white/10 bg-white/5">
+                                    <FolderKanban className="h-12 w-12 mx-auto text-white/30 mb-4" />
+                                    <h3 className="text-lg font-medium text-white mb-2">
+                                        No ongoing projects yet
                                     </h3>
-                                    <p className="text-gray-500 dark:text-gray-400 mb-6">
+                                    <p className="text-white/50 mb-6">
                                         Discover projects and join teams
                                     </p>
                                     <Button onClick={() => navigate('/discover')}>
@@ -440,12 +431,12 @@ export default function MyProjects() {
                     {activeTab === 'past' && (
                         <div>
                             {pastProjects.length === 0 ? (
-                                <div className="text-center py-12 bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800">
-                                    <FolderKanban className="h-12 w-12 mx-auto text-gray-400 mb-4" />
-                                    <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
+                                <div className="text-center py-12 rounded-lg border border-white/10 bg-white/5">
+                                    <FolderKanban className="h-12 w-12 mx-auto text-white/30 mb-4" />
+                                    <h3 className="text-lg font-medium text-white mb-2">
                                         No past projects in history
                                     </h3>
-                                    <p className="text-gray-500 dark:text-gray-400 mb-6">
+                                    <p className="text-white/50 mb-6">
                                         Completed projects will be displayed here
                                     </p>
                                 </div>
@@ -459,15 +450,7 @@ export default function MyProjects() {
                         </div>
                     )}
 
-                    {/* Applications Tab */}
-                    {activeTab === 'applications' && (
-                        <div className="text-center py-12 bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800">
-                            <p className="text-gray-500">Applications view - See your profile page for application details</p>
-                            <Button onClick={() => navigate('/profile')} className="mt-4">
-                                View Profile
-                            </Button>
-                        </div>
-                    )}
+
                 </>
             )}
         </DashboardLayout>

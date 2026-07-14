@@ -36,6 +36,7 @@ import {
     type PlatformStats, type UserData, type ProjectData,
     type Announcement, type GrowthDataPoint, type ActivityLog, type ModerationItem
 } from '@/services/adminService'
+import { loadFeedbacks, resolveFeedback, deleteFeedback, type FeedbackData } from '@/services/feedbackService'
 import { useToast } from '@/hooks/use-toast'
 import { getFlagMessage } from '@/services/contentModerationService'
 import { FCMTestPanel } from '@/components/FCMTestPanel'
@@ -262,6 +263,9 @@ export function AdminDashboard() {
     const [activeTab, setActiveTab] = useState('overview')
     const [loading, setLoading] = useState(true)
     const [refreshing, setRefreshing] = useState(false)
+    const [feedbacks, setFeedbacks] = useState<FeedbackData[]>([])
+    const [feedbackFilter, setFeedbackFilter] = useState('all')
+    const [viewingScreenshot, setViewingScreenshot] = useState<string | null>(null)
 
     // Data states
     const [stats, setStats] = useState<PlatformStats | null>(null)
@@ -585,6 +589,23 @@ export function AdminDashboard() {
         loadData()
     }, [])
 
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search)
+        const tab = params.get('tab')
+        if (tab) {
+            setActiveTab(tab)
+        }
+    }, [])
+
+    const loadFeedbacksLocal = async (): Promise<FeedbackData[]> => {
+        try {
+            return await loadFeedbacks()
+        } catch (error) {
+            console.error('Error loading feedbacks:', error)
+            return []
+        }
+    }
+
     // ─── Load all data ────────────────────────────────────
     const loadReports = async (): Promise<Report[]> => {
         try {
@@ -609,7 +630,8 @@ export function AdminDashboard() {
                 growthDataRes,
                 logsData,
                 moderationData,
-                reportsData
+                reportsData,
+                feedbacksData
             ] = await Promise.all([
                 loadPlatformStats(),
                 loadAllUsers(),
@@ -618,7 +640,8 @@ export function AdminDashboard() {
                 loadGrowthData(30),
                 loadAdminLogs(),
                 loadModerationQueue(),
-                loadReports()
+                loadReports(),
+                loadFeedbacksLocal()
             ])
             setStats(statsData)
             setUsers(usersData)
@@ -628,6 +651,7 @@ export function AdminDashboard() {
             setActivityLogs(logsData)
             setModerationQueue(moderationData)
             setReports(reportsData)
+            setFeedbacks(feedbacksData)
         } catch (error) {
             console.error('Error loading admin data:', error)
         } finally {
@@ -1073,6 +1097,20 @@ export function AdminDashboard() {
                                 className="ml-2 h-5 min-w-[20px] px-1"
                             >
                                 {pendingReportsCount}
+                            </Badge>
+                        )}
+                    </TabsTrigger>
+
+                    {/* Feedback & Bugs */}
+                    <TabsTrigger value="feedback" className="relative">
+                        <HelpCircle className="h-4 w-4 mr-2" />
+                        Feedback &amp; Bugs
+                        {feedbacks.filter(f => !f.resolved).length > 0 && (
+                            <Badge
+                                variant="destructive"
+                                className="ml-2 h-5 min-w-[20px] px-1"
+                            >
+                                {feedbacks.filter(f => !f.resolved).length}
                             </Badge>
                         )}
                     </TabsTrigger>
@@ -1545,6 +1583,234 @@ export function AdminDashboard() {
                                                 </CardContent>
                                             </Card>
                                         ))}
+                                    </div>
+                                </ScrollArea>
+                            )}
+                        </CardContent>
+                    </Card>
+                </TabsContent>
+
+                {/* ══════════════════════════════════════════
+                    FEEDBACK & BUGS TAB
+                ══════════════════════════════════════════ */}
+                <TabsContent value="feedback">
+                    <Card className="border-white/10 bg-zinc-900/40 backdrop-blur-xl">
+                        <CardHeader>
+                            <div className="flex justify-between items-center flex-wrap gap-4">
+                                <div>
+                                    <CardTitle className="flex items-center gap-2 text-white">
+                                        <HelpCircle className="h-5 w-5 text-primary" />
+                                        User Feedback &amp; Bug Reports
+                                    </CardTitle>
+                                    <CardDescription className="text-white/60">
+                                        Monitor issues, general feedback, and ideas submitted by users.
+                                    </CardDescription>
+                                </div>
+
+                                {/* Filter & Refresh */}
+                                <div className="flex items-center gap-3">
+                                    <Select
+                                        value={feedbackFilter}
+                                        onValueChange={setFeedbackFilter}
+                                    >
+                                        <SelectTrigger className="w-40 bg-zinc-950/40 border-white/10 text-white">
+                                            <SelectValue placeholder="Filter Status" />
+                                        </SelectTrigger>
+                                        <SelectContent className="bg-zinc-900 border-white/10 text-white">
+                                            <SelectItem value="all">All Feedback</SelectItem>
+                                            <SelectItem value="pending">Pending</SelectItem>
+                                            <SelectItem value="resolved">Resolved</SelectItem>
+                                            <SelectItem value="bug">Bugs Only</SelectItem>
+                                            <SelectItem value="feature_request">Feature Ideas</SelectItem>
+                                            <SelectItem value="feedback">General Only</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            </div>
+                        </CardHeader>
+
+                        <CardContent>
+                            {feedbacks.length === 0 ? (
+                                <div className="text-center py-12">
+                                    <CheckCircle className="h-16 w-16 mx-auto text-green-500 mb-4" />
+                                    <h3 className="text-xl font-semibold mb-2 text-white">All Clean!</h3>
+                                    <p className="text-white/40">No feedbacks or bug reports submitted yet.</p>
+                                </div>
+                            ) : (
+                                <ScrollArea className="h-[600px] pr-2">
+                                    <div className="space-y-4">
+                                        {feedbacks
+                                            .filter(f => {
+                                                if (feedbackFilter === 'pending') return !f.resolved
+                                                if (feedbackFilter === 'resolved') return f.resolved
+                                                if (feedbackFilter === 'bug') return f.type === 'bug'
+                                                if (feedbackFilter === 'feature_request') return f.type === 'feature_request'
+                                                if (feedbackFilter === 'feedback') return f.type === 'feedback'
+                                                return true
+                                            })
+                                            .map((item) => (
+                                                <Card 
+                                                    key={item.id} 
+                                                    className={`border-white/5 bg-white/[0.02] backdrop-blur-md border-l-4 ${
+                                                        item.resolved 
+                                                            ? 'border-l-green-500' 
+                                                            : item.type === 'bug' 
+                                                            ? 'border-l-red-500' 
+                                                            : item.type === 'feature_request'
+                                                            ? 'border-l-violet-500'
+                                                            : 'border-l-amber-500'
+                                                    }`}
+                                                >
+                                                    <CardContent className="p-5 flex flex-col md:flex-row md:items-start justify-between gap-4">
+                                                        <div className="flex-1 space-y-2.5">
+                                                            {/* Type & Status */}
+                                                            <div className="flex items-center gap-2 flex-wrap">
+                                                                <Badge 
+                                                                    className={`capitalize ${
+                                                                        item.type === 'bug' 
+                                                                            ? 'bg-red-500/20 text-red-400 border-red-500/30' 
+                                                                            : item.type === 'feature_request'
+                                                                            ? 'bg-violet-500/20 text-violet-400 border-violet-500/30'
+                                                                            : 'bg-amber-500/20 text-amber-400 border-amber-500/30'
+                                                                    }`}
+                                                                >
+                                                                    {item.type === 'bug' ? 'Bug Report' : item.type === 'feature_request' ? 'Feature Idea' : 'General Feedback'}
+                                                                </Badge>
+                                                                {item.resolved ? (
+                                                                    <Badge className="bg-green-500/20 text-green-400 border-green-500/30">Resolved</Badge>
+                                                                ) : (
+                                                                    <Badge className="bg-zinc-500/20 text-zinc-400 border-zinc-500/30">Pending</Badge>
+                                                                )}
+                                                            </div>
+
+                                                            {/* Message */}
+                                                            <p className="text-sm text-white/90 leading-relaxed whitespace-pre-wrap">
+                                                                {item.message}
+                                                            </p>
+
+                                                            {/* Screenshot Thumbnail */}
+                                                            {item.screenshotURL && (
+                                                                <div className="pt-2">
+                                                                    <div 
+                                                                        onClick={() => setViewingScreenshot(item.screenshotURL!)}
+                                                                        className="relative inline-block group cursor-pointer rounded-lg overflow-hidden border border-white/10 h-20 w-36 bg-cover bg-center"
+                                                                        style={{ backgroundImage: `url(${item.screenshotURL})` }}
+                                                                    >
+                                                                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                                                                            <span className="text-[10px] font-semibold text-white">View Screenshot</span>
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            )}
+
+                                                            {/* Metadata */}
+                                                            <div className="flex items-center gap-3 text-xs text-white/40 flex-wrap">
+                                                                <span>
+                                                                    Submitted by:{' '}
+                                                                    <strong className={item.submittedBy === 'anonymous' ? 'text-white/40 font-normal italic' : 'text-white/60'}>
+                                                                        {item.submittedByName}
+                                                                        {item.submittedByEmail && ` (${item.submittedByEmail})`}
+                                                                    </strong>
+                                                                </span>
+                                                                <span>•</span>
+                                                                <span>{formatTimeAgo(item.createdAt)}</span>
+                                                                {item.resolvedAt && (
+                                                                    <>
+                                                                        <span>•</span>
+                                                                        <span>Resolved {formatTimeAgo(item.resolvedAt)}</span>
+                                                                    </>
+                                                                )}
+                                                            </div>
+                                                        </div>
+
+                                                        {/* Action Buttons */}
+                                                        <div className="flex flex-col gap-2 md:w-36 flex-shrink-0">
+                                                            {!item.resolved ? (
+                                                                <Button
+                                                                    size="sm"
+                                                                    className="bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg h-9 text-xs border-0"
+                                                                    onClick={async () => {
+                                                                        if (!user) return
+                                                                        try {
+                                                                            await resolveFeedback(item.id!, user.uid, true)
+                                                                            setFeedbacks(prev =>
+                                                                                prev.map(f => f.id === item.id ? { ...f, resolved: true } : f)
+                                                                            )
+                                                                            toast({
+                                                                                title: 'Feedback Resolved',
+                                                                                description: 'Marked feedback as resolved.',
+                                                                                variant: 'success'
+                                                                            })
+                                                                        } catch (e) {
+                                                                            console.error(e)
+                                                                            toast({
+                                                                                title: 'Action Failed',
+                                                                                variant: 'destructive'
+                                                                            })
+                                                                        }
+                                                                    }}
+                                                                >
+                                                                    <CheckCircle className="h-3.5 w-3.5 mr-1.5" />
+                                                                    Resolve
+                                                                </Button>
+                                                            ) : (
+                                                                <Button
+                                                                    size="sm"
+                                                                    variant="outline"
+                                                                    className="border-white/10 text-white hover:bg-white/5 font-semibold rounded-lg h-9 text-xs"
+                                                                    onClick={async () => {
+                                                                        if (!user) return
+                                                                        try {
+                                                                            await resolveFeedback(item.id!, user.uid, false)
+                                                                            setFeedbacks(prev =>
+                                                                                prev.map(f => f.id === item.id ? { ...f, resolved: false } : f)
+                                                                            )
+                                                                            toast({
+                                                                                title: 'Feedback Reopened',
+                                                                                description: 'Reopened the feedback report.',
+                                                                            })
+                                                                        } catch (e) {
+                                                                            console.error(e)
+                                                                            toast({
+                                                                                title: 'Action Failed',
+                                                                                variant: 'destructive'
+                                                                            })
+                                                                        }
+                                                                    }}
+                                                                >
+                                                                    Reopen
+                                                                </Button>
+                                                            )}
+                                                            <Button
+                                                                size="sm"
+                                                                variant="destructive"
+                                                                className="bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 hover:border-red-500/30 font-semibold rounded-lg h-9 text-xs mt-1"
+                                                                onClick={async () => {
+                                                                    if (!window.confirm('Are you sure you want to permanently delete this report and its screenshot?')) return
+                                                                    try {
+                                                                        await deleteFeedback(item.id!, item.screenshotURL)
+                                                                        setFeedbacks(prev => prev.filter(f => f.id !== item.id))
+                                                                        toast({
+                                                                            title: 'Feedback Deleted',
+                                                                            description: 'The report and its screenshot were deleted permanently.',
+                                                                            variant: 'success'
+                                                                        })
+                                                                    } catch (e) {
+                                                                        console.error(e)
+                                                                        toast({
+                                                                            title: 'Delete Failed',
+                                                                            variant: 'destructive'
+                                                                        })
+                                                                    }
+                                                                }}
+                                                            >
+                                                                <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+                                                                Delete Report
+                                                            </Button>
+                                                        </div>
+                                                    </CardContent>
+                                                </Card>
+                                            ))}
                                     </div>
                                 </ScrollArea>
                             )}
@@ -2791,6 +3057,24 @@ export function AdminDashboard() {
                             Delete
                         </Button>
                     </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Screenshot Dialog */}
+            <Dialog open={!!viewingScreenshot} onOpenChange={(open) => !open && setViewingScreenshot(null)}>
+                <DialogContent className="max-w-4xl p-2 bg-zinc-950 border-white/10">
+                    <DialogHeader className="p-2 flex-row justify-between items-center border-b border-white/5">
+                        <DialogTitle className="text-white text-sm font-semibold">Screenshot Attachment</DialogTitle>
+                    </DialogHeader>
+                    {viewingScreenshot && (
+                        <div className="w-full flex items-center justify-center p-1 rounded-lg overflow-hidden border border-white/5 bg-black">
+                            <img 
+                                src={viewingScreenshot} 
+                                alt="Feedback Attachment" 
+                                className="max-h-[70vh] w-auto object-contain rounded"
+                            />
+                        </div>
+                    )}
                 </DialogContent>
             </Dialog>
         </DashboardLayout>

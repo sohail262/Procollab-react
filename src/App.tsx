@@ -32,6 +32,7 @@ const Notifications = lazy(() => import('@/pages/Notifications').then(module => 
 const PublicProjectShowcase = lazy(() => import('@/pages/PublicProjectShowcase'))
 const PublicProfile = lazy(() => import('@/pages/PublicProfile'))
 const PublicProject = lazy(() => import('@/pages/PublicProject'))
+const Feedback = lazy(() => import('@/pages/Feedback'))
 // PageLoader uses the statically-imported LoadingScreen — zero blank-screen flash
 const PageLoader = () => <LoadingScreen />
 
@@ -91,6 +92,16 @@ function AppRoutes() {
                 <ErrorBoundary>
                   <ProtectedRoute>
                     <Applications />
+                  </ProtectedRoute>
+                </ErrorBoundary>
+              }
+            />
+            <Route
+              path="/feedback"
+              element={
+                <ErrorBoundary>
+                  <ProtectedRoute>
+                    <Feedback />
                   </ProtectedRoute>
                 </ErrorBoundary>
               }

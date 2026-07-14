@@ -36,6 +36,7 @@ import {
     cleanupForegroundMessaging,
 } from '@/services/fcmService'
 import { trackSessionStart } from '@/services/analyticsService'
+import { LoadingScreen } from '@/components/LoadingScreen'
 
 // ─────────────────────────────────────────────────────────
 // Types
@@ -76,7 +77,7 @@ const SESSION_EXTENSION_CHECK = 5 * 60 * 1000     // 5 minutes
 // Context
 // ─────────────────────────────────────────────────────────
 
-const AuthContext = createContext<AuthContextType | undefined>(undefined)
+export const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
 export function useAuth() {
     const context = useContext(AuthContext)
@@ -166,44 +167,63 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
             try {
                 if (firebaseUser) {
-                    const userDocRef = doc(db, 'users', firebaseUser.uid)
-                    const userDoc = await getDoc(userDocRef)
+                    const cacheKey = `user_verified_${firebaseUser.uid}`
+                    const isVerified = localStorage.getItem(cacheKey) === 'true'
 
-                    if (!userDoc.exists()) {
-                        // Create minimal user document for OAuth users
-                        const isSohail = firebaseUser.email?.toLowerCase() === 'mohd26sohail@gmail.com'
-                        await setDoc(userDocRef, {
-                            uid: firebaseUser.uid,
-                            email: firebaseUser.email,
-                            displayName: firebaseUser.displayName,
-                            photoURL: firebaseUser.photoURL,
-                            createdAt: serverTimestamp(),
-                            lastLogin: serverTimestamp(),
-                            lastActivity: serverTimestamp(),
-                            sessionExtended: serverTimestamp(),
-                            firstName: '',
-                            lastName: '',
-                            discipline: '',
-                            role: isSohail ? 'admin' : '',
-                            skills: [],
-                            bio: '',
-                            activated: false,
-                            lastCollaboratedAt: null,
-                        })
+                    if (!isVerified) {
+                        const userDocRef = doc(db, 'users', firebaseUser.uid)
+                        const userDoc = await getDoc(userDocRef)
+
+                        if (!userDoc.exists()) {
+                            // Create minimal user document for OAuth users
+                            const isSohail = firebaseUser.email?.toLowerCase() === 'mohd26sohail@gmail.com'
+                            await setDoc(userDocRef, {
+                                uid: firebaseUser.uid,
+                                email: firebaseUser.email,
+                                displayName: firebaseUser.displayName,
+                                photoURL: firebaseUser.photoURL,
+                                createdAt: serverTimestamp(),
+                                lastLogin: serverTimestamp(),
+                                lastActivity: serverTimestamp(),
+                                sessionExtended: serverTimestamp(),
+                                firstName: '',
+                                lastName: '',
+                                discipline: '',
+                                role: isSohail ? 'admin' : '',
+                                skills: [],
+                                bio: '',
+                                activated: false,
+                                lastCollaboratedAt: null,
+                            })
+                        } else {
+                            const isSohail = firebaseUser.email?.toLowerCase() === 'mohd26sohail@gmail.com'
+                            setDoc(
+                                userDocRef,
+                                {
+                                    lastLogin: serverTimestamp(),
+                                    lastActivity: serverTimestamp(),
+                                    sessionExtended: serverTimestamp(),
+                                    ...(isSohail && userDoc.data()?.role !== 'admin' ? { role: 'admin' } : {})
+                                },
+                                { merge: true }
+                            ).catch(err => console.error('Failed to update login stats in bg:', err))
+                        }
+                        try {
+                            localStorage.setItem(cacheKey, 'true')
+                        } catch { /* storage full / private browsing */ }
                     } else {
-                        const isSohail = firebaseUser.email?.toLowerCase() === 'mohd26sohail@gmail.com'
-                        await setDoc(
+                        // Returning user — update login activity silently in background
+                        const userDocRef = doc(db, 'users', firebaseUser.uid)
+                        setDoc(
                             userDocRef,
                             {
                                 lastLogin: serverTimestamp(),
                                 lastActivity: serverTimestamp(),
                                 sessionExtended: serverTimestamp(),
-                                ...(isSohail && userDoc.data()?.role !== 'admin' ? { role: 'admin' } : {})
                             },
                             { merge: true }
-                        )
+                        ).catch(err => console.error('Failed to update login stats in bg:', err))
                     }
-
 
                     // Track session start for retention analytics
                     trackSessionStart(firebaseUser.uid)
@@ -540,7 +560,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     return (
         <AuthContext.Provider value={value}>
-            {!loading && children}
+            {loading ? <LoadingScreen /> : children}
         </AuthContext.Provider>
     )
 }

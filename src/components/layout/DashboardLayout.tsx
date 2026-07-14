@@ -20,7 +20,9 @@ import {
     X,
     Compass,
     Grid3x3,
-    Shield
+    Shield,
+    Sparkles,
+    MessageSquare
 } from 'lucide-react'
 import { useState, useEffect, useRef } from 'react'
 import { doc, onSnapshot, collection, query, orderBy, limit, getDocs } from 'firebase/firestore'
@@ -307,8 +309,45 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                         </ul>
                     </div>
 
+                    {/* Feedback Prompt Card at the bottom of the sidebar */}
+                    <div className="px-4 py-4 mx-3 my-2 rounded-xl border border-white/5 bg-white/[0.02] backdrop-blur-md hidden lg:block">
+                        <div className="flex items-center gap-2 mb-2 text-primary">
+                            <MessageSquare className="h-4 w-4" />
+                            <h4 className="text-xs font-semibold text-white">Found a Bug?</h4>
+                        </div>
+                        <p className="text-[10px] text-white/50 mb-3 leading-relaxed">
+                            Help us improve ProCollab by reporting bugs or sharing your feature ideas.
+                        </p>
+                        <Button
+                            onClick={() => {
+                                setSidebarOpen(false)
+                                navigate('/feedback')
+                            }}
+                            size="sm"
+                            className="w-full h-8 text-[11px] font-medium bg-white/5 border border-white/10 hover:bg-white/10 text-white/80 hover:text-white rounded-lg transition-all"
+                        >
+                            Give Feedback
+                        </Button>
+                    </div>
+
                     {/* Logout — mobile sidebar only (fixed at bottom, non-scrollable) */}
                     <div className="px-3 pt-3 mt-2 border-t border-border/30 lg:hidden">
+                        {/* Mobile feedback entry (same style) */}
+                        <div className="px-3 py-3 mb-3 rounded-lg bg-white/[0.02] border border-white/5">
+                            <p className="text-[10px] text-white/50 mb-2 leading-relaxed">
+                                Help us improve by reporting bugs or sharing ideas.
+                            </p>
+                            <Button
+                                onClick={() => {
+                                    setSidebarOpen(false)
+                                    navigate('/feedback')
+                                }}
+                                size="sm"
+                                className="w-full h-7 text-[10px] font-medium bg-white/5 border border-white/10 hover:bg-white/10 text-white rounded-lg"
+                            >
+                                Give Feedback
+                            </Button>
+                        </div>
                         <button
                             onClick={handleLogout}
                             className="w-full flex items-center px-3 py-2.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-all duration-200"

@@ -49,26 +49,15 @@ export function LoadingScreen({ done = false, onExited }: LoadingScreenProps) {
     >
       {/* Brand mark — matches WelcomeScreen typography */}
       <div style={{ marginBottom: '2.5rem', display: 'flex', alignItems: 'center', gap: '0.625rem' }}>
-        <div
+        <img
+          src="/images/logo_pc.png"
+          alt="ProCollab Logo"
           style={{
             width: 30,
             height: 30,
-            borderRadius: 8,
-            background: 'hsl(var(--foreground))',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
+            objectFit: 'contain',
           }}
-        >
-          <span style={{
-            fontFamily: "'Plus Jakarta Sans', system-ui, sans-serif",
-            fontSize: 15,
-            fontWeight: 700,
-            color: 'hsl(var(--background))',
-            lineHeight: 1,
-            marginTop: 1,
-          }}>P</span>
-        </div>
+        />
         <span style={{
           fontSize: 11,
           fontWeight: 400,

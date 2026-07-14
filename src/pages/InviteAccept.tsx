@@ -28,6 +28,7 @@ type Step =
     | 'done'
     | 'error'
     | 'expired'
+    | 'already-joined'
 
 interface InviteData {
     id:               string
@@ -42,6 +43,8 @@ interface InviteData {
     resolvedUserId?:  string
     status:           string
     createdAt:        any
+    acceptedBy?:      string
+    acceptedAt?:      any
 }
 
 interface ProjectData {
@@ -118,15 +121,26 @@ export default function InviteAccept() {
 
             const data = tokenSnap.data() as Omit<InviteData, 'id'>
 
-            // Expiry check — 72 hours
+            // Expiry check — 7 days
             const createdAt  = data.createdAt?.toDate() ?? new Date(0)
             const hoursOld   = (Date.now() - createdAt.getTime()) / 36e5
             const isConsumed =
-                data.status === 'accepted' ||
                 data.status === 'declined'  ||
                 data.status === 'cancelled'
 
-            if (hoursOld > 72 || isConsumed) {
+            // If accepted by this user, show a friendly 'already joined' screen
+            if (data.status === 'accepted') {
+                const invite: InviteData = { id: tokenSnap.id, ...data }
+                setInviteData(invite)
+                if (user && data.acceptedBy === user.uid) {
+                    setStep('already-joined')
+                } else {
+                    setStep('expired')
+                }
+                return
+            }
+
+            if (hoursOld > 168 || isConsumed) {
                 setStep('expired')
                 return
             }
@@ -260,6 +274,34 @@ export default function InviteAccept() {
 
     if (step === 'accepting') {
         return <FullPageSpinner message="Joining project…" />
+    }
+
+    if (step === 'already-joined') {
+        return (
+            <FullPageCard>
+                <div className="w-16 h-16 rounded-full bg-green-100 dark:bg-green-900/20 flex items-center justify-center mx-auto">
+                    <CheckCircle className="h-8 w-8 text-green-500" />
+                </div>
+                <h2 className="text-xl font-bold text-center">Already a Member!</h2>
+                <p className="text-muted-foreground text-sm text-center leading-relaxed">
+                    You've already joined{' '}
+                    <strong className="text-foreground">{inviteData?.projectTitle}</strong>.
+                    <br />Head to your project dashboard to get started.
+                </p>
+                <div className="flex flex-col gap-2 w-full pt-2">
+                    <Button
+                        className="w-full"
+                        onClick={() => navigate(`/dashboard/projects/${inviteData?.projectId}`)}
+                    >
+                        <FolderKanban className="h-4 w-4 mr-2" />
+                        Go to Project Dashboard
+                    </Button>
+                    <Button variant="outline" className="w-full" onClick={() => navigate('/dashboard/projects')}>
+                        My Projects
+                    </Button>
+                </div>
+            </FullPageCard>
+        )
     }
 
     if (step === 'expired') {

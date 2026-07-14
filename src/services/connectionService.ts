@@ -7,7 +7,7 @@ import {
     collection,
 } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
-import { cachedGetDoc } from '@/lib/queryUtils'
+import { cachedGetDoc, clearCache } from '@/lib/queryUtils'
 import {
     buildConnectionAcceptedNotif,
     buildConnectionRejectedNotif,
@@ -50,6 +50,15 @@ export async function getConnectionStatus(
     if (outSnap.exists())    return 'pending_out'
     if (inSnap.exists())     return 'pending_in'
     return 'none'
+}
+
+/**
+ * Bust cached connection-related docs for two users.
+ * Call this after any write that changes connection state.
+ */
+function bustConnectionCache(uidA: string, uidB: string) {
+    clearCache(uidA)
+    clearCache(uidB)
 }
 
 // ─── Send ─────────────────────────────────────────────────────────────────────
@@ -173,6 +182,9 @@ export async function acceptConnectionRequest(
 
     await batch.commit()
 
+    // Bust stale cached reads so UI updates immediately
+    bustConnectionCache(receiverUid, senderUid)
+
     // Track analytics
     trackConnectionAccepted(receiverUid, senderUid)
 
@@ -212,6 +224,9 @@ export async function rejectConnectionRequest(
     batch.delete(doc(db, 'users', senderUid, 'sentRequests', receiverUid))
     await batch.commit()
 
+    // Bust stale cached reads so UI updates immediately
+    bustConnectionCache(receiverUid, senderUid)
+
     // ✅ Send in-app + push notification to sender
     await sendNotificationWithPush(
         senderUid,
@@ -243,6 +258,9 @@ export async function withdrawConnectionRequest(
     // ⚡ FIX: Clean up the sender's sentRequests mirror on withdraw
     batch.delete(doc(db, 'users', senderUid, 'sentRequests', targetUserId))
     await batch.commit()
+
+    // Bust stale cached reads so UI updates immediately
+    bustConnectionCache(senderUid, targetUserId)
 
     // ✅ Send in-app + push notification to target
     await sendNotificationWithPush(
