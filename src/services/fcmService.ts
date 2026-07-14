@@ -51,7 +51,7 @@ const VAPID_KEY =
     import.meta.env.VITE_FIREBASE_VAPID_KEY ||
     'BOhnhTBouqFbYv78EDTBCU6AUdhN_DGnXb3xzJ9BlhPOD3LWOQVaDz4-CmodBfIcfy6IHWyeUR5GBH9VvfCR1oA'
 
-const SW_PATH = '/firebase-messaging-sw.js'
+const SW_PATH = '/sw.js'
 const TOKEN_REFRESH_INTERVAL = 7 * 24 * 60 * 60 * 1000 // 7 days in ms
 const MAX_TOKENS_PER_USER = 5
 const SW_ACTIVATION_TIMEOUT = 10_000 // 10 seconds
@@ -128,9 +128,9 @@ export async function getServiceWorkerRegistration(): Promise<ServiceWorkerRegis
         const registrations = await navigator.serviceWorker.getRegistrations()
         const existing = registrations.find(
             (r) =>
-                r.active?.scriptURL.includes('firebase-messaging-sw.js') ||
-                r.installing?.scriptURL.includes('firebase-messaging-sw.js') ||
-                r.waiting?.scriptURL.includes('firebase-messaging-sw.js')
+                r.active?.scriptURL.includes('sw.js') ||
+                r.installing?.scriptURL.includes('sw.js') ||
+                r.waiting?.scriptURL.includes('sw.js')
         )
 
         if (existing) {

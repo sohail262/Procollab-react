@@ -156,7 +156,7 @@ export function SEOHead({
             <meta name="twitter:image" content={image} />
 
             {/* ── Mobile / PWA ─────────────────────────────────── */}
-            <meta name="theme-color" content="#6366f1" />
+            <meta name="theme-color" content="#000000" />
             <meta name="application-name" content={SITE_NAME} />
             <meta name="apple-mobile-web-app-title" content={SITE_NAME} />
             <meta name="apple-mobile-web-app-capable" content="yes" />
