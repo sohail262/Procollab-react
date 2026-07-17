@@ -17,6 +17,7 @@ import {
     GithubAuthProvider,
     signInWithPopup,
     updateProfile,
+    sendPasswordResetEmail,
 } from 'firebase/auth'
 import {
     doc,
@@ -55,6 +56,7 @@ interface AuthContextType {
     loginWithGoogle: (isSignUp?: boolean) => Promise<void>
     loginWithGithub: (isSignUp?: boolean) => Promise<void>
     refreshUser: () => Promise<void>
+    sendPasswordReset: (email: string) => Promise<void>
 }
 
 interface UserData {
@@ -545,6 +547,16 @@ export function AuthProvider({ children }: AuthProviderProps) {
         }
     }
 
+    const sendPasswordReset = async (email: string) => {
+        try {
+            await sendPasswordResetEmail(auth, email)
+            console.log('✅ Password reset email sent to:', email)
+        } catch (error: any) {
+            console.error('❌ Password reset error:', error)
+            throw new Error(getAuthErrorMessage(error.code || error.message))
+        }
+    }
+
     // ─── Context Value ────────────────────────────────────
 
     const value: AuthContextType = {
@@ -556,6 +568,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
         loginWithGoogle,
         loginWithGithub,
         refreshUser,
+        sendPasswordReset,
     }
 
     return (
@@ -593,7 +606,11 @@ function getAuthErrorMessage(errorCode: string): string {
             return 'Sign-in popup was closed. Please try again.'
         case 'auth/cancelled-popup-request':
             return 'Only one popup request is allowed at a time.'
+        case 'auth/account-exists-with-different-credential':
+            return 'An account already exists with the same email address but different sign-in credentials. Please sign in using your original provider (e.g., Google or Email).'
+        case 'auth/unauthorized-domain':
+            return 'This domain is not authorized for authentication. Please add your domain to the Authorized Domains list in the Firebase console (Authentication > Settings > Authorized domains).'
         default:
-            return 'An error occurred. Please try again.'
+            return errorCode ? `An error occurred (${errorCode}). Please try again.` : 'An error occurred. Please try again.'
     }
 }

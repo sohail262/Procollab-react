@@ -109,6 +109,9 @@ export async function sendConnectionRequest(
 
     await batch.commit()
 
+    // Bust stale cached reads so UI updates immediately
+    bustConnectionCache(senderUid, targetUid)
+
     // Track analytics
     trackConnectionSent(senderUid, targetUid)
 
@@ -134,6 +137,9 @@ export async function updateConnectionRequestNote(
         { message }
     )
     await batch.commit()
+
+    // Bust stale cached reads so UI updates immediately
+    bustConnectionCache(senderUid, targetUid)
 }
 
 // ─── Accept ───────────────────────────────────────────────────────────────────
@@ -279,4 +285,7 @@ export async function removeConnection(
     batch.delete(doc(db, 'users', myUid, 'friends', otherUid))
     batch.delete(doc(db, 'users', otherUid, 'friends', myUid))
     await batch.commit()
+
+    // Bust stale cached reads so UI updates immediately
+    bustConnectionCache(myUid, otherUid)
 }

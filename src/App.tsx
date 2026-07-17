@@ -14,6 +14,7 @@ const InviteAccept = lazy(() => import('@/pages/InviteAccept'))
 const Landing = lazy(() => import('@/pages/Landing').then(module => ({ default: module.Landing })))
 const Login = lazy(() => import('@/pages/Login').then(module => ({ default: module.Login })))
 const Register = lazy(() => import('@/pages/Register').then(module => ({ default: module.Register })))
+const ForgotPassword = lazy(() => import('@/pages/ForgotPassword').then(module => ({ default: module.ForgotPassword })))
 const Dashboard = lazy(() => import('@/pages/Dashboard').then(module => ({ default: module.Dashboard })))
 const Discover = lazy(() => import('@/pages/Discover').then(module => ({ default: module.Discover })))
 const Projects = lazy(() => import('@/pages/Projects').then(module => ({ default: module.Projects })))
@@ -45,6 +46,7 @@ function AppRoutes() {
               <Route path="/" element={<Landing />} />
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Register />} />
+              <Route path="/forgot-password" element={<ForgotPassword />} />
               <Route path="/invite" element={<InviteAccept />} />
               <Route path="/project/public/:projectId" element={<PublicProjectShowcase />} />
               <Route path="/u/:username" element={<Profile />} />

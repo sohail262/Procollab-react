@@ -234,15 +234,17 @@ export default function PublicProfile() {
         if (!profileUser) return
 
         setIsConnecting(true)
+        const prevStatus = connectionState
+        setConnectionState('pending_out') // Optimistic update
         try {
             await sendConnectionRequest(auth.currentUser.uid, profileUser.id)
-            setConnectionState('pending_out')
             toast({
                 title: 'Request Sent',
                 description: `Connection request sent to ${profileUser.displayName || 'user'}.`,
                 variant: 'success'
             })
         } catch (err) {
+            setConnectionState(prevStatus) // Revert on error
             console.error('Failed to send connection request:', err)
             toast({
                 title: 'Request Failed',

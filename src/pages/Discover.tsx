@@ -294,33 +294,9 @@ export function Discover() {
     }
 
     const loadInitialData = async () => {
-        // ── FIX 3: Try sessionStorage cache first for instant revisit ──────────
-        const now = Date.now()
-        try {
-            const raw = sessionStorage.getItem(SS_USERS_KEY)
-            if (raw) {
-                const { items, hasMore, ts } = JSON.parse(raw)
-                if (now - ts < SS_USERS_TTL && Array.isArray(items) && items.length > 0) {
-                    // Serve from cache — no spinner needed
-                    peopleActions.setItems(items)
-                    peopleActions.setHasMore(hasMore)
-                    setLoading(false)
-                    // Still refresh connection statuses in background (cheap: 3 queries)
-                    checkConnectionStatuses()
-                    // Also kick off topics in background
-                    loadTrendingTopics().then(topics => {
-                        topicsActions.setItems(topics.slice(0, 9))
-                        topicsActions.setHasMore(topics.length > 9)
-                        if (topics.length > 9) topicsActions.addItems([], { id: '9' } as any)
-                    }).catch(() => {})
-                    return
-                }
-            }
-        } catch { /* sessionStorage unavailable — proceed normally */ }
-
         setLoading(true)
         try {
-            // ── FIX 1: Load people FIRST, clear spinner, then load topics in background ──
+            // ── Load people FIRST, clear spinner, then load topics in background ──
             const peopleResult = await loadPaginatedUsers()
 
             peopleActions.setItems(peopleResult.items)
@@ -329,22 +305,13 @@ export function Discover() {
                 peopleActions.addItems([], peopleResult.lastDoc as any)
             }
 
-            // ── FIX 3: Persist first page to sessionStorage ───────────────────
-            try {
-                sessionStorage.setItem(SS_USERS_KEY, JSON.stringify({
-                    items: peopleResult.items,
-                    hasMore: peopleResult.hasMore,
-                    ts: Date.now()
-                }))
-            } catch { /* quota exceeded — ignore */ }
-
             // Spinner can go away as soon as we have people data
             setLoading(false)
 
-            // ── FIX 2: Run connection status check (now 3 queries, not N+1) ──
+            // ── Run connection status check (now 3 queries, not N+1) ──
             checkConnectionStatuses()
 
-            // ── FIX 1: Load topics in background — doesn't block people display ──
+            // ── Load topics in background — doesn't block people display ──
             loadTrendingTopics().then(topics => {
                 const initialTopics = topics.slice(0, 9)
                 topicsActions.setItems(initialTopics)
@@ -615,9 +582,11 @@ export function Discover() {
     const handleConnect = async (userId: string) => {
         if (!auth.currentUser) return
         try {
+            // Optimistic update
+            setOutgoingPendingIds(prev => new Set([...prev, userId]))
+
             // ✅ Centralized service — handles guard, write, and notification
             await sendConnectionRequest(auth.currentUser.uid, userId)
-            setOutgoingPendingIds(prev => new Set([...prev, userId]))
 
             // Brief "sent" animation
             setFadingUsers(prev => new Set([...prev, userId]))
@@ -631,6 +600,12 @@ export function Discover() {
 
             toast({ title: 'Request sent', description: 'They will be notified.' })
         } catch (error) {
+            // Revert optimistic update on error
+            setOutgoingPendingIds(prev => {
+                const next = new Set(prev)
+                next.delete(userId)
+                return next
+            })
             console.error('Error sending connection request:', error)
             toast({ title: 'Could not send request', variant: 'destructive' })
         }
@@ -639,14 +614,17 @@ export function Discover() {
     const handleDisconnect = async (userId: string) => {
         if (!auth.currentUser) return
         try {
-            await removeConnection(auth.currentUser.uid, userId)
+            // Optimistic update
             setFriendIds(prev => {
                 const next = new Set(prev)
                 next.delete(userId)
                 return next
             })
+            await removeConnection(auth.currentUser.uid, userId)
             toast({ title: 'Connection removed' })
         } catch (error) {
+            // Revert optimistic update on error
+            setFriendIds(prev => new Set([...prev, userId]))
             console.error('Error removing connection:', error)
             toast({ title: 'Could not remove connection', variant: 'destructive' })
         }

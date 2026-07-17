@@ -166,18 +166,18 @@ export function ApplicationModal({ isOpen, onClose, onSuccess, project }: Applic
     }
 
     return (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
-            <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200 dark:border-gray-800 max-w-md w-full max-h-[90vh] overflow-y-auto">
+        <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
+            <div className="bg-background/95 backdrop-blur-lg rounded-2xl shadow-2xl border border-white/10 max-w-md w-full max-h-[90vh] overflow-y-auto text-white">
 
                 {/* Header */}
-                <div className="p-5 border-b dark:border-gray-800 flex justify-between items-start sticky top-0 bg-white dark:bg-gray-900 z-10 rounded-t-2xl">
+                <div className="p-5 border-b border-white/10 flex justify-between items-start sticky top-0 bg-background/90 backdrop-blur-md z-10 rounded-t-2xl">
                     <div>
-                        <h2 className="text-lg font-bold text-gray-900 dark:text-white">Apply to Join</h2>
-                        <p className="text-sm text-gray-500 mt-0.5 line-clamp-1">{project.title}</p>
+                        <h2 className="text-lg font-bold text-white">Apply to Join</h2>
+                        <p className="text-sm text-white/60 mt-0.5 line-clamp-1">{project.title}</p>
                     </div>
                     <button
                         onClick={onClose}
-                        className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors mt-0.5"
+                        className="text-white/40 hover:text-white/80 transition-colors mt-0.5"
                     >
                         <X className="h-5 w-5" />
                     </button>
@@ -187,55 +187,55 @@ export function ApplicationModal({ isOpen, onClose, onSuccess, project }: Applic
                     <form onSubmit={handleSubmit} className="space-y-4">
 
                         {/* Express Apply Banner */}
-                        <div className="flex items-start gap-2.5 p-3 rounded-xl bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800">
-                            <Zap className="h-4 w-4 text-indigo-500 mt-0.5 shrink-0" />
+                        <div className="flex items-start gap-2.5 p-3 rounded-xl bg-primary/10 border border-primary/20">
+                            <Zap className="h-4 w-4 text-primary mt-0.5 shrink-0" />
                             <div className="flex-1 min-w-0">
-                                <p className="text-xs font-semibold text-indigo-800 dark:text-indigo-300">
+                                <p className="text-xs font-semibold text-primary">
                                     Express Apply — Pre-filled from your profile
                                 </p>
                                 {profileLoading ? (
-                                    <p className="text-xs text-indigo-500 mt-0.5">Loading your profile…</p>
+                                    <p className="text-xs text-primary/70 mt-0.5 animate-pulse">Loading your profile…</p>
                                 ) : userProfile ? (
                                     <div className="flex items-center gap-1.5 mt-1">
-                                        <div className="w-5 h-5 rounded-full overflow-hidden bg-indigo-200 shrink-0">
+                                        <div className="w-5 h-5 rounded-full overflow-hidden bg-primary/20 shrink-0">
                                             {userProfile.photoURL ? (
                                                 <img src={userProfile.photoURL} alt="" className="w-full h-full object-cover" />
                                             ) : (
-                                                <User className="h-3 w-3 text-indigo-500 m-1" />
+                                                <User className="h-3 w-3 text-primary m-1" />
                                             )}
                                         </div>
-                                        <p className="text-xs text-indigo-600 dark:text-indigo-400 truncate">
+                                        <p className="text-xs text-primary/80 truncate">
                                             {`${userProfile.firstName || ''} ${userProfile.lastName || ''}`.trim() || 'Your profile'} · Skills pre-filled
                                         </p>
                                     </div>
                                 ) : (
-                                    <p className="text-xs text-indigo-500 mt-0.5">Complete your profile for faster applications</p>
+                                    <p className="text-xs text-primary/70 mt-0.5">Complete your profile for faster applications</p>
                                 )}
                             </div>
                         </div>
 
                         {/* Position — the one required field */}
                         <div>
-                            <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
+                            <label className="block text-sm font-semibold text-white/80 mb-1.5">
                                 Role you're applying for *
                             </label>
                             {hasOpenRoles ? (
                                 <select
                                     required
-                                    className="w-full px-3 py-2.5 border border-gray-300 dark:border-gray-700 rounded-xl bg-white dark:bg-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+                                    className="w-full px-3 py-2.5 border border-white/10 bg-white/5 rounded-xl text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary/35 focus:border-transparent transition-all"
                                     value={formData.position}
                                     onChange={e => setFormData({ ...formData, position: e.target.value })}
                                 >
-                                    <option value="">Select a role…</option>
+                                    <option value="" className="bg-[#0f0f12] text-white">Select a role…</option>
                                     {project.openRoles!.map((role, index) => (
-                                        <option key={index} value={role}>{role}</option>
+                                        <option key={index} value={role} className="bg-[#0f0f12] text-white">{role}</option>
                                     ))}
                                 </select>
                             ) : (
                                 <input
                                     required
                                     type="text"
-                                    className="w-full px-3 py-2.5 border border-gray-300 dark:border-gray-700 rounded-xl bg-white dark:bg-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+                                    className="w-full px-3 py-2.5 border border-white/10 bg-white/5 rounded-xl text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary/35 focus:border-transparent transition-all"
                                     placeholder="e.g. Frontend Developer, UI Designer…"
                                     value={formData.position}
                                     onChange={e => setFormData({ ...formData, position: e.target.value })}
@@ -245,17 +245,17 @@ export function ApplicationModal({ isOpen, onClose, onSuccess, project }: Applic
 
                         {/* Optional quick message */}
                         <div>
-                            <label className="flex items-center gap-1.5 text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1.5">
-                                <MessageSquare className="h-3.5 w-3.5 text-gray-400" />
+                            <label className="flex items-center gap-1.5 text-sm font-semibold text-white/80 mb-1.5">
+                                <MessageSquare className="h-3.5 w-3.5 text-white/40" />
                                 Quick message
-                                <span className="text-xs font-normal text-gray-400">(optional)</span>
+                                <span className="text-xs font-normal text-white/40">(optional)</span>
                             </label>
                             <Textarea
                                 rows={2}
                                 placeholder="Anything you'd like the team to know upfront…"
                                 value={formData.customMessage}
                                 onChange={e => setFormData({ ...formData, customMessage: e.target.value })}
-                                className="resize-none text-sm rounded-xl"
+                                className="resize-none text-sm rounded-xl border-white/10 bg-white/5 focus-visible:ring-primary/30 focus:border-primary/50 text-white"
                             />
                         </div>
 
@@ -263,7 +263,7 @@ export function ApplicationModal({ isOpen, onClose, onSuccess, project }: Applic
                         <button
                             type="button"
                             onClick={() => setShowDetailed(v => !v)}
-                            className="w-full flex items-center justify-between py-2.5 px-3 rounded-xl border border-dashed border-gray-300 dark:border-gray-700 text-sm text-gray-500 dark:text-gray-400 hover:border-gray-400 dark:hover:border-gray-600 hover:text-gray-700 dark:hover:text-gray-300 transition-all"
+                            className="w-full flex items-center justify-between py-2.5 px-3 rounded-xl border border-dashed border-white/15 text-sm text-white/60 hover:border-white/30 hover:text-white hover:bg-white/3 transition-all"
                         >
                             <span className="flex items-center gap-2">
                                 <FileText className="h-3.5 w-3.5" />
@@ -277,10 +277,10 @@ export function ApplicationModal({ isOpen, onClose, onSuccess, project }: Applic
 
                                 {/* Skills — pre-filled */}
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                                    <label className="block text-sm font-medium text-white/80 mb-1.5">
                                         Relevant Skills
                                         {userProfile && formData.skills && (
-                                            <span className="ml-2 text-xs text-indigo-500 font-normal">· pre-filled from profile</span>
+                                            <span className="ml-2 text-xs text-primary font-normal">· pre-filled from profile</span>
                                         )}
                                     </label>
                                     <Textarea
@@ -288,16 +288,16 @@ export function ApplicationModal({ isOpen, onClose, onSuccess, project }: Applic
                                         placeholder="List your relevant skills for this role…"
                                         value={formData.skills}
                                         onChange={e => setFormData({ ...formData, skills: e.target.value })}
-                                        className="resize-none text-sm rounded-xl"
+                                        className="resize-none text-sm rounded-xl border-white/10 bg-white/5 focus-visible:ring-primary/30 focus:border-primary/50 text-white"
                                     />
                                 </div>
 
                                 {/* Experience — pre-filled from bio */}
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                                    <label className="block text-sm font-medium text-white/80 mb-1.5">
                                         Experience
                                         {userProfile?.bio && (
-                                            <span className="ml-2 text-xs text-indigo-500 font-normal">· pre-filled from bio</span>
+                                            <span className="ml-2 text-xs text-primary font-normal">· pre-filled from bio</span>
                                         )}
                                     </label>
                                     <Textarea
@@ -305,13 +305,13 @@ export function ApplicationModal({ isOpen, onClose, onSuccess, project }: Applic
                                         placeholder="Briefly describe your relevant experience…"
                                         value={formData.experience}
                                         onChange={e => setFormData({ ...formData, experience: e.target.value })}
-                                        className="resize-none text-sm rounded-xl"
+                                        className="resize-none text-sm rounded-xl border-white/10 bg-white/5 focus-visible:ring-primary/30 focus:border-primary/50 text-white"
                                     />
                                 </div>
 
                                 {/* Motivation */}
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                                    <label className="block text-sm font-medium text-white/80 mb-1.5">
                                         Why do you want to join?
                                     </label>
                                     <Textarea
@@ -319,45 +319,45 @@ export function ApplicationModal({ isOpen, onClose, onSuccess, project }: Applic
                                         placeholder="What excites you about this project?"
                                         value={formData.motivation}
                                         onChange={e => setFormData({ ...formData, motivation: e.target.value })}
-                                        className="resize-none text-sm rounded-xl"
+                                        className="resize-none text-sm rounded-xl border-white/10 bg-white/5 focus-visible:ring-primary/30 focus:border-primary/50 text-white"
                                     />
                                 </div>
 
                                 {/* Time Commitment */}
                                 <div>
-                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+                                    <label className="block text-sm font-medium text-white/80 mb-1.5">
                                         Weekly Availability
                                     </label>
                                     <select
-                                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-xl bg-white dark:bg-gray-800 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+                                        className="w-full px-3 py-2 border border-white/10 bg-white/5 rounded-xl text-white text-sm focus:outline-none focus:ring-2 focus:ring-primary/35 transition-all"
                                         value={formData.timeCommitment}
                                         onChange={e => setFormData({ ...formData, timeCommitment: e.target.value })}
                                     >
-                                        <option value="">Select availability…</option>
-                                        <option value="1-5 hours/week">1–5 hours/week</option>
-                                        <option value="5-10 hours/week">5–10 hours/week</option>
-                                        <option value="10-15 hours/week">10–15 hours/week</option>
-                                        <option value="15-20 hours/week">15–20 hours/week</option>
-                                        <option value="20+ hours/week">20+ hours/week</option>
-                                        <option value="Flexible">Flexible</option>
+                                        <option value="" className="bg-[#0f0f12] text-white">Select availability…</option>
+                                        <option value="1-5 hours/week" className="bg-[#0f0f12] text-white">1–5 hours/week</option>
+                                        <option value="5-10 hours/week" className="bg-[#0f0f12] text-white">5–10 hours/week</option>
+                                        <option value="10-15 hours/week" className="bg-[#0f0f12] text-white">10–15 hours/week</option>
+                                        <option value="15-20 hours/week" className="bg-[#0f0f12] text-white">15–20 hours/week</option>
+                                        <option value="20+ hours/week" className="bg-[#0f0f12] text-white">20+ hours/week</option>
+                                        <option value="Flexible" className="bg-[#0f0f12] text-white">Flexible</option>
                                     </select>
                                 </div>
 
                                 {/* Cover Letter */}
                                 <div>
-                                    <label className="flex items-center gap-1.5 text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
-                                        <FileText className="h-3.5 w-3.5 text-gray-400" />
+                                    <label className="flex items-center gap-1.5 text-sm font-medium text-white/80 mb-1.5">
+                                        <FileText className="h-3.5 w-3.5 text-white/40" />
                                         Cover Letter
-                                        <span className="text-xs text-gray-400 font-normal">(optional)</span>
+                                        <span className="text-xs text-white/40 font-normal">(optional)</span>
                                     </label>
                                     <Textarea
                                         rows={3}
                                         placeholder="Tell us about yourself and why you're a great fit…"
                                         value={formData.coverLetter}
                                         onChange={e => setFormData({ ...formData, coverLetter: e.target.value })}
-                                        className="resize-none text-sm rounded-xl"
+                                        className="resize-none text-sm rounded-xl border-white/10 bg-white/5 focus-visible:ring-primary/30 focus:border-primary/50 text-white"
                                     />
-                                    <p className="text-xs text-gray-400 mt-1">{formData.coverLetter.length}/1000</p>
+                                    <p className="text-xs text-white/40 mt-1">{formData.coverLetter.length}/1000</p>
                                 </div>
                             </div>
                         )}
@@ -367,7 +367,7 @@ export function ApplicationModal({ isOpen, onClose, onSuccess, project }: Applic
                             <Button
                                 type="button"
                                 variant="outline"
-                                className="flex-1 rounded-xl"
+                                className="flex-1 rounded-xl border-white/10 hover:bg-white/5 hover:text-white text-white/70"
                                 onClick={onClose}
                                 disabled={loading}
                             >
@@ -376,7 +376,7 @@ export function ApplicationModal({ isOpen, onClose, onSuccess, project }: Applic
                             <Button
                                 type="submit"
                                 disabled={loading || !formData.position}
-                                className="flex-1 rounded-xl bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 border-0 shadow-md shadow-indigo-500/20 gap-2"
+                                className="flex-1 rounded-xl bg-primary hover:bg-primary/90 text-primary-foreground border-0 shadow-md shadow-primary/20 font-semibold gap-2"
                             >
                                 {loading ? (
                                     <span className="flex items-center gap-2">

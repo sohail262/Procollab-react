@@ -233,7 +233,7 @@ export function ProjectCard({ project, onApply, isAlreadyMember = false, hasAppl
     // ─── Render ───────────────────────────────────────────────────────────
 
     return (
-        <Card className="glass-card rounded-lg overflow-hidden transition-all duration-300 h-full flex flex-col">
+        <Card className="glass-card hover:bg-primary/5 rounded-lg overflow-hidden transition-all duration-300 h-full flex flex-col">
             <CardContent className="p-4 sm:p-6 relative z-10 flex flex-col flex-1">
                 {/* Header row */}
                 <div className="flex justify-between items-start mb-3">

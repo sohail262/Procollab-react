@@ -213,7 +213,7 @@ export default function MyProjects() {
         }
 
         return (
-            <Card className="glass-card hover:border-white/25 transition-all duration-300 rounded-lg overflow-hidden h-full flex flex-col">
+            <Card className="glass-card hover:border-white/25 hover:bg-primary/5 transition-all duration-300 rounded-lg overflow-hidden h-full flex flex-col">
                 <CardContent className="p-4 relative z-10 flex flex-col flex-1 h-full">
                     {/* Top row: status pill + date */}
                     <div className="flex items-center justify-between mb-2">

@@ -1,0 +1,20 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // 1. Resumes path
+    match /resumes/{userId}/{fileName} {
+      // Resumes are publicly readable so that recruiters and other students can view/download them.
+      allow read: if true;
+      // Only the authenticated owner can upload/overwrite/delete their resume.
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // 2. User feedbacks path (e.g. screenshots)
+    match /users/{userId}/feedbacks/{fileName} {
+      // Feedback screenshots are readable by the owner (and admins if applicable).
+      allow read: if request.auth != null && request.auth.uid == userId;
+      // Only the owner can write their feedbacks.
+      allow write: if request.auth != null && request.auth.uid == userId;
+    }
+  }
+}

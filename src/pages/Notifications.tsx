@@ -14,6 +14,7 @@ import {
     collection, query, orderBy, limit,
     onSnapshot, doc, updateDoc, writeBatch,
     startAfter, getDocs, DocumentSnapshot, Timestamp,
+    where,
 } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
 import { useToast } from '@/hooks/use-toast'
@@ -227,17 +228,19 @@ export function Notifications() {
     // ─── Mark all read ────────────────────────────────────
     const handleMarkAllRead = async () => {
         if (!user) return
-        const unread = notifications.filter(n => !n.read)
-        if (unread.length === 0) return
-
         try {
-            for (const chunk of chunkArray(unread, BATCH_LIMIT)) {
+            const q = query(
+                collection(db, 'users', user.uid, 'notifications'),
+                where('read', '==', false)
+            )
+            const snap = await getDocs(q)
+            if (snap.empty) return
+
+            const docsToUpdate = snap.docs
+            for (const chunk of chunkArray(docsToUpdate, BATCH_LIMIT)) {
                 const batch = writeBatch(db)
-                chunk.forEach(n => {
-                    batch.update(
-                        doc(db, 'users', user.uid, 'notifications', n.id),
-                        { read: true }
-                    )
+                chunk.forEach(d => {
+                    batch.update(d.ref, { read: true })
                 })
                 await batch.commit()
             }
@@ -264,14 +267,16 @@ export function Notifications() {
 
     // ─── Clear all ────────────────────────────────────────
     const handleClearAll = async () => {
-        if (!user || notifications.length === 0) return
+        if (!user) return
         try {
-            for (const chunk of chunkArray(notifications, BATCH_LIMIT)) {
+            const allSnap = await getDocs(collection(db, 'users', user.uid, 'notifications'))
+            if (allSnap.empty) return
+
+            const docsToDelete = allSnap.docs
+            for (const chunk of chunkArray(docsToDelete, BATCH_LIMIT)) {
                 const batch = writeBatch(db)
-                chunk.forEach(n => {
-                    batch.delete(
-                        doc(db, 'users', user.uid, 'notifications', n.id)
-                    )
+                chunk.forEach(d => {
+                    batch.delete(d.ref)
                 })
                 await batch.commit()
             }

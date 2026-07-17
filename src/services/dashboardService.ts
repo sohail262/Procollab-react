@@ -1,4 +1,4 @@
-import { collection, query, where, getDocs, orderBy, limit, doc, onSnapshot } from 'firebase/firestore'
+import { collection, query, where, getDocs, getDoc, orderBy, limit, doc, onSnapshot } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
 import { cachedQuery, cachedGetDoc, batchGetDocs, clearCache } from '@/lib/queryUtils'
 
@@ -55,6 +55,7 @@ export interface Project {
     maxTeamSize?: number
     applications?: number
     tags?: string[]
+    matchScore?: number
 }
 
 export interface Application {
@@ -205,11 +206,8 @@ export async function loadRecommendedProjects(userId: string): Promise<Project[]
     if (!userId) return [];
 
     try {
-        // Get user profile with caching
-        const userDoc = await cachedGetDoc(doc(db, 'users', userId), {
-            userId,
-            ttl: 600000 // 10 minutes cache
-        });
+        // Get user profile - live & un-cached
+        const userDoc = await getDoc(doc(db, 'users', userId));
 
         if (!userDoc.exists()) return [];
 
@@ -232,33 +230,67 @@ export async function loadRecommendedProjects(userId: string): Promise<Project[]
                 userSkills = userData.skills.map((s: string) => s.toLowerCase().trim());
             }
         }
-        const userDiscipline = userData.discipline?.toLowerCase() || '';
+        const userDiscipline = userData.discipline || '';
         const userRole = userData.role?.toLowerCase() || '';
 
-        // Get user's applied projects to exclude them
-        const appliedProjectsSnap = await cachedQuery(
-            query(collection(db, 'users', userId, 'applications')),
-            { userId, ttl: 300000 }
+        // Get user's applied projects - live & un-cached
+        const appliedProjectsSnap = await getDocs(
+            query(collection(db, 'users', userId, 'applications'))
         );
         const appliedProjectIds = new Set(appliedProjectsSnap.docs.map(d => d.data().projectId));
 
-        // Get recent projects with a modest limit of 40 to minimize read operations and billing costs.
-        // We order by createdAt to get the newest content and filter status / ownership in-memory.
-        const projectsSnap = await cachedQuery(
-            query(
-                collection(db, 'projects'),
-                orderBy('createdAt', 'desc'),
-                limit(40)
-            ),
-            { userId, ttl: 300000 } // Cached for 5 minutes to avoid repeated reads
+        // Convert user's discipline to kebab-case for the Firestore exact match query
+        const kebabDiscipline = userDiscipline.toLowerCase().replace(/ & /g, '-').replace(/ /g, '-');
+
+        // Hybrid query: Fetch latest general projects AND latest projects matching user's discipline
+        const latestQuery = query(
+            collection(db, 'projects'),
+            orderBy('createdAt', 'desc'),
+            limit(40)
         );
+
+        let disciplineQuery = null;
+        if (userDiscipline) {
+            disciplineQuery = query(
+                collection(db, 'projects'),
+                where('primaryDiscipline', '==', kebabDiscipline),
+                limit(40)
+            );
+        }
+
+        // Run fetches in parallel with individual error catching for safety
+        let latestSnap = null;
+        let disciplineSnap = null;
+
+        try {
+            latestSnap = await getDocs(latestQuery);
+        } catch (err) {
+            console.error('Error fetching latest projects for recommendations:', err);
+        }
+
+        if (disciplineQuery) {
+            try {
+                disciplineSnap = await getDocs(disciplineQuery);
+            } catch (err) {
+                console.warn('Discipline-specific query failed (likely missing index). Falling back to general query.', err);
+            }
+        }
+
+        // Merge and deduplicate by document ID
+        const docsMap = new Map<string, any>();
+        if (latestSnap) {
+            latestSnap.docs.forEach(docSnap => docsMap.set(docSnap.id, docSnap));
+        }
+        if (disciplineSnap) {
+            disciplineSnap.docs.forEach(docSnap => docsMap.set(docSnap.id, docSnap));
+        }
 
         const projects: (Project & {
             requiredSkills?: string[]
             openRoles?: string[]
         })[] = [];
 
-        projectsSnap.forEach(docSnap => {
+        docsMap.forEach((docSnap, docId) => {
             const data = docSnap.data();
             // Skip user's own projects
             if (data.createdBy === userId) return;
@@ -266,12 +298,12 @@ export async function loadRecommendedProjects(userId: string): Promise<Project[]
             const status = (data.status || '').toLowerCase();
             if (status !== 'active' && status !== 'recruiting') return;
             // Skip projects user already applied to
-            if (appliedProjectIds.has(docSnap.id)) return;
+            if (appliedProjectIds.has(docId)) return;
             // Skip projects where user is already a member
             if (data.teamMembers && data.teamMembers[userId]) return;
 
             projects.push({
-                id: docSnap.id,
+                id: docId,
                 title: data.title,
                 description: data.description,
                 summary: data.summary,
@@ -295,11 +327,12 @@ export async function loadRecommendedProjects(userId: string): Promise<Project[]
 
             // 1. DISCIPLINE MATCH (25 points max)
             if (project.primaryDiscipline) {
-                const projectDiscipline = project.primaryDiscipline.toLowerCase();
-                if (projectDiscipline === userDiscipline) {
+                const normProject = normalizeDiscipline(project.primaryDiscipline);
+                const normUser = normalizeDiscipline(userDiscipline);
+                if (normProject === normUser) {
                     score += 25;
                     matchReasons.push('discipline');
-                } else if (projectDiscipline.includes(userDiscipline) || userDiscipline.includes(projectDiscipline)) {
+                } else if (normProject.includes(normUser) || normUser.includes(normProject)) {
                     score += 15;
                     matchReasons.push('related-discipline');
                 }
@@ -372,8 +405,8 @@ export async function loadRecommendedProjects(userId: string): Promise<Project[]
             userSkills,
             userDiscipline,
             userRole,
-            fetchedRecentCount: projectsSnap.docs.length,
-            fetchedProjects: projectsSnap.docs.map(d => ({
+            fetchedCandidateCount: docsMap.size,
+            fetchedProjects: Array.from(docsMap.values()).map(d => ({
                 id: d.id,
                 title: d.data().title,
                 createdBy: d.data().createdBy,
@@ -396,8 +429,11 @@ export async function loadRecommendedProjects(userId: string): Promise<Project[]
         const projectsToShow = meaningfulMatches.length > 0 ? meaningfulMatches : scoredProjects;
 
         return projectsToShow
-            .slice(0, 5)
-            .map(item => item.project);
+            .slice(0, 20)
+            .map(item => ({
+                ...item.project,
+                matchScore: item.score
+            }));
 
     } catch (error) {
         console.error('Error loading recommended projects:', error);
@@ -472,13 +508,12 @@ function fuzzyMatch(userSkill: string, projectSkill: string): boolean {
 // After: cache hit after first load → 0 reads for up to 5 minutes.
 export async function loadMyProjects(userId: string): Promise<Project[]> {
     try {
-        const projectsSnap = await cachedQuery(
+        const projectsSnap = await getDocs(
             query(
                 collection(db, 'projects'),
                 where('createdBy', '==', userId),
                 orderBy('createdAt', 'desc')
-            ),
-            { userId, ttl: 300_000, cacheKey: `my-projects-${userId}` }
+            )
         )
 
         const projects: Project[] = []
@@ -506,36 +541,38 @@ export async function loadMyProjects(userId: string): Promise<Project[]> {
 }
 
 // Load user's applications
-// ✅ P0 FIX: Eliminates N+1 query pattern.
-// Before: 1 getDocs (applications) + N sequential getDoc (projects) = 1+N reads, uncached.
-// After:  1 cachedQuery (applications, 5 min) + batchGetDocs (projects, parallel+cached) = ~1 read per 5 min.
-// Estimated read reduction: ~N reads per dashboard load where N = number of applications.
 export async function loadMyApplications(userId: string): Promise<Application[]> {
     try {
-        // Step 1 — fetch applications list (cached)
-        const applicationsSnap = await cachedQuery(
+        // Step 1 — fetch applications list (live & un-cached)
+        const applicationsSnap = await getDocs(
             query(
                 collection(db, 'users', userId, 'applications'),
                 orderBy('appliedAt', 'desc')
-            ),
-            { userId, ttl: 300_000, cacheKey: `my-applications-${userId}` }
+            )
         )
 
         if (applicationsSnap.empty) return []
 
-        // Step 2 — collect all unique project IDs and batch-fetch in parallel
+        // Step 2 — collect all unique project IDs and batch-fetch in parallel (un-cached)
         const projectRefs = applicationsSnap.docs
             .map(d => d.data().projectId)
             .filter(Boolean)
             .map(pid => doc(db, 'projects', pid))
 
-        // batchGetDocs internally uses cachedGetDoc, so repeated calls are free
-        const projectsData = await batchGetDocs(projectRefs, { userId })
+        const promises = projectRefs.map(async (docRef) => {
+            const d = await getDoc(docRef)
+            return {
+                id: docRef.id,
+                data: d.exists() ? d.data() : undefined,
+                exists: d.exists()
+            }
+        })
+        const projectsData = await Promise.all(promises)
         const projectsMap = new Map(
             projectsData.filter(p => p.exists).map(p => [p.id, p.data!])
         )
 
-        // Step 3 — assemble output without any additional reads
+        // Step 3 — assemble output
         return applicationsSnap.docs.map(appDoc => {
             const appData = appDoc.data()
             const projectData = projectsMap.get(appData.projectId)
@@ -678,3 +715,12 @@ export function subscribeToNotifications(
 // This function is intentionally kept as a no-op stub so that any lingering
 // import in Dashboard.tsx does not break compilation while the migration is applied.
 // It can be deleted entirely once Dashboard.tsx is updated.
+
+function normalizeDiscipline(d: string): string {
+    return (d || '')
+        .toLowerCase()
+        .replace(/ & /g, '')
+        .replace(/-/g, '')
+        .replace(/ /g, '')
+        .trim();
+}

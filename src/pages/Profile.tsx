@@ -11,7 +11,8 @@ import {
     Mail, Calendar, UserPlus, Check, BookOpen, Trash2,
     LayoutDashboard, FileText, Users, ImageIcon, X, Award, Star,
     Zap, CheckCircle, ShieldAlert, Crown, Heart, Code2, Compass, Shield,
-    ShieldCheck, Clock, GitBranch, Layers, Briefcase, BarChart3, Share2, Search
+    ShieldCheck, Clock, GitBranch, Layers, Briefcase, BarChart3, Share2, Search,
+    Lock
 } from 'lucide-react'
 import {
     doc, getDoc, collection, query, where,
@@ -49,6 +50,7 @@ import {
     DialogTitle,
     DialogTrigger,
 } from '@/components/ui/dialog'
+import { ResumeBuilder } from '@/components/profile/ResumeBuilder'
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface UserProfile {
     id: string
@@ -672,12 +674,15 @@ export default function Profile() {
     // ── Action handlers ───────────────────────────────────────────────────────
     const handleConnectClick = async () => {
         if (!currentUser || !profile || isOwnProfile) return
+        const prevStatus = connectionStatus
         try {
             setActionLoading(true)
+            setConnectionStatus('pending_out') // Optimistic update
             await sendConnectionRequest(currentUser.uid, profile.id)
             await refreshConnectionStatus()
             toast({ title: 'Request sent!' })
         } catch (error) {
+            setConnectionStatus(prevStatus) // Revert on error
             console.error('Error sending connection request:', error)
             toast({ title: 'Could not send request', variant: 'destructive' })
         } finally {
@@ -689,12 +694,15 @@ export default function Profile() {
 
     const handleWithdraw = async () => {
         if (!currentUser || !profile) return
+        const prevStatus = connectionStatus
         try {
             setActionLoading(true)
+            setConnectionStatus('none') // Optimistic update
             await withdrawConnectionRequest(currentUser.uid, profile.id)
             await refreshConnectionStatus()
             toast({ title: 'Request withdrawn' })
         } catch (error) {
+            setConnectionStatus(prevStatus) // Revert on error
             console.error(error)
             toast({ title: 'Could not withdraw', variant: 'destructive' })
         } finally {
@@ -704,12 +712,15 @@ export default function Profile() {
 
     const handleDisconnect = async () => {
         if (!currentUser || !profile) return
+        const prevStatus = connectionStatus
         try {
             setActionLoading(true)
+            setConnectionStatus('none') // Optimistic update
             await removeConnection(currentUser.uid, profile.id)
             await refreshConnectionStatus()
             toast({ title: 'Connection removed' })
         } catch (error) {
+            setConnectionStatus(prevStatus) // Revert on error
             console.error('Error removing connection:', error)
             toast({ title: 'Could not remove connection', variant: 'destructive' })
         } finally {
@@ -719,18 +730,21 @@ export default function Profile() {
 
     const handleAcceptIncomingOnProfile = useCallback(async () => {
         if (!currentUser || !profile) return
+        const prevStatus = connectionStatus
         try {
             setActionLoading(true)
+            setConnectionStatus('connected') // Optimistic update
             await acceptConnectionRequest(currentUser.uid, profile.id)
             await refreshConnectionStatus()
             toast({ title: 'Connected!', description: 'You are now collaborators.' })
         } catch (e) {
+            setConnectionStatus(prevStatus) // Revert on error
             console.error(e)
             toast({ title: 'Could not accept', variant: 'destructive' })
         } finally {
             setActionLoading(false)
         }
-    }, [currentUser, profile, refreshConnectionStatus, toast])
+    }, [currentUser, profile, connectionStatus, refreshConnectionStatus, toast])
 
     // ✅ Auto-accept connection request if query param is set
     useEffect(() => {
@@ -745,12 +759,15 @@ export default function Profile() {
 
     const handleRejectIncomingOnProfile = async () => {
         if (!currentUser || !profile) return
+        const prevStatus = connectionStatus
         try {
             setActionLoading(true)
+            setConnectionStatus('none') // Optimistic update
             await rejectConnectionRequest(currentUser.uid, profile.id)
             await refreshConnectionStatus()
             toast({ title: 'Request declined' })
         } catch (e) {
+            setConnectionStatus(prevStatus) // Revert on error
             console.error(e)
             toast({ title: 'Could not decline', variant: 'destructive' })
         } finally {
@@ -1013,14 +1030,14 @@ export default function Profile() {
                         {/* Stats row */}
                         <div className="flex items-center gap-4 sm:gap-6 mb-3 pb-3 border-b border-gray-100 dark:border-gray-800">
                             <div className="text-center">
-                                <p className="text-base sm:text-lg font-bold text-gray-900 dark:text-white">{projects.length}</p>
+                                <p className="text-base sm:text-lg font-bold text-gray-950 dark:text-white">{projects.length}</p>
                                 <p className="text-xs text-gray-500 dark:text-gray-400">Projects</p>
                             </div>
                             {isOwnProfile && networkFriends.length > 0 && (
                                 <>
                                     <div className="w-px h-8 bg-gray-200 dark:bg-gray-700" />
                                     <div className="text-center">
-                                        <p className="text-base sm:text-lg font-bold text-gray-900 dark:text-white">{networkFriends.length}</p>
+                                        <p className="text-base sm:text-lg font-bold text-gray-955 dark:text-white">{networkFriends.length}</p>
                                         <p className="text-xs text-gray-500 dark:text-gray-400">Connections</p>
                                     </div>
                                 </>
@@ -1029,7 +1046,7 @@ export default function Profile() {
                                 <>
                                     <div className="w-px h-8 bg-gray-200 dark:bg-gray-700" />
                                     <div className="text-center">
-                                        <p className="text-base sm:text-lg font-bold text-gray-900 dark:text-white">{applications.length}</p>
+                                        <p className="text-base sm:text-lg font-bold text-gray-955 dark:text-white">{applications.length}</p>
                                         <p className="text-xs text-gray-500 dark:text-gray-400">Applications</p>
                                     </div>
                                 </>
@@ -1083,7 +1100,7 @@ export default function Profile() {
                                     )}
                                     {profile.twitter && (
                                         <a href={profile.twitter} target="_blank" rel="noopener noreferrer"
-                                            className="flex items-center gap-1 px-2 py-1 rounded-full bg-gray-100 dark:bg-gray-800 hover:bg-sky-100 dark:hover:bg-sky-900/30 hover:text-sky-500 transition-colors text-gray-600 dark:text-gray-300">
+                                            className="flex items-center gap-1 px-2 py-1 rounded-full bg-gray-100 dark:bg-gray-800 hover:bg-sky-100 dark:hover:bg-sky-900/30 hover:text-sky-505 transition-colors text-gray-600 dark:text-gray-300">
                                             <Twitter className="h-3.5 w-3.5" />
                                             <span className="hidden sm:inline text-[10px] font-medium">Twitter</span>
                                         </a>
@@ -1113,7 +1130,7 @@ export default function Profile() {
                             <Card className="relative overflow-hidden border border-indigo-100 dark:border-indigo-900/30">
                                 <CardContent className="pt-6">
                                     <div className="flex justify-between items-center mb-3">
-                                        <h3 className="font-bold text-sm text-gray-900 dark:text-white flex items-center gap-1.5">
+                                        <h3 className="font-bold text-sm text-gray-950 dark:text-white flex items-center gap-1.5">
                                             <span className="flex h-2 w-2 rounded-full bg-indigo-500 animate-pulse" />
                                             Profile Strength
                                         </h3>
@@ -1136,7 +1153,7 @@ export default function Profile() {
                                             <p className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Suggested actions</p>
                                             {profileStrengthSuggestions.map((suggestion, index) => (
                                                 <div key={index} className="flex items-start gap-2 text-xs text-gray-600 dark:text-gray-300">
-                                                    <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-indigo-50 dark:bg-indigo-950 text-indigo-600 dark:text-indigo-400 text-[10px] font-bold mt-0.5">
+                                                    <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-indigo-50 dark:bg-indigo-955 text-indigo-600 dark:text-indigo-400 text-[10px] font-bold mt-0.5">
                                                         +
                                                     </span>
                                                     <div className="flex-1">
@@ -1148,7 +1165,7 @@ export default function Profile() {
                                             <Button 
                                                 variant="outline" 
                                                 size="sm" 
-                                                className="w-full text-xs mt-2 border-indigo-200 hover:bg-indigo-50 hover:text-indigo-600 dark:border-indigo-900/30 dark:hover:bg-indigo-950/30 dark:hover:text-indigo-400 transition-colors"
+                                                className="w-full text-xs mt-2 border-indigo-200 hover:bg-indigo-50 hover:text-indigo-650 dark:border-indigo-900/30 dark:hover:bg-indigo-950/30 dark:hover:text-indigo-400 transition-colors"
                                                 onClick={() => navigate('/settings/profile')}
                                             >
                                                 Update Profile
@@ -1185,7 +1202,7 @@ export default function Profile() {
                                 <CardHeader className="pb-3">
                                     <CardTitle className="text-sm font-bold flex items-center justify-between">
                                         <span>Reputation & Feedback</span>
-                                        <Badge className="bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 hover:bg-amber-500/20 font-semibold text-[10px] py-0.5">
+                                        <Badge className="bg-amber-505/15 text-amber-600 dark:text-amber-400 border border-amber-500/30 hover:bg-amber-500/20 font-semibold text-[10px] py-0.5">
                                             {computedReputation.totalReviews} Peer Review{computedReputation.totalReviews > 1 ? 's' : ''}
                                         </Badge>
                                     </CardTitle>
@@ -1198,13 +1215,13 @@ export default function Profile() {
                                                 <Award className="h-4 w-4 text-indigo-500" />
                                                 Reputation Trust Score
                                             </span>
-                                            <span className="font-extrabold text-indigo-600 dark:text-indigo-400 text-sm">{computedReputation.trustScore}%</span>
+                                            <span className="font-extrabold text-indigo-650 dark:text-indigo-400 text-sm">{computedReputation.trustScore}%</span>
                                         </div>
                                     )}
 
                                     {typeof computedReputation.overallRating === 'number' && (
                                         <div className="flex items-center gap-3 bg-amber-500/5 dark:bg-amber-500/10 border border-amber-500/15 dark:border-amber-500/20 rounded-lg p-3">
-                                            <div className="text-3xl font-extrabold text-amber-600 dark:text-amber-400">
+                                            <div className="text-3xl font-extrabold text-amber-606 dark:text-amber-400">
                                                 {computedReputation.overallRating.toFixed(1)}
                                             </div>
                                             <div className="space-y-0.5">
@@ -1239,7 +1256,7 @@ export default function Profile() {
                                                 </div>
                                                 <div className="w-full h-1.5 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
                                                     <div
-                                                        className="h-full bg-gradient-to-r from-indigo-500 to-purple-500 rounded-full transition-all duration-500"
+                                                        className="h-full bg-gradient-to-r from-indigo-500 to-purple-550 rounded-full transition-all duration-500"
                                                         style={{ width: `${rep.score}%` }}
                                                     />
                                                 </div>
@@ -1255,7 +1272,7 @@ export default function Profile() {
                             <Card className="mt-4">
                                 <CardHeader className="pb-2">
                                     <CardTitle className="text-sm font-bold flex items-center gap-1.5">
-                                        <Award className="h-4 w-4 text-indigo-500" />
+                                        <Award className="h-4 w-4 text-indigo-505" />
                                         Verified Trust Credentials
                                     </CardTitle>
                                 </CardHeader>
@@ -1379,7 +1396,7 @@ export default function Profile() {
                                                                 )}
                                                             </TooltipContent>
                                                         </Tooltip>
-                                                        <span className="text-[10px] font-semibold text-slate-700 dark:text-slate-350 tracking-tight leading-tight max-w-[64px] line-clamp-2">
+                                                        <span className="text-[10px] font-semibold text-slate-750 dark:text-slate-350 tracking-tight leading-tight max-w-[64px] line-clamp-2">
                                                             {design.title}
                                                         </span>
                                                     </div>
@@ -1424,6 +1441,39 @@ export default function Profile() {
                                 </div>
                             </CardContent>
                         </Card>
+
+                        {/* Tools Section */}
+                        {isOwnProfile && (
+                            <Card className="border border-white/[0.06] bg-[#0c0c0e]">
+                                <CardHeader className="pb-3 pt-4 px-4">
+                                    <CardTitle className="text-sm font-semibold flex items-center gap-2 text-white/80">
+                                        <Layers className="h-4 w-4 text-indigo-400 shrink-0" />
+                                        Tools
+                                    </CardTitle>
+                                </CardHeader>
+                                <CardContent className="px-4 pb-4 pt-0 space-y-3">
+                                    <div className="flex items-center justify-between p-3 rounded-lg bg-white/[0.02] border border-white/[0.04] transition-colors">
+                                        <div className="flex items-center gap-3">
+                                            <div className="p-2 bg-indigo-500/10 rounded-md">
+                                                <FileText className="h-4.5 w-4.5 text-indigo-400" />
+                                            </div>
+                                            <div>
+                                                <h4 className="text-xs font-bold text-white">Resume Builder</h4>
+                                                <p className="text-[10px] text-white/40">Create & download a LaTeX-style resume</p>
+                                            </div>
+                                        </div>
+                                        <Button 
+                                            size="sm" 
+                                            disabled 
+                                            className="h-8 font-mono text-[10px] uppercase tracking-wider bg-white/5 border border-white/[0.06] text-white/30 cursor-not-allowed rounded-none flex items-center gap-1"
+                                        >
+                                            <Lock className="h-3 w-3 text-white/30" />
+                                            Build
+                                        </Button>
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        )}
 
                         {/* My Connections — own profile only */}
                         {isOwnProfile && (
@@ -1470,7 +1520,7 @@ export default function Profile() {
                                                             {friend.displayName}
                                                         </span>
                                                         <button
-                                                            className="text-[10px] text-red-400/60 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all shrink-0 px-1.5 py-0.5 rounded hover:bg-red-500/10"
+                                                            className="text-[10px] text-red-405/60 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all shrink-0 px-1.5 py-0.5 rounded hover:bg-red-500/10"
                                                             onClick={async (e) => {
                                                                 e.stopPropagation()
                                                                 if (!currentUser) return
@@ -1495,7 +1545,7 @@ export default function Profile() {
                                                     <DialogTrigger asChild>
                                                         <Button
                                                             variant="ghost"
-                                                            className="w-full text-xs text-blue-400 hover:text-blue-300 hover:bg-white/5 mt-2 h-8"
+                                                            className="w-full text-xs text-blue-450 hover:text-blue-300 hover:bg-white/5 mt-2 h-8"
                                                         >
                                                             View All {networkFriends.length} Connections
                                                         </Button>
@@ -1608,7 +1658,7 @@ export default function Profile() {
                                                                 <h3 className="font-semibold text-lg text-blue-600 dark:text-blue-400 mb-1 flex items-center gap-1.5 flex-wrap">
                                                                     {project.title}
                                                                     {project.status === 'completed' && project.activityVerified && (
-                                                                        <span className="inline-flex items-center gap-0.5 text-[9px] font-bold bg-emerald-100 dark:bg-emerald-950/45 text-emerald-750 dark:text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-900/50 uppercase tracking-wide">
+                                                                        <span className="inline-flex items-center gap-0.5 text-[9px] font-bold bg-emerald-100 dark:bg-emerald-950/45 text-emerald-755 dark:text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-900/50 uppercase tracking-wide">
                                                                             <Check className="h-2.5 w-2.5" />
                                                                             Verified Work
                                                                         </span>
@@ -1670,7 +1720,7 @@ export default function Profile() {
                         {reviews.length > 0 && (
                             <div>
                                 <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-                                    <Award className="h-5 w-5 text-amber-500" />
+                                    <Award className="h-5 w-5 text-amber-505" />
                                     Teammate Endorsements
                                 </h2>
                                 <div className="space-y-4">
@@ -1697,7 +1747,7 @@ export default function Profile() {
                                                             Cooperated: {rev.cooperation}/5 · Reliable: {rev.reliability}/5 · Comm: {rev.communication}/5
                                                         </p>
                                                         {rev.comment && (
-                                                            <blockquote className="mt-3 text-xs text-gray-600 dark:text-gray-300 border-l-2 border-zinc-200 dark:border-zinc-800 pl-3 italic leading-relaxed">
+                                                            <blockquote className="mt-3 text-xs text-gray-600 dark:text-gray-355 border-l-2 border-zinc-205 dark:border-zinc-800 pl-3 italic leading-relaxed">
                                                                 "{rev.comment}"
                                                             </blockquote>
                                                         )}
@@ -1713,7 +1763,7 @@ export default function Profile() {
                         {/* Portfolio Showcase */}
                         <div>
                             <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-                                <ImageIcon className="h-5 w-5 text-indigo-500" />
+                                <ImageIcon className="h-5 w-5 text-indigo-505" />
                                 Project Showcase
                             </h2>
                             {profile.pastProjectsShowcase && profile.pastProjectsShowcase.length > 0 ? (
@@ -1721,7 +1771,7 @@ export default function Profile() {
                                     {profile.pastProjectsShowcase.map((proj, idx) => (
                                         <Card key={idx} className="overflow-hidden border border-gray-200 dark:border-gray-800 hover:shadow-lg transition-all duration-300 flex flex-col">
                                             {proj.screenshotURL && (
-                                                <div className="h-40 w-full overflow-hidden bg-gray-100 dark:bg-gray-800 relative">
+                                                <div className="h-40 w-full overflow-hidden bg-gray-105 dark:bg-gray-800 relative">
                                                     <img 
                                                         src={proj.screenshotURL} 
                                                         alt={proj.title}

@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
     FolderKanban,
     Send,
@@ -29,16 +30,12 @@ import {
     Check,
 } from 'lucide-react';
 import {
-    loadDashboardStats,
     loadRecommendedProjects,
-    loadMyProjects,
-    loadMyApplications,
     type DashboardStats,
-    type Activity,
     type Project,
     type Application,
 } from '@/services/dashboardService'
-import { collection, query, orderBy, limit, onSnapshot, doc, where } from 'firebase/firestore'
+import { collection, query, orderBy, limit, onSnapshot, doc, where, getDoc, getDocs } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
 import { cachedGetDoc, cachedQuery } from '@/lib/queryUtils'
 import { OnboardingChecklist } from '@/components/dashboard/OnboardingChecklist'
@@ -55,7 +52,7 @@ export function Dashboard() {
         notifications: 0,
         savedProjects: 0,
     });
-    const [recentActivity, setRecentActivity] = useState<Activity[]>([]);
+
     const [recommendedProjects, setRecommendedProjects] = useState<Project[]>([]);
     const [myProjects, setMyProjects] = useState<Project[]>([]);
     const [applications, setApplications] = useState<Application[]>([]);
@@ -65,184 +62,228 @@ export function Dashboard() {
     const [profileData, setProfileData] = useState<any>(null);
     const [connectionsCount, setConnectionsCount] = useState<number>(0);
     const [suggestedUsers, setSuggestedUsers] = useState<any[]>([]);
+    const [showRecommendedModal, setShowRecommendedModal] = useState(false);
 
-    // Memoized data loading function with reduced initial load
-    const loadData = useCallback(async () => {
+    const isProfileIncomplete = !profileData || 
+        !profileData.discipline || 
+        (!profileData.skills || (Array.isArray(profileData.skills) ? profileData.skills.length === 0 : Object.keys(profileData.skills).length === 0));
+
+    // 1. Real-time User Profile & Connections Count Listener
+    useEffect(() => {
         if (!user) return;
 
-        try {
-            setError(null);
+        setLoading(true);
 
-            // ── FIX: Route all raw reads through cachedGetDoc / cachedQuery ──
-            // Try sessionStorage first for instant revisit of profile/conn data
-            let discipline = ''
-            const ssProfKey = `dash_profile_${user.uid}`
-            let connCountFromCache = -1
-
-            try {
-                const raw = sessionStorage.getItem(ssProfKey)
-                if (raw) {
-                    const { pData, connCount, ts } = JSON.parse(raw)
-                    if (Date.now() - ts < 5 * 60_000) {
-                        setProfileData(pData)
-                        discipline = pData.discipline || ''
-                        setConnectionsCount(connCount)
-                        connCountFromCache = connCount
-                    }
-                }
-            } catch { /* ignore */ }
-
-            // Only hit Firestore if sessionStorage miss
-            if (connCountFromCache === -1) {
-                const [userDoc, friendsSnap] = await Promise.all([
-                    cachedGetDoc(doc(db, 'users', user.uid), { ttl: 300_000 }),
-                    cachedQuery(
-                        query(collection(db, 'users', user.uid, 'friends')),
-                        { ttl: 120_000, cacheKey: `dash-friends-${user.uid}` }
-                    )
-                ])
-
-                if (userDoc.exists()) {
-                    const pData = userDoc.data()
-                    setProfileData(pData)
-                    discipline = pData.discipline || ''
-                }
-
-                const connCount = friendsSnap.size
-                setConnectionsCount(connCount)
-                connCountFromCache = connCount
-
-                // Persist for next visit
-                try {
-                    sessionStorage.setItem(ssProfKey, JSON.stringify({
-                        pData: userDoc.exists() ? userDoc.data() : null,
-                        connCount,
-                        ts: Date.now()
-                    }))
-                } catch { /* quota */ }
+        const unsubProfile = onSnapshot(doc(db, 'users', user.uid), (docSnap) => {
+            if (docSnap.exists()) {
+                setProfileData(docSnap.data());
             }
+            setLoading(false);
+        }, (err) => {
+            console.error('Error listening to user profile:', err);
+            setLoading(false);
+        });
 
-            // Load stats (uses cachedQuery internally in dashboardService)
-            const statsData = await loadDashboardStats(user.uid);
-            setStats(statsData);
-
-            // Fetch suggested users if connections count is 0
-            if (connCountFromCache === 0) {
-                let uQuery = query(collection(db, 'users'), limit(15));
-                if (discipline) {
-                    uQuery = query(collection(db, 'users'), where('discipline', '==', discipline), limit(15));
-                }
-                const uSnap = await cachedQuery(uQuery, {
-                    ttl: 300_000,
-                    cacheKey: `dash-suggested-${user.uid}-${discipline}`
-                })
-                const list: any[] = [];
-                uSnap.forEach(d => {
-                    const dData = d.data();
-                    if (d.id !== user.uid && dData.displayName) {
-                        list.push({ id: d.id, ...dData });
-                    }
-                });
-                setSuggestedUsers(list.slice(0, 3));
-            }
-
-            // Load non-critical data in background (small delay for perceived perf)
-            // NOTE: loadRecentActivity is REMOVED — the onSnapshot listener already
-            // derives recentActivity from the notifications stream (no double-fetch).
-            setTimeout(async () => {
-                const [recommendedData, projectsData, appsData] = await Promise.allSettled([
-                    loadRecommendedProjects(user.uid),
-                    loadMyProjects(user.uid),
-                    loadMyApplications(user.uid),
-                ]);
-
-                setRecommendedProjects(recommendedData.status === 'fulfilled' ? recommendedData.value : []);
-                setMyProjects(projectsData.status === 'fulfilled' ? projectsData.value.slice(0, 3) : []);
-                setApplications(appsData.status === 'fulfilled' ? appsData.value.slice(0, 3) : []);
-
-                [recommendedData, projectsData, appsData].forEach((result, index) => {
-                    if (result.status === 'rejected') {
-                        console.error(`Dashboard data load failed for section ${index}:`, result.reason);
-                    }
-                });
-            }, 100);
-
-        } catch (error) {
-            console.error('Error loading dashboard data:', error);
-            setError('Failed to load dashboard data. Please try refreshing.');
-        }
-    }, [user]);
-
-    // Redirect if not authenticated
-    useEffect(() => {
-        if (!user) {
-            navigate('/login?redirect=/dashboard');
-            return;
-        }
-    }, [user, navigate]);
-
-    // Load data on mount and when user changes
-    useEffect(() => {
-        let mounted = true;
-
-        const loadInitialData = async () => {
-            setLoading(true);
-            await loadData();
-            if (mounted) {
-                setLoading(false);
-            }
-        };
-
-        if (user) {
-            loadInitialData();
-        }
+        const unsubFriends = onSnapshot(collection(db, 'users', user.uid, 'friends'), (snap) => {
+            setConnectionsCount(snap.size);
+        }, (err) => {
+            console.error('Error listening to connections:', err);
+        });
 
         return () => {
-            mounted = false;
+            unsubProfile();
+            unsubFriends();
         };
-    }, [user, loadData]);
+    }, [user]);
 
-    // ✅ P1 FIX: Single merged notification listener.
-    // Previously two separate onSnapshot listeners both opened against
-    // users/{uid}/notifications:
-    //   • subscribeToNotifications  (where read==false, limit 10)
-    //   • subscribeToRecentActivity (all, limit 10)
-    // This was 2 persistent Firestore connections for the same collection.
-    // Now one listener derives both unread count AND recent activity feed.
-    // Read reduction: eliminates 1 persistent listener = ~50% of real-time read traffic.
+    // 2. Real-time My Projects Listener (Count and list)
     useEffect(() => {
-        if (!user) return
+        if (!user) return;
+
+        const q = query(
+            collection(db, 'projects'),
+            where('createdBy', '==', user.uid),
+            orderBy('createdAt', 'desc')
+        );
+
+        const unsub = onSnapshot(q, (snap) => {
+            setStats(prev => ({ ...prev, myProjects: snap.size }));
+            
+            const projects: Project[] = [];
+            snap.forEach(docSnap => {
+                const data = docSnap.data();
+                projects.push({
+                    id: docSnap.id,
+                    title: data.title,
+                    description: data.description,
+                    status: data.status,
+                    createdBy: data.createdBy,
+                    createdAt: data.createdAt?.toDate() || new Date(),
+                    teamMembers: data.teamMembers,
+                    teamSize: data.teamSize || (data.teamMembers ? Object.keys(data.teamMembers).length : 1),
+                    maxTeamSize: data.maxTeamSize,
+                    applications: data.applications || 0
+                });
+            });
+            setMyProjects(projects.slice(0, 3));
+        }, (err) => {
+            console.error('Error listening to my projects:', err);
+        });
+
+        return () => unsub();
+    }, [user]);
+
+    // 3. Real-time Applications Listener (Count and list)
+    useEffect(() => {
+        if (!user) return;
+
+        const q = query(
+            collection(db, 'users', user.uid, 'applications'),
+            orderBy('appliedAt', 'desc')
+        );
+
+        const unsub = onSnapshot(q, async (snap) => {
+            setStats(prev => ({ ...prev, applications: snap.size }));
+
+            if (snap.empty) {
+                setApplications([]);
+                return;
+            }
+
+            const projectRefs = snap.docs
+                .map(d => d.data().projectId)
+                .filter(Boolean)
+                .map(pid => doc(db, 'projects', pid));
+
+            try {
+                const promises = projectRefs.map(async (docRef) => {
+                    const d = await getDoc(docRef);
+                    return {
+                        id: docRef.id,
+                        data: d.exists() ? d.data() : undefined,
+                        exists: d.exists()
+                    };
+                });
+                const projectsData = await Promise.all(promises);
+                const projectsMap = new Map(
+                    projectsData.filter(p => p.exists).map(p => [p.id, p.data!])
+                );
+
+                const apps = snap.docs.map(appDoc => {
+                    const appData = appDoc.data();
+                    const projectData = projectsMap.get(appData.projectId);
+                    return {
+                        id: appDoc.id,
+                        projectId: appData.projectId,
+                        projectTitle: projectData?.title ?? 'Unknown Project',
+                        status: appData.status,
+                        appliedAt: appData.appliedAt?.toDate() ?? new Date(),
+                        message: appData.message,
+                        project: projectData
+                            ? ({
+                                id: appData.projectId,
+                                ...projectData,
+                                createdAt: projectData.createdAt?.toDate() ?? new Date()
+                            } as Project)
+                            : undefined
+                    };
+                });
+
+                setApplications(apps.slice(0, 3));
+            } catch (err) {
+                console.error('Error fetching application projects:', err);
+            }
+        }, (err) => {
+            console.error('Error listening to applications:', err);
+        });
+
+        return () => unsub();
+    }, [user]);
+
+    // 4. Real-time Saved Projects Listener (Count only)
+    useEffect(() => {
+        if (!user) return;
+
+        const unsub = onSnapshot(collection(db, 'users', user.uid, 'savedProjects'), (snap) => {
+            setStats(prev => ({ ...prev, savedProjects: snap.size }));
+        }, (err) => {
+            console.error('Error listening to saved projects:', err);
+        });
+
+        return () => unsub();
+    }, [user]);
+
+    // 5. Real-time Unread Notifications count
+    useEffect(() => {
+        if (!user) return;
 
         const q = query(
             collection(db, 'users', user.uid, 'notifications'),
-            orderBy('timestamp', 'desc'),
-            limit(20) // enough for both: badge count + 6-item activity feed
-        )
+            where('read', '==', false)
+        );
 
         const unsub = onSnapshot(q, (snap) => {
-            const allNotifications = snap.docs.map(d => ({
-                id: d.id,
-                ...d.data()
-            })) as any[]
+            setStats(prev => ({ ...prev, notifications: snap.size }));
+        }, (err) => {
+            console.error('Error listening to unread notifications:', err);
+        });
 
-            // Derive unread badge count
-            const unreadCount = allNotifications.filter(n => !n.read).length
-            setStats(prev => ({ ...prev, notifications: unreadCount }))
+        return () => unsub();
+    }, [user]);
 
-            // Derive recent activity feed (newest 6)
-            const activities: Activity[] = allNotifications.slice(0, 6).map(n => ({
-                id: n.id,
-                type: n.type || 'project_update',
-                message: n.message,
-                timestamp: n.timestamp?.toDate?.() ?? new Date(),
-                projectId: n.projectId,
-                projectTitle: n.projectTitle,
-            }))
-            setRecentActivity(activities)
-        })
+    // 6. Reactive Recommended Projects (Updates live when profileData / skills change!)
+    useEffect(() => {
+        if (!user || !profileData) return;
 
-        return () => unsub()
-    }, [user])
+        let active = true;
+        loadRecommendedProjects(user.uid).then((res) => {
+            if (active) {
+                setRecommendedProjects(res);
+            }
+        }).catch((err) => {
+            console.error('Error loading recommendations:', err);
+        });
+
+        return () => {
+            active = false;
+        };
+    }, [user, profileData]);
+
+    // 7. Reactive Suggested Users (If connections count is 0)
+    useEffect(() => {
+        if (!user || connectionsCount > 0) {
+            setSuggestedUsers([]);
+            return;
+        }
+
+        let active = true;
+        const loadSuggestions = async () => {
+            const discipline = profileData?.discipline || '';
+            let uQuery = query(collection(db, 'users'), limit(15));
+            if (discipline) {
+                uQuery = query(collection(db, 'users'), where('discipline', '==', discipline), limit(15));
+            }
+            const uSnap = await getDocs(uQuery);
+            const list: any[] = [];
+            uSnap.forEach(d => {
+                const dData = d.data();
+                if (d.id !== user.uid && dData.displayName) {
+                    list.push({ id: d.id, ...dData });
+                }
+            });
+            if (active) {
+                setSuggestedUsers(list.slice(0, 3));
+            }
+        };
+
+        loadSuggestions().catch((err) => {
+            console.error('Error loading suggestions:', err);
+        });
+
+        return () => {
+            active = false;
+        };
+    }, [user, connectionsCount, profileData?.discipline]);
 
     const formatTimeAgo = useCallback((date: Date): string => {
         const seconds = Math.floor((new Date().getTime() - date.getTime()) / 1000);
@@ -506,14 +547,6 @@ export function Dashboard() {
                                                 <User className="h-3.5 w-3.5 shrink-0" />
                                                 <span className="truncate">Edit Profile</span>
                                             </Button>
-                                            <Button
-                                                variant="outline"
-                                                className="w-full justify-start gap-2 text-xs"
-                                                onClick={() => navigate('/test/profile-redesign')}
-                                            >
-                                                <Sparkles className="h-3.5 w-3.5 shrink-0" />
-                                                <span className="truncate">New Profile</span>
-                                            </Button>
                                         </div>
                                     </CardContent>
                                 </Card>
@@ -524,7 +557,7 @@ export function Dashboard() {
                     <>
                         {/* Stats Grid - 2x2 on mobile, 4 cols on desktop */}
                         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6 sm:mb-8">
-                            <Card className="glass-card border-primary/25 hover:border-primary/50 transition-all duration-300 cursor-pointer" onClick={() => navigate('/dashboard/projects')}>
+                            <Card className="glass-card border-primary/25 hover:border-primary/50 hover:bg-primary/5 transition-all duration-300 cursor-pointer" onClick={() => navigate('/dashboard/projects')}>
                                 <CardContent className="p-4 sm:p-6">
                                     <div className="flex items-center justify-between">
                                         <div>
@@ -537,7 +570,7 @@ export function Dashboard() {
                                     </div>
                                 </CardContent>
                             </Card>
-                            <Card className="glass-card border-accent/25 hover:border-accent/50 transition-all duration-300 cursor-pointer" onClick={() => navigate('/dashboard/applications')}>
+                            <Card className="glass-card border-accent/25 hover:border-accent/50 hover:bg-accent/5 transition-all duration-300 cursor-pointer" onClick={() => navigate('/dashboard/applications')}>
                                 <CardContent className="p-4 sm:p-6">
                                     <div className="flex items-center justify-between">
                                         <div>
@@ -550,7 +583,7 @@ export function Dashboard() {
                                     </div>
                                 </CardContent>
                             </Card>
-                            <Card className="glass-card border-emerald-500/20 hover:border-emerald-500/40 transition-all duration-300 cursor-pointer" onClick={() => navigate('/dashboard/notifications')}>
+                            <Card className="glass-card border-emerald-500/20 hover:border-emerald-500/40 hover:bg-emerald-500/5 transition-all duration-300 cursor-pointer" onClick={() => navigate('/dashboard/notifications')}>
                                 <CardContent className="p-4 sm:p-6">
                                     <div className="flex items-center justify-between">
                                         <div>
@@ -563,7 +596,7 @@ export function Dashboard() {
                                     </div>
                                 </CardContent>
                             </Card>
-                            <Card className="glass-card border-primary/25 hover:border-primary/50 transition-all duration-300 cursor-pointer" onClick={() => navigate('/dashboard/saved')}>
+                            <Card className="glass-card border-primary/25 hover:border-primary/50 hover:bg-primary/5 transition-all duration-300 cursor-pointer" onClick={() => navigate('/dashboard/saved')}>
                                 <CardContent className="p-4 sm:p-6">
                                     <div className="flex items-center justify-between">
                                         <div>
@@ -606,58 +639,76 @@ export function Dashboard() {
                                                 <User className="h-4 w-4 shrink-0" />
                                                 <span className="truncate">Edit Profile</span>
                                             </Button>
-                                            <Button
-                                                variant="outline"
-                                                className="w-full justify-start gap-2 text-sm"
-                                                onClick={() => navigate('/test/profile-redesign')}
-                                            >
-                                                <Sparkles className="h-4 w-4 shrink-0" />
-                                                <span className="truncate">New Profile</span>
-                                            </Button>
                                         </div>
                                     </CardContent>
                                 </Card>
 
                                 {/* Recommended Projects */}
-                                <Card className="shadow-sm hover:shadow-md transition-shadow">
-                                    <CardHeader className="pb-3">
-                                        <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
-                                            <TrendingUp className="h-4 w-4 sm:h-5 sm:w-5 text-muted-foreground" />
-                                            Recommended
-                                        </CardTitle>
-                                        <CardDescription className="text-xs sm:text-sm">Projects matching your skills</CardDescription>
-                                    </CardHeader>
-                                    <CardContent className="pt-0">
-                                        {loading ? (
-                                            <div className="space-y-3">
-                                                {[1, 2, 3].map((i) => (
-                                                    <div key={i} className="animate-pulse">
-                                                        <div className="h-4 bg-white/10 rounded w-3/4 mb-2" />
-                                                        <div className="h-3 bg-white/10 rounded w-1/2 mb-2" />
-                                                        <div className="h-3 bg-white/10 rounded w-full" />
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        ) : recommendedProjects.length === 0 ? (
-                                            <p className="text-center py-4 text-white/50 text-xs sm:text-sm">Complete your profile to get personalized suggestions!</p>
-                                        ) : (
-                                            <div className="space-y-2 sm:space-y-3">
-                                                {recommendedProjects.map((project) => (
-                                                    <div key={project.id} className="p-3 rounded-lg border border-white/5 hover:border-primary/30 hover:bg-primary/5 transition-all duration-200 cursor-pointer" onClick={() => navigate(`/project/${project.id}`)}>
-                                                        <h4 className="font-semibold text-xs sm:text-sm mb-0.5 text-white line-clamp-1">{project.title}</h4>
-                                                        <p className="text-xs text-white/50 mb-1">{project.primaryDiscipline}</p>
-                                                        <p className="text-xs text-white/60 line-clamp-2 mb-2">{project.summary || project.description}</p>
-                                                        <div className="flex items-center gap-1.5 flex-wrap">
-                                                            {project.tags?.slice(0, 2).map((tag, i) => (
-                                                                <Badge key={i} variant="secondary" className="text-[10px] px-1.5 py-0 bg-white/5 text-white border-0">{tag}</Badge>
-                                                            ))}
-                                                        </div>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        )}
-                                    </CardContent>
-                                </Card>
+                                 {/* Recommended Projects */}
+                                 <Card className="shadow-sm hover:shadow-md transition-shadow">
+                                     <CardHeader className="pb-3">
+                                         <div className="flex justify-between items-start gap-2">
+                                             <div>
+                                                 <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+                                                     <TrendingUp className="h-4 w-4 sm:h-5 sm:w-5 text-muted-foreground" />
+                                                     Recommended
+                                                 </CardTitle>
+                                                 <CardDescription className="text-xs sm:text-sm">Projects matching your skills</CardDescription>
+                                             </div>
+                                             {recommendedProjects.length > 5 && (
+                                                 <Button 
+                                                     variant="ghost" 
+                                                     size="sm" 
+                                                     className="text-xs sm:text-sm h-8 px-2 sm:px-3 text-white/70 hover:text-white shrink-0 font-medium" 
+                                                     onClick={() => setShowRecommendedModal(true)}
+                                                 >
+                                                     View All
+                                                 </Button>
+                                             )}
+                                         </div>
+                                     </CardHeader>
+                                     <CardContent className="pt-0">
+                                         {loading ? (
+                                             <div className="space-y-3">
+                                                 {[1, 2, 3].map((i) => (
+                                                     <div key={i} className="animate-pulse">
+                                                         <div className="h-4 bg-white/10 rounded w-3/4 mb-2" />
+                                                         <div className="h-3 bg-white/10 rounded w-1/2 mb-2" />
+                                                         <div className="h-3 bg-white/10 rounded w-full" />
+                                                     </div>
+                                                 ))}
+                                             </div>
+                                         ) : recommendedProjects.length === 0 ? (
+                                             <p className="text-center py-4 text-white/50 text-xs sm:text-sm px-2">
+                                                 {isProfileIncomplete
+                                                     ? "Complete your profile (add skills or discipline) to get personalized suggestions!"
+                                                     : "No other active projects matching your profile found right now."}
+                                             </p>
+                                         ) : (
+                                             <div className="space-y-2 sm:space-y-3">
+                                                 {recommendedProjects.slice(0, 5).map((project) => (
+                                                     <div key={project.id} className="p-3 rounded-lg border border-white/5 hover:border-primary/30 hover:bg-primary/5 transition-all duration-200 cursor-pointer" onClick={() => navigate(`/project/${project.id}`)}>
+                                                         <div className="flex justify-between items-start gap-2 mb-1">
+                                                             <h4 className="font-semibold text-xs sm:text-sm text-white line-clamp-1 flex-1">{project.title}</h4>
+                                                             {project.matchScore !== undefined && (
+                                                                 <Badge className="text-[9px] px-1.5 py-0 bg-primary/10 hover:bg-primary/15 text-primary border border-primary/20 shrink-0 font-semibold transition-colors">
+                                                                     {project.matchScore}% Match
+                                                                 </Badge>
+                                                             )}
+                                                         </div>
+                                                         <p className="text-xs text-white/50 mb-1">{project.primaryDiscipline}</p>
+                                                         <p className="text-xs text-white/60 line-clamp-2 mb-2">{project.summary || project.description}</p>
+                                                         <div className="flex items-center gap-1.5 flex-wrap">
+                                                             {project.tags?.slice(0, 2).map((tag, i) => (
+                                                                 <Badge key={i} variant="secondary" className="text-[10px] px-1.5 py-0 bg-white/5 text-white border-0">{tag}</Badge>
+                                                             ))}
+                                                         </div>
+                                                     </div>
+                                                 ))}
+                                             </div>
+                                         )}
+                                     </CardContent>
+                                 </Card>
                             </div>
 
                             {/* Left Column — main content */}
@@ -767,52 +818,58 @@ export function Dashboard() {
                                     </CardContent>
                                 </Card>
 
-                                {/* Recent Activity */}
-                                <Card className="shadow-sm hover:shadow-md transition-shadow">
-                                    <CardHeader className="pb-3">
-                                        <div className="flex justify-between items-center">
-                                            <CardTitle className="flex items-center gap-2 text-base sm:text-lg text-white">
-                                                <Clock className="h-4 w-4 sm:h-5 sm:w-5 text-white/50" />
-                                                Recent Activity
-                                            </CardTitle>
-                                            <button
-                                                onClick={() => loadData()}
-                                                title="Refresh"
-                                                className="p-1.5 rounded-md text-white/40 hover:text-white hover:bg-white/5 transition-colors"
-                                            >
-                                                <RefreshCw className="h-3.5 w-3.5" />
-                                            </button>
-                                        </div>
-                                    </CardHeader>
-                                    <CardContent className="pt-0">
-                                        {loading ? (
-                                            <div className="space-y-2">
-                                                {[1, 2, 3].map(i => (
-                                                    <div key={i} className="animate-pulse h-10 bg-white/10 rounded-lg" />
-                                                ))}
-                                            </div>
-                                        ) : recentActivity.length === 0 ? (
-                                            <p className="text-center py-4 text-white/50 text-sm">No recent activity</p>
-                                        ) : (
-                                            <div className="space-y-1">
-                                                {recentActivity.map((activity) => (
-                                                    <div key={activity.id} className="flex items-start gap-3 p-2 sm:p-3 rounded-lg hover:bg-white/5 transition-colors duration-200">
-                                                        <div className="w-1.5 h-1.5 bg-white/40 rounded-full mt-2 flex-shrink-0" />
-                                                        <div className="flex-1 min-w-0">
-                                                            <p className="text-xs sm:text-sm text-white">{activity.message}</p>
-                                                            <p className="text-xs text-white/55 mt-0.5">{formatTimeAgo(activity.timestamp)}</p>
-                                                        </div>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                        )}
-                                    </CardContent>
-                                </Card>
+
                             </div>
                         </div>
                     </>
                 )}
             </DashboardLayout>
+
+            <Dialog open={showRecommendedModal} onOpenChange={setShowRecommendedModal}>
+                <DialogContent className="max-w-2xl bg-background/95 backdrop-blur-lg border border-white/10 text-white rounded-xl shadow-2xl p-4 sm:p-6">
+                    <DialogHeader className="pb-3 border-b border-white/10">
+                        <DialogTitle className="flex items-center gap-2 text-lg sm:text-xl font-bold text-white">
+                            <TrendingUp className="h-5 w-5 text-primary" />
+                            All Recommendations
+                        </DialogTitle>
+                    </DialogHeader>
+                    
+                    <div className="mt-4 max-h-[60vh] overflow-y-auto space-y-3 pr-2 scrollbar-thin scrollbar-thumb-white/10">
+                        {recommendedProjects.map((project) => (
+                            <div 
+                                key={project.id} 
+                                className="p-4 rounded-xl border border-white/5 hover:border-primary/30 hover:bg-primary/5 transition-all duration-200 cursor-pointer" 
+                                onClick={() => {
+                                    setShowRecommendedModal(false);
+                                    navigate(`/project/${project.id}`);
+                                }}
+                            >
+                                <div className="flex justify-between items-start gap-2 mb-1.5">
+                                    <h4 className="font-semibold text-sm sm:text-base text-white line-clamp-1 flex-1 hover:text-primary transition-colors">
+                                        {project.title}
+                                    </h4>
+                                    {project.matchScore !== undefined && (
+                                        <Badge className="text-[10px] px-2 py-0.5 bg-primary/10 hover:bg-primary/15 text-primary border border-primary/20 shrink-0 font-bold transition-colors">
+                                            {project.matchScore}% Match
+                                        </Badge>
+                                    )}
+                                </div>
+                                <p className="text-xs text-primary mb-2 font-medium">{project.primaryDiscipline}</p>
+                                <p className="text-xs sm:text-sm text-white/70 line-clamp-2 mb-3 leading-relaxed">
+                                    {project.summary || project.description}
+                                </p>
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                    {project.tags?.map((tag, i) => (
+                                        <Badge key={i} variant="secondary" className="text-[10px] px-2 py-0.5 bg-white/5 text-white/80 border-0">
+                                            {tag}
+                                        </Badge>
+                                    ))}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </DialogContent>
+            </Dialog>
         </ErrorBoundary>
     );
 }

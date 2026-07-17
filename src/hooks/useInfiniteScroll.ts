@@ -118,11 +118,15 @@ export function usePagination<T = DocumentData>(
   }, [])
 
   const addItems = useCallback((items: T[], lastDoc?: QueryDocumentSnapshot<T> | null) => {
-    setState(prev => ({
-      ...prev,
-      items: [...prev.items, ...items],
-      lastDoc: lastDoc || prev.lastDoc
-    }))
+    setState(prev => {
+      const existingIds = new Set(prev.items.map((item: any) => item.id).filter(Boolean))
+      const uniqueNewItems = items.filter((item: any) => !item.id || !existingIds.has(item.id))
+      return {
+        ...prev,
+        items: [...prev.items, ...uniqueNewItems],
+        lastDoc: lastDoc || prev.lastDoc
+      }
+    })
   }, [])
 
   const setLoading = useCallback((loading: boolean) => {
