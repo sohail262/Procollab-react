@@ -96,23 +96,27 @@ interface UserProfile {
 }
 
 const ROLE_CONFIG: Record<string, {
-    label: string; icon: any; color: string; badgeVariant: any
+    label: string; icon: any; color: string; badgeVariant: any; badgeClass: string
 }> = {
-    'Project Lead': {
-        label: 'Project Lead', icon: Crown,
-        color: 'text-yellow-500', badgeVariant: 'default',
+    'Owner': {
+        label: 'Owner', icon: Crown,
+        color: 'text-amber-500', badgeVariant: 'default',
+        badgeClass: 'bg-amber-100 text-amber-800 border-amber-250/20 dark:bg-amber-950/40 dark:text-amber-400',
     },
     'Admin': {
         label: 'Admin', icon: Shield,
         color: 'text-blue-500', badgeVariant: 'secondary',
+        badgeClass: 'bg-blue-100 text-blue-800 border-blue-250/20 dark:bg-blue-950/40 dark:text-blue-400',
     },
     'Member': {
         label: 'Member', icon: UserIcon,
-        color: 'text-gray-500', badgeVariant: 'outline',
+        color: 'text-green-600', badgeVariant: 'outline',
+        badgeClass: 'bg-emerald-50 text-emerald-700 border-emerald-250/20 dark:bg-emerald-950/40 dark:text-emerald-400',
     },
     'Viewer': {
         label: 'Viewer', icon: BookOpen,
         color: 'text-purple-400', badgeVariant: 'outline',
+        badgeClass: 'bg-purple-100 text-purple-800 border-purple-250/20 dark:bg-purple-950/40 dark:text-purple-400',
     },
 }
 
@@ -140,8 +144,8 @@ const HEALTH_CONFIG = {
 function normalizeRole(raw: string | undefined): string {
     if (!raw) return 'Member'
     const map: Record<string, string> = {
-        'owner':        'Project Lead',
-        'project lead': 'Project Lead',
+        'owner':        'Owner',
+        'project lead': 'Owner',
         'admin':        'Admin',
         'member':       'Member',
         'viewer':       'Viewer',
@@ -216,16 +220,25 @@ function MemberCard({
                                 </span>
                             )}
                         </div>
-                        <div className="min-w-0">
-                            <p className="font-semibold text-sm truncate max-w-[130px]">
-                                {member.displayName}
-                            </p>
+                        <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                                <p className="font-semibold text-sm truncate max-w-[120px]" title={member.displayName}>
+                                    {member.displayName}
+                                </p>
+                                <Badge
+                                    className={`px-1.5 py-0 text-[9px] font-semibold rounded-md border-none scale-90 origin-left shrink-0 ${
+                                        ROLE_CONFIG[member.role]?.badgeClass ?? ''
+                                    }`}
+                                >
+                                    {ROLE_CONFIG[member.role]?.label ?? member.role}
+                                </Badge>
+                            </div>
                             <div className="flex items-center gap-1 mt-0.5">
                                 <RoleIcon className={`h-3 w-3 ${
                                     ROLE_CONFIG[member.role]?.color
                                 }`} />
                                 <span className="text-xs text-muted-foreground">
-                                    {member.role}
+                                    {ROLE_CONFIG[member.role]?.label ?? member.role}
                                 </span>
                             </div>
                         </div>
@@ -1843,29 +1856,33 @@ export function ResourceManagement({ readOnly = false }: ResourceManagementProps
                                                     i % 2 === 0 ? '' : 'bg-muted/10'
                                                 }`}
                                             >
-                                                {/* Member */}
-                                                <td className="py-3 px-4">
-                                                    <div className="flex items-center gap-2">
-                                                        <Avatar className="h-7 w-7">
-                                                            <AvatarImage src={m.photoURL} />
-                                                            <AvatarFallback className="text-xs">
-                                                                {m.displayName.charAt(0)}
-                                                            </AvatarFallback>
-                                                        </Avatar>
-                                                        <div>
-                                                            <p className="font-medium
-                                                                max-w-[120px] truncate">
-                                                                {m.displayName}
-                                                            </p>
-                                                            {m.uid === user?.uid && (
-                                                                <span className="text-[10px]
-                                                                    text-primary font-medium">
-                                                                    You
-                                                                </span>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                </td>
+                                                 <td className="py-3 px-4">
+                                                     <div className="flex items-center gap-2">
+                                                         <Avatar className="h-7 w-7">
+                                                             <AvatarImage src={m.photoURL} />
+                                                             <AvatarFallback className="text-xs">
+                                                                 {m.displayName.charAt(0)}
+                                                             </AvatarFallback>
+                                                         </Avatar>
+                                                         <div className="flex items-center gap-1.5 min-w-0">
+                                                             <p className="font-medium max-w-[120px] truncate">
+                                                                 {m.displayName}
+                                                             </p>
+                                                             <Badge
+                                                                 className={`px-1 py-0 text-[8px] font-semibold rounded-md border-none scale-90 origin-left shrink-0 ${
+                                                                     ROLE_CONFIG[m.role]?.badgeClass ?? ''
+                                                                 }`}
+                                                             >
+                                                                 {ROLE_CONFIG[m.role]?.label ?? m.role}
+                                                             </Badge>
+                                                             {m.uid === user?.uid && (
+                                                                 <span className="text-[10px] text-primary font-medium shrink-0">
+                                                                     You
+                                                                 </span>
+                                                             )}
+                                                         </div>
+                                                     </div>
+                                                 </td>
                                                 {/* Role */}
                                                 <td className="py-3 px-4">
                                                     <div className="flex items-center gap-1">

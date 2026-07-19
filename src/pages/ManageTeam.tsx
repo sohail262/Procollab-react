@@ -1482,9 +1482,16 @@ export function ManageTeam() {
                                                             </AvatarFallback>
                                                         </Avatar>
                                                         <div>
-                                                            <p className="font-medium">
-                                                                {member.name}
-                                                            </p>
+                                                            <div className="flex items-center gap-2 flex-wrap">
+                                                                <p className="font-medium">
+                                                                    {member.name}
+                                                                </p>
+                                                                <Badge
+                                                                    className={`${getRoleBadgeColor(member.role)} border-none text-[9px] px-1.5 py-0 font-semibold rounded-md capitalize shrink-0`}
+                                                                >
+                                                                    {member.role}
+                                                                </Badge>
+                                                            </div>
                                                             <p className="text-xs text-muted-foreground">
                                                                 {member.email}
                                                             </p>
@@ -1521,11 +1528,6 @@ export function ManageTeam() {
                                                                 </SelectContent>
                                                             </Select>
                                                         )}
-                                                        <Badge
-                                                            className={`${getRoleBadgeColor(member.role)} border-none`}
-                                                        >
-                                                            {member.role}
-                                                        </Badge>
                                                         {member.role !== 'owner' && (
                                                             <Button
                                                                 variant="ghost"
@@ -1846,13 +1848,17 @@ export function ManageTeam() {
                                                             {(member.name || 'U').charAt(0).toUpperCase()}
                                                         </AvatarFallback>
                                                     </Avatar>
-                                                    <div className="min-w-0">
-                                                        <p className="text-sm font-medium truncate">
-                                                            {member.name}
-                                                        </p>
-                                                        <p className="text-xs text-muted-foreground capitalize">
-                                                            {member.role}
-                                                        </p>
+                                                    <div className="min-w-0 flex-1">
+                                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                                            <p className="text-sm font-medium truncate max-w-[100px]" title={member.name}>
+                                                                {member.name}
+                                                            </p>
+                                                            <Badge
+                                                                className={`${getRoleBadgeColor(member.role)} border-none text-[8px] px-1 py-0 font-semibold rounded-md capitalize shrink-0`}
+                                                            >
+                                                                {member.role}
+                                                            </Badge>
+                                                        </div>
                                                     </div>
                                                 </div>
                                             ))
