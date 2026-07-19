@@ -11,7 +11,7 @@ import {
     LayoutDashboard,
     FolderKanban,
     Send,
-    Bell,
+
     Bookmark,
     User,
     Search,
@@ -155,7 +155,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
         { name: 'My Projects', href: '/dashboard/projects', icon: FolderKanban },
         { name: 'Applications', href: '/dashboard/applications', icon: Send },
         { name: 'Saved', href: '/dashboard/saved', icon: Bookmark },
-        { name: 'Notifications', href: '/dashboard/notifications', icon: Bell },
+
         { name: 'Profile', href: '/profile', icon: User },
         ...(isAdmin ? [{ name: 'Admin', href: '/admin', icon: Shield }] : []),
     ]
