@@ -12,14 +12,15 @@ import {
     LayoutDashboard, FileText, Users, ImageIcon, X, Award, Star,
     Zap, CheckCircle, ShieldAlert, Crown, Heart, Code2, Compass, Shield,
     ShieldCheck, Clock, GitBranch, Layers, Briefcase, BarChart3, Share2, Search,
-    Lock
+    Lock, Upload, Info
 } from 'lucide-react'
 import {
     doc, getDoc, collection, query, where,
     getDocs, deleteDoc, onSnapshot, updateDoc,
     addDoc, serverTimestamp, orderBy,
 } from 'firebase/firestore'
-import { db } from '@/lib/firebase'
+import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage'
+import { db, storage } from '@/lib/firebase'
 import { cachedGetDoc, cachedQuery } from '@/lib/queryUtils'
 import { BADGE_IMAGES } from '@/lib/badgeImages'
 import { useToast } from '@/hooks/use-toast'
@@ -149,6 +150,41 @@ const ICON_MAP: Record<string, React.ComponentType<any>> = {
     FileText
 }
 
+const compressImage = (file: File, quality: number = 0.75): Promise<Blob> => {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = (e) => {
+            const img = new Image()
+            img.onload = () => {
+                const canvas = document.createElement('canvas')
+                canvas.width = img.naturalWidth
+                canvas.height = img.naturalHeight
+                const ctx = canvas.getContext('2d')
+                if (!ctx) {
+                    reject(new Error('Failed to get 2D canvas context'))
+                    return
+                }
+                ctx.drawImage(img, 0, 0)
+                canvas.toBlob(
+                    (blob) => {
+                        if (blob) {
+                            resolve(blob)
+                        } else {
+                            reject(new Error('Image compression returned null blob'))
+                        }
+                    },
+                    'image/jpeg',
+                    quality
+                )
+            }
+            img.onerror = (err) => reject(err)
+            img.src = e.target?.result as string
+        }
+        reader.onerror = (err) => reject(err)
+        reader.readAsDataURL(file)
+    })
+}
+
 export default function Profile() {
     const { id, username: usernameParam } = useParams<{ id?: string; username?: string }>()
     const { user: currentUser, logout } = useAuth()
@@ -199,6 +235,52 @@ export default function Profile() {
             toast({ title: 'Could not save banner', variant: 'destructive' })
         } finally {
             setSavingBanner(false)
+        }
+    }
+
+    const handleCustomBannerUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0]
+        if (!file || !currentUser || !isOwnProfile) return
+
+        setSavingBanner(true)
+        try {
+            // Compress the image before upload (keeping dimensions, lowering quality to 0.75)
+            const compressedBlob = await compressImage(file, 0.75)
+
+            // 1. Delete previous custom banner from Firebase Storage if it exists to avoid orphaned files
+            if (profile?.bannerStyle?.startsWith('http')) {
+                try {
+                    const oldRef = ref(storage, profile.bannerStyle)
+                    await deleteObject(oldRef)
+                } catch (deleteErr) {
+                    console.warn('Could not delete old banner from storage:', deleteErr)
+                }
+            }
+
+            // 2. Upload compressed image to Firebase Storage
+            const uniqueFileName = `users/${currentUser.uid}/banners/banner_${Date.now()}.jpg`
+            const storageRef = ref(storage, uniqueFileName)
+            await uploadBytes(storageRef, compressedBlob)
+            
+            // 3. Get the public download URL
+            const downloadURL = await getDownloadURL(storageRef)
+
+            // 4. Update user document in Firestore
+            await updateDoc(doc(db, 'users', currentUser.uid), { bannerStyle: downloadURL })
+            setProfile(prev => prev ? { ...prev, bannerStyle: downloadURL } : prev)
+            
+            // 5. Clear session cache so settings and other cached views get updated
+            try { sessionStorage.removeItem(`profile_${currentUser.uid}`) } catch { /* ignore */ }
+
+            setShowBannerPicker(false)
+            toast({ title: 'Custom banner uploaded!' })
+        } catch (err) {
+            console.error('Error uploading custom banner:', err)
+            toast({ title: 'Could not upload custom banner', variant: 'destructive' })
+        } finally {
+            setSavingBanner(false)
+            // Reset the input value so the user can re-upload the same file if needed
+            e.target.value = ''
         }
     }
 
@@ -911,8 +993,16 @@ export default function Profile() {
                         className="relative h-36 sm:h-44 overflow-hidden cursor-pointer group rounded-t-xl"
                         onClick={() => isOwnProfile && setShowBannerPicker(true)}
                     >
-                        {/* Render the chosen SVG banner */}
-                        {currentBanner.render()}
+                        {/* Render the chosen SVG banner or custom image */}
+                        {profile?.bannerStyle?.startsWith('http') ? (
+                            <img
+                                src={profile.bannerStyle}
+                                alt="Profile Banner"
+                                className="w-full h-full object-cover"
+                            />
+                        ) : (
+                            currentBanner.render()
+                        )}
 
                         {/* Change banner hint — own profile only */}
                         {isOwnProfile && (
@@ -1903,42 +1993,111 @@ export default function Profile() {
             )}
 
             {/* Banner picker overlay (moved to page root to avoid container-bound z-index issues) */}
-            {showBannerPicker && (
-                <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-                    <div className="bg-zinc-950 border border-zinc-800 rounded-xl shadow-2xl p-4 w-full max-w-2xl">
-                        <div className="flex items-center justify-between mb-3">
-                            <h3 className="font-semibold text-sm">Choose a banner</h3>
-                            <button
-                                onClick={() => setShowBannerPicker(false)}
-                                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"
-                            >
-                                <X className="h-4 w-4" />
-                            </button>
-                        </div>
-                        <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 max-h-[60vh] overflow-y-auto pr-1">
-                            {BANNER_PRESETS.map(preset => (
+            {showBannerPicker && (() => {
+                const isCustom = !!profile?.bannerStyle?.startsWith('http')
+                const selectedPresetId = isCustom ? null : (profile?.bannerStyle || DEFAULT_BANNER.id)
+                return (
+                    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+                        <div className="bg-zinc-950 border border-zinc-800 rounded-xl shadow-2xl p-6 w-full max-w-2xl">
+                            <div className="flex items-center justify-between mb-4">
+                                <h3 className="font-semibold text-base text-white">Choose profile banner</h3>
                                 <button
-                                    key={preset.id}
-                                    onClick={() => handleBannerSelect(preset)}
-                                    disabled={savingBanner}
-                                    className={`relative h-16 sm:h-20 rounded-lg overflow-hidden ring-2 transition-all hover:scale-105 ${
-                                        currentBanner.id === preset.id
-                                            ? 'ring-blue-500 scale-105'
-                                            : 'ring-transparent hover:ring-gray-300 dark:hover:ring-gray-600'
-                                    }`}
+                                    onClick={() => setShowBannerPicker(false)}
+                                    className="text-gray-400 hover:text-white transition-colors"
                                 >
-                                    {preset.render()}
-                                    {currentBanner.id === preset.id && (
-                                        <div className="absolute inset-0 flex items-center justify-center bg-black/30">
-                                            <Check className="h-5 w-5 text-white drop-shadow" />
-                                        </div>
-                                    )}
+                                    <X className="h-4 w-4" />
                                 </button>
-                            ))}
+                            </div>
+
+                            <div className="flex flex-col gap-4">
+                                {/* Custom Upload Section */}
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div className="border border-dashed border-zinc-800 rounded-xl p-4 flex flex-col items-center justify-center gap-2 hover:border-zinc-700 transition-colors cursor-pointer relative min-h-[140px] bg-zinc-900/20">
+                                        {savingBanner ? (
+                                            <div className="flex flex-col items-center gap-2">
+                                                <Loader2 className="h-6 w-6 text-blue-500 animate-spin" />
+                                                <span className="text-xs text-zinc-400">Processing & uploading...</span>
+                                            </div>
+                                        ) : (
+                                            <>
+                                                <Upload className="h-6 w-6 text-zinc-400" />
+                                                <span className="text-sm font-medium text-zinc-200">Upload custom banner</span>
+                                                <span className="text-xs text-zinc-500 text-center">PNG, JPG or JPEG up to 10MB</span>
+                                                <input 
+                                                    type="file" 
+                                                    accept="image/*" 
+                                                    className="absolute inset-0 opacity-0 cursor-pointer" 
+                                                    onChange={handleCustomBannerUpload}
+                                                    disabled={savingBanner}
+                                                />
+                                            </>
+                                        )}
+                                    </div>
+
+                                    {/* Canva Instructions Box */}
+                                    <div className="bg-zinc-900/30 border border-zinc-800/80 rounded-xl p-4 flex flex-col justify-center">
+                                        <div className="flex items-start gap-2.5">
+                                            <Info className="h-4 w-4 text-blue-400 shrink-0 mt-0.5" />
+                                            <div className="space-y-1">
+                                                <h4 className="text-xs font-semibold text-zinc-200">Design Instructions:</h4>
+                                                <p className="text-[11px] leading-relaxed text-zinc-400">
+                                                    For best results, go to <a href="https://canva.com" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">Canva.com</a>, create a design with custom dimensions <strong className="text-zinc-200">2048 × 352 px</strong>, export it as PNG or JPG, and upload here.
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* Current Custom Banner Preview if active */}
+                                {isCustom && profile?.bannerStyle && (
+                                    <div className="mt-1">
+                                        <h4 className="text-xs font-medium text-zinc-400 mb-2">Current Custom Banner</h4>
+                                        <div className="relative h-20 w-full rounded-lg overflow-hidden border border-zinc-800 ring-2 ring-blue-500">
+                                            <img src={profile.bannerStyle} className="w-full h-full object-cover" alt="Custom Banner" />
+                                            <div className="absolute inset-0 flex items-center justify-center bg-black/40">
+                                                <Check className="h-5 w-5 text-white drop-shadow" />
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
+
+                                {/* Separator */}
+                                <div className="flex items-center gap-2 my-1">
+                                    <div className="h-[1px] bg-zinc-800 flex-1" />
+                                    <span className="text-[10px] text-zinc-500 font-semibold uppercase tracking-wider">Or choose a preset</span>
+                                    <div className="h-[1px] bg-zinc-800 flex-1" />
+                                </div>
+
+                                {/* Presets Grid */}
+                                <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 max-h-[30vh] overflow-y-auto pr-1">
+                                    {BANNER_PRESETS.map(preset => {
+                                        const isSelected = selectedPresetId === preset.id
+                                        return (
+                                            <button
+                                                key={preset.id}
+                                                onClick={() => handleBannerSelect(preset)}
+                                                disabled={savingBanner}
+                                                className={`relative h-16 sm:h-20 rounded-lg overflow-hidden ring-2 transition-all hover:scale-105 ${
+                                                    isSelected
+                                                        ? 'ring-blue-500 scale-105'
+                                                        : 'ring-transparent hover:ring-gray-300 dark:hover:ring-gray-600'
+                                                }`}
+                                            >
+                                                {preset.render()}
+                                                {isSelected && (
+                                                    <div className="absolute inset-0 flex items-center justify-center bg-black/30">
+                                                        <Check className="h-5 w-5 text-white drop-shadow" />
+                                                    </div>
+                                                )}
+                                            </button>
+                                        )
+                                    })}
+                                </div>
+                            </div>
                         </div>
                     </div>
-                </div>
-            )}
+                )
+            })()}
 
         </DashboardLayout>
     )

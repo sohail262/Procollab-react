@@ -185,6 +185,8 @@ export function ProjectDashboard() {
     const [isCompletionModalOpen, setIsCompletionModalOpen] = useState(false)
     const [isConfigureShowcaseOpen, setIsConfigureShowcaseOpen] = useState(false)
     const [shareDialogOpen, setShareDialogOpen] = useState(false)
+    const [isReopenDialogOpen, setIsReopenDialogOpen] = useState(false)
+    const [reopenStatus, setReopenStatus] = useState<'active' | 'recruiting'>('active')
 
     // ── Share handlers ────────────────────────────────────────────────────────
     const handleCopyLink = async () => {
@@ -338,6 +340,96 @@ export function ProjectDashboard() {
             toast({
                 title: 'Error',
                 description: 'Failed to record completion vote.',
+                variant: 'destructive',
+            })
+        } finally {
+            setUpdatingStatus(false)
+        }
+    }
+
+    const handleReopenProject = async () => {
+        if (!id || !user?.uid) return
+
+        setUpdatingStatus(true)
+        try {
+            // Get all unique collaborators (owner + team members)
+            const allCollaboratorUids = Array.from(new Set([
+                ...(teamMembers?.map(m => m.uid) || []),
+                ...(project?.createdBy ? [project.createdBy] : [])
+            ])).filter(Boolean)
+
+            // Batch-update users' reputation statistics (decrementing them)
+            const batch = writeBatch(db)
+            allCollaboratorUids.forEach((collabUid) => {
+                const userTasks = tasks.filter(t => t.assigneeId === collabUid)
+                const userAssigned = userTasks.length
+                const userCompleted = userTasks.filter(t => t.status === 'done').length
+
+                const toDate = (val: any) => {
+                    if (!val) return null
+                    if (val.toDate && typeof val.toDate === 'function') return val.toDate()
+                    return new Date(val)
+                }
+
+                const userOnTime = userTasks.filter(t => {
+                    if (t.status !== 'done') return false
+                    const due = toDate(t.dueDate)
+                    return !due || due >= new Date()
+                }).length
+
+                const userRef = doc(db, 'users', collabUid)
+                batch.update(userRef, {
+                    "reputationStats.totalTasksAssigned": increment(-userAssigned),
+                    "reputationStats.totalTasksCompleted": increment(-userCompleted),
+                    "reputationStats.totalTasksCompletedOnTime": increment(-userOnTime),
+                    "reputationStats.projectsCompleted": increment(-1)
+                })
+
+                // Delete peer reviews (this member as recipient, other members as reviewers)
+                allCollaboratorUids.forEach((reviewerId) => {
+                    if (reviewerId === collabUid) return
+                    const reviewId = `${reviewerId}_${id}`
+                    const reviewRef = doc(db, 'users', collabUid, 'reviews', reviewId)
+                    batch.delete(reviewRef)
+                })
+
+                // Delete the reviewState document
+                const reviewStateRef = doc(db, 'projects', id, 'reviewStates', collabUid)
+                batch.delete(reviewStateRef)
+            })
+
+            // Update project status to the selected reopenStatus
+            const projectRef = doc(db, 'projects', id)
+            batch.update(projectRef, {
+                status: reopenStatus,
+                completedAt: null,
+                completionVotes: {},
+                activityVerified: false
+            })
+
+            await batch.commit()
+
+            // Recalculate reputation and check badges for all collaborators
+            await Promise.all(allCollaboratorUids.map(uid => aggregateUserReputation(uid)))
+
+            setProject((prev: any) => prev ? {
+                ...prev,
+                status: reopenStatus,
+                completedAt: null,
+                completionVotes: {},
+                activityVerified: false
+            } : prev)
+
+            setIsReopenDialogOpen(false)
+            toast({
+                title: 'Project Reopened',
+                description: `Project status has been updated to "${reopenStatus}".`,
+            })
+        } catch (err) {
+            console.error('Error reopening project:', err)
+            toast({
+                title: 'Error',
+                description: 'Failed to reopen project.',
                 variant: 'destructive',
             })
         } finally {
@@ -808,6 +900,19 @@ export function ProjectDashboard() {
                             >
                                 <Share2 className="h-4 w-4 mr-2" />
                                 Showcase & Resume
+                            </Button>
+                        )}
+
+                        {project?.status === 'completed' && (isOwner || isAdmin || isMember) && (
+                            <Button
+                                size="sm"
+                                variant="outline"
+                                className="border-red-300 dark:border-red-750 bg-red-50/50 dark:bg-red-950/20 text-red-700 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50 h-8 active:scale-[0.96] transition-transform"
+                                onClick={() => setIsReopenDialogOpen(true)}
+                                disabled={updatingStatus}
+                            >
+                                <RefreshCw className="h-4 w-4 mr-2" />
+                                Mark Incomplete
                             </Button>
                         )}
 
@@ -1562,6 +1667,62 @@ export function ProjectDashboard() {
                             </Button>
                         </div>
                     </div>
+                </DialogContent>
+            </Dialog>
+
+            {/* Reopen / Mark Incomplete Dialog */}
+            <Dialog open={isReopenDialogOpen} onOpenChange={setIsReopenDialogOpen}>
+                <DialogContent className="max-w-md bg-zinc-950/95 backdrop-blur-xl border border-zinc-800 text-white p-6 rounded-2xl">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2 text-lg font-bold">
+                            <RefreshCw className="h-5 w-5 text-primary" />
+                            Reopen Project
+                        </DialogTitle>
+                        <DialogDescription className="text-zinc-400">
+                            This will change the project status back to incomplete. Choose the new status below:
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4 pt-3">
+                        <div className="space-y-2">
+                            <label className="text-sm font-medium text-zinc-300">New Project Status</label>
+                            <select
+                                value={reopenStatus}
+                                onChange={(e) => setReopenStatus(e.target.value as 'active' | 'recruiting')}
+                                className="w-full px-3 py-2.5 bg-zinc-900/60 border border-zinc-800 rounded-lg text-sm text-zinc-300 focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent cursor-pointer"
+                            >
+                                <option value="active" className="bg-zinc-950 text-white">Active (Team is complete & working)</option>
+                                <option value="recruiting" className="bg-zinc-950 text-white">Recruiting (Looking for new members)</option>
+                            </select>
+                        </div>
+                        <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-3 text-xs text-yellow-500 space-y-1">
+                            <p className="font-semibold">Important Notice:</p>
+                            <p>This action will delete all submitted peer reviews for this completion and adjust user reputation stats back to their pre-completion levels.</p>
+                        </div>
+                    </div>
+                    <DialogFooter className="gap-2 sm:gap-0 pt-2">
+                        <Button
+                            variant="ghost"
+                            className="text-zinc-400 hover:text-white hover:bg-zinc-900 rounded-lg active:scale-[0.96] transition-transform"
+                            onClick={() => setIsReopenDialogOpen(false)}
+                            disabled={updatingStatus}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            className="bg-primary hover:bg-primary/90 text-primary-foreground rounded-lg active:scale-[0.96] transition-transform"
+                            onClick={handleReopenProject}
+                            disabled={updatingStatus}
+                        >
+                            {updatingStatus ? (
+                                <>
+                                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                                    Reopening...
+                                </>
+                            ) : (
+                                'Confirm Reopen'
+                            )}
+                        </Button>
+                    </DialogFooter>
                 </DialogContent>
             </Dialog>
         </DashboardLayout>
