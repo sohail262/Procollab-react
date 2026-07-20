@@ -20,7 +20,8 @@ import {
     UserCog, BarChart3, AlertCircle, CheckCircle2, Clock, Plus,
     XCircle, Info, AlertTriangle, Flag, Award, BookOpen, Crown,
     Heart, Code2, Compass, ShieldAlert, CheckCircle, HelpCircle, Zap,
-    ShieldCheck, GitBranch, Layers, Briefcase, FileText, ChevronDown
+    ShieldCheck, GitBranch, Layers, Briefcase, FileText, ChevronDown,
+    MessageSquare, Loader2
 } from 'lucide-react'
 import {
     LineChart, Line, XAxis, YAxis, CartesianGrid,
@@ -36,7 +37,7 @@ import {
     type PlatformStats, type UserData, type ProjectData,
     type Announcement, type GrowthDataPoint, type ActivityLog, type ModerationItem
 } from '@/services/adminService'
-import { loadFeedbacks, resolveFeedback, deleteFeedback, type FeedbackData } from '@/services/feedbackService'
+import { loadFeedbacks, resolveFeedback, deleteFeedback, replyToFeedback, replyToFeedbackGroup, type FeedbackData } from '@/services/feedbackService'
 import { useToast } from '@/hooks/use-toast'
 import { getFlagMessage } from '@/services/contentModerationService'
 import { FCMTestPanel } from '@/components/FCMTestPanel'
@@ -266,6 +267,16 @@ export function AdminDashboard() {
     const [feedbacks, setFeedbacks] = useState<FeedbackData[]>([])
     const [feedbackFilter, setFeedbackFilter] = useState('all')
     const [viewingScreenshot, setViewingScreenshot] = useState<string | null>(null)
+
+    // Reply Dialog States
+    const [replyingFeedback, setReplyingFeedback] = useState<FeedbackData | null>(null)
+    const [replyMessage, setReplyMessage] = useState('')
+    const [replyResolve, setReplyResolve] = useState(false)
+    const [sendingReply, setSendingReply] = useState(false)
+
+    // Queue / Batch States
+    const [replyQueue, setReplyQueue] = useState<Record<string, { message: string; resolve: boolean }>>({})
+    const [processingQueue, setProcessingQueue] = useState(false)
 
     // Data states
     const [stats, setStats] = useState<PlatformStats | null>(null)
@@ -596,6 +607,90 @@ export function AdminDashboard() {
             setActiveTab(tab)
         }
     }, [])
+
+    const handleSendQueue = async () => {
+        if (!user || Object.keys(replyQueue).length === 0) return
+        setProcessingQueue(true)
+
+        try {
+            // 1. Group the queued items by their unique combination of:
+            // - message
+            // - resolve status
+            const groups: Record<string, { message: string; resolve: boolean; items: FeedbackData[] }> = {}
+
+            Object.entries(replyQueue).forEach(([feedbackId, draft]) => {
+                const item = feedbacks.find(f => f.id === feedbackId)
+                if (!item) return
+
+                const key = `${draft.resolve}_${draft.message}`
+                if (!groups[key]) {
+                    groups[key] = {
+                        message: draft.message,
+                        resolve: draft.resolve,
+                        items: []
+                    }
+                }
+                groups[key].items.push(item)
+            })
+
+            // 2. Process each group
+            let fcmInvocations = 0
+            const groupEntries = Object.entries(groups)
+
+            for (const [_, group] of groupEntries) {
+                if (group.items.length === 0) continue
+
+                // Batch optimization:
+                // If group.items has more than 1 item, we call replyToFeedbackGroup
+                // If group.items has exactly 1 item, we call replyToFeedback
+                if (group.items.length > 1) {
+                    await replyToFeedbackGroup(group.items, group.message, user.uid, group.resolve)
+                } else {
+                    await replyToFeedback(group.items[0], group.message, user.uid, group.resolve)
+                }
+                fcmInvocations += 1
+            }
+
+            // 3. Update the local feedbacks state in one go
+            setFeedbacks(prev =>
+                prev.map(f => {
+                    const queued = replyQueue[f.id!]
+                    if (queued) {
+                        return {
+                            ...f,
+                            adminReply: queued.message,
+                            repliedAt: { seconds: Date.now() / 1000 },
+                            repliedBy: user.uid,
+                            resolved: queued.resolve ? true : f.resolved,
+                            resolvedAt: queued.resolve ? { seconds: Date.now() / 1000 } : f.resolvedAt,
+                            resolvedBy: queued.resolve ? user.uid : f.resolvedBy,
+                        }
+                    }
+                    return f
+                })
+            )
+
+            // 4. Reset queue
+            const queuedCount = Object.keys(replyQueue).length
+            setReplyQueue({})
+            
+            // 5. Toast optimization report
+            toast({
+                title: 'All Drafts Sent!',
+                description: `Delivered ${queuedCount} replies in exactly ${fcmInvocations} FCM batches.`,
+                variant: 'success'
+            })
+        } catch (err) {
+            console.error('Error sending reply queue:', err)
+            toast({
+                title: 'Queue Send Failed',
+                description: 'An error occurred while transmitting replies.',
+                variant: 'destructive'
+            })
+        } finally {
+            setProcessingQueue(false)
+        }
+    }
 
     const loadFeedbacksLocal = async (): Promise<FeedbackData[]> => {
         try {
@@ -1630,6 +1725,51 @@ export function AdminDashboard() {
                         </CardHeader>
 
                         <CardContent>
+                            {Object.keys(replyQueue).length > 0 && (
+                                <div className="mb-4 p-4 rounded-xl border border-blue-500/20 bg-blue-500/5 backdrop-blur-md flex flex-col sm:flex-row items-center justify-between gap-4 animate-in fade-in slide-in-from-top-4 duration-300">
+                                    <div className="flex items-center gap-3">
+                                        <div className="h-9 w-9 rounded-lg bg-blue-500/10 flex items-center justify-center text-blue-400">
+                                            <MessageSquare className="h-5 w-5 animate-pulse" />
+                                        </div>
+                                        <div>
+                                            <h4 className="text-sm font-semibold text-white">Pending Reply Queue</h4>
+                                            <p className="text-xs text-white/50">
+                                                You have <strong className="text-blue-400 font-bold">{Object.keys(replyQueue).length}</strong> reply drafts ready to send.
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <Button
+                                            size="sm"
+                                            variant="outline"
+                                            className="border-white/10 text-white hover:bg-white/5 font-semibold text-xs h-9"
+                                            onClick={() => setReplyQueue({})}
+                                            disabled={processingQueue}
+                                        >
+                                            Discard Drafts
+                                        </Button>
+                                        <Button
+                                            size="sm"
+                                            className="bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs h-9 flex items-center gap-1.5"
+                                            onClick={handleSendQueue}
+                                            disabled={processingQueue}
+                                        >
+                                            {processingQueue ? (
+                                                <>
+                                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                                    Sending Batches...
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <Megaphone className="h-3.5 w-3.5" />
+                                                    Send All Drafted ({Object.keys(replyQueue).length})
+                                                </>
+                                            )}
+                                        </Button>
+                                    </div>
+                                </div>
+                            )}
+
                             {feedbacks.length === 0 ? (
                                 <div className="text-center py-12">
                                     <CheckCircle className="h-16 w-16 mx-auto text-green-500 mb-4" />
@@ -1681,8 +1821,12 @@ export function AdminDashboard() {
                                                                 ) : (
                                                                     <Badge className="bg-zinc-500/20 text-zinc-400 border-zinc-500/30">Pending</Badge>
                                                                 )}
+                                                                {replyQueue[item.id!] && (
+                                                                    <Badge className="bg-orange-500/20 text-orange-400 border-orange-500/30 flex items-center gap-1">
+                                                                        <Clock className="h-3 w-3 animate-pulse" /> Drafted in Queue
+                                                                    </Badge>
+                                                                )}
                                                             </div>
-
                                                             {/* Message */}
                                                             <p className="text-sm text-white/90 leading-relaxed whitespace-pre-wrap">
                                                                 {item.message}
@@ -1721,38 +1865,133 @@ export function AdminDashboard() {
                                                                     </>
                                                                 )}
                                                             </div>
+
+                                                            {/* Drafted Reply in Queue */}
+                                                            {replyQueue[item.id!] && (
+                                                                <div className="mt-3 p-3.5 bg-orange-500/5 border border-orange-500/10 rounded-lg space-y-1.5 max-w-xl">
+                                                                    <div className="flex items-center justify-between text-[11px]">
+                                                                        <span className="font-semibold text-orange-400 flex items-center gap-1">
+                                                                            <Clock className="h-3 w-3 animate-pulse" /> Drafted Reply (Will mark resolved: {replyQueue[item.id!].resolve ? "Yes" : "No"})
+                                                                        </span>
+                                                                        <button 
+                                                                            onClick={() => {
+                                                                                const updated = { ...replyQueue }
+                                                                                delete updated[item.id!]
+                                                                                setReplyQueue(updated)
+                                                                            }}
+                                                                            className="text-[10px] text-red-400 hover:text-red-300 font-semibold hover:underline"
+                                                                        >
+                                                                            Remove Draft
+                                                                        </button>
+                                                                    </div>
+                                                                    <p className="text-xs text-white/80 leading-relaxed italic">
+                                                                        "{replyQueue[item.id!].message}"
+                                                                    </p>
+                                                                </div>
+                                                            )}
+
+                                                            {/* Admin Reply Log */}
+                                                            {item.adminReply && (
+                                                                <div className="mt-3 p-3.5 bg-blue-500/5 border border-blue-500/10 rounded-lg space-y-1.5 max-w-xl">
+                                                                    <div className="flex items-center justify-between text-[11px]">
+                                                                        <span className="font-semibold text-blue-400 flex items-center gap-1">
+                                                                            <MessageSquare className="h-3 w-3" /> Response Sent
+                                                                        </span>
+                                                                        {item.repliedAt && <span className="text-white/40">{formatTimeAgo(item.repliedAt)}</span>}
+                                                                    </div>
+                                                                    <p className="text-xs text-white/80 leading-relaxed italic">
+                                                                        "{item.adminReply}"
+                                                                    </p>
+                                                                </div>
+                                                            )}
                                                         </div>
 
                                                         {/* Action Buttons */}
                                                         <div className="flex flex-col gap-2 md:w-36 flex-shrink-0">
+                                                            {(() => {
+                                                                const recipientUid = item.submittedByUid || item.submittedBy;
+                                                                const cannotReply = !recipientUid || recipientUid === 'anonymous';
+                                                                return (
+                                                                    <Button
+                                                                        size="sm"
+                                                                        variant="outline"
+                                                                        className="border-white/10 text-white hover:bg-white/5 font-semibold rounded-lg h-9 text-xs flex items-center justify-center gap-1.5"
+                                                                        disabled={cannotReply}
+                                                                        onClick={() => {
+                                                                            setReplyingFeedback(item)
+                                                                            setReplyMessage(replyQueue[item.id!]?.message || '')
+                                                                            setReplyResolve(replyQueue[item.id!]?.resolve !== undefined ? replyQueue[item.id!].resolve : !item.resolved)
+                                                                        }}
+                                                                        title={cannotReply ? "Cannot reply to anonymous guest submissions" : "Reply to submitter"}
+                                                                    >
+                                                                        <MessageSquare className="h-3.5 w-3.5" />
+                                                                        {replyQueue[item.id!] ? 'Edit Draft' : item.adminReply ? 'Reply Again' : 'Reply'}
+                                                                    </Button>
+                                                                );
+                                                            })()}
+
                                                             {!item.resolved ? (
-                                                                <Button
-                                                                    size="sm"
-                                                                    className="bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg h-9 text-xs border-0"
-                                                                    onClick={async () => {
-                                                                        if (!user) return
-                                                                        try {
-                                                                            await resolveFeedback(item.id!, user.uid, true)
-                                                                            setFeedbacks(prev =>
-                                                                                prev.map(f => f.id === item.id ? { ...f, resolved: true } : f)
-                                                                            )
-                                                                            toast({
-                                                                                title: 'Feedback Resolved',
-                                                                                description: 'Marked feedback as resolved.',
-                                                                                variant: 'success'
-                                                                            })
-                                                                        } catch (e) {
-                                                                            console.error(e)
-                                                                            toast({
-                                                                                title: 'Action Failed',
-                                                                                variant: 'destructive'
-                                                                            })
-                                                                        }
-                                                                    }}
-                                                                >
-                                                                    <CheckCircle className="h-3.5 w-3.5 mr-1.5" />
-                                                                    Resolve
-                                                                </Button>
+                                                                <>
+                                                                    <Button
+                                                                        size="sm"
+                                                                        className="bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg h-9 text-xs border-0"
+                                                                        onClick={async () => {
+                                                                            if (!user) return
+                                                                            try {
+                                                                                await resolveFeedback(item, user.uid, true)
+                                                                                setFeedbacks(prev =>
+                                                                                    prev.map(f => f.id === item.id ? { ...f, resolved: true } : f)
+                                                                                )
+                                                                                toast({
+                                                                                    title: 'Feedback Resolved',
+                                                                                    description: 'Marked feedback as resolved.',
+                                                                                    variant: 'success'
+                                                                                })
+                                                                            } catch (e) {
+                                                                                console.error(e)
+                                                                                toast({
+                                                                                    title: 'Action Failed',
+                                                                                    variant: 'destructive'
+                                                                                })
+                                                                            }
+                                                                        }}
+                                                                    >
+                                                                        <CheckCircle className="h-3.5 w-3.5 mr-1.5" />
+                                                                        Resolve
+                                                                    </Button>
+
+                                                                    {!replyQueue[item.id!] && (
+                                                                        <Button
+                                                                            size="sm"
+                                                                            variant="secondary"
+                                                                            className="bg-zinc-800 hover:bg-zinc-700 text-white border border-white/10 font-semibold rounded-lg h-9 text-xs flex items-center justify-center gap-1.5"
+                                                                            onClick={() => {
+                                                                                let defaultMsg = "Thank you for sharing your feedback! We have reviewed it and appreciate you taking the time to help us improve the platform."
+                                                                                if (item.type === 'bug') {
+                                                                                    defaultMsg = "Thanks for reporting this bug! We have resolved the issue. Let us know if you run into anything else."
+                                                                                } else if (item.type === 'feature_request') {
+                                                                                    defaultMsg = "Thanks for this feature suggestion! We have reviewed your idea and appreciate your input on how to improve the platform."
+                                                                                }
+                                                                                
+                                                                                setReplyQueue(prev => ({
+                                                                                    ...prev,
+                                                                                    [item.id!]: {
+                                                                                        message: defaultMsg,
+                                                                                        resolve: true
+                                                                                    }
+                                                                                }))
+                                                                                toast({
+                                                                                    title: 'Added to Queue',
+                                                                                    description: 'Drafted default resolution response and added to send queue.',
+                                                                                    variant: 'success'
+                                                                                })
+                                                                            }}
+                                                                        >
+                                                                            <Clock className="h-3.5 w-3.5 mr-1.5" />
+                                                                            {item.type === 'bug' ? 'Queue Resolve' : 'Queue Review'}
+                                                                        </Button>
+                                                                    )}
+                                                                </>
                                                             ) : (
                                                                 <Button
                                                                     size="sm"
@@ -1761,7 +2000,7 @@ export function AdminDashboard() {
                                                                     onClick={async () => {
                                                                         if (!user) return
                                                                         try {
-                                                                            await resolveFeedback(item.id!, user.uid, false)
+                                                                            await resolveFeedback(item, user.uid, false)
                                                                             setFeedbacks(prev =>
                                                                                 prev.map(f => f.id === item.id ? { ...f, resolved: false } : f)
                                                                             )
@@ -3075,6 +3314,218 @@ export function AdminDashboard() {
                             />
                         </div>
                     )}
+                </DialogContent>
+            </Dialog>
+
+            {/* Reply to Feedback Dialog */}
+            <Dialog open={!!replyingFeedback} onOpenChange={(open) => !open && setReplyingFeedback(null)}>
+                <DialogContent className="max-w-lg bg-zinc-950 border-white/10 text-white">
+                    <DialogHeader className="border-b border-white/5 pb-3">
+                        <DialogTitle className="text-white text-base font-semibold flex items-center gap-2">
+                            <MessageSquare className="h-5 w-5 text-blue-400" />
+                            Reply to Submitter
+                        </DialogTitle>
+                        <DialogDescription className="text-white/60 text-xs">
+                            Send an in-app notification directly to the user who submitted this report.
+                        </DialogDescription>
+                    </DialogHeader>
+
+                    {replyingFeedback && (
+                        <div className="space-y-4 py-2">
+                            {/* Original Feedback Details */}
+                            <div className="bg-white/[0.02] border border-white/5 rounded-lg p-3 space-y-1.5">
+                                <div className="flex items-center justify-between text-[11px] text-white/40">
+                                    <span className="font-semibold text-white/50 capitalize">Original {replyingFeedback.type.replace('_', ' ')}</span>
+                                    <span>Submitted by {replyingFeedback.submittedByName}</span>
+                                </div>
+                                <p className="text-xs text-white/70 line-clamp-3 leading-relaxed">
+                                    "{replyingFeedback.message}"
+                                </p>
+                            </div>
+
+                            {/* Presets / Templates */}
+                            <div className="space-y-2">
+                                <Label className="text-xs text-white/60 font-semibold">Message Presets (Quick Fill):</Label>
+                                <div className="flex flex-wrap gap-2">
+                                    {replyingFeedback.type === 'bug' && (
+                                        <Button
+                                            type="button"
+                                            size="sm"
+                                            variant="outline"
+                                            className="text-[10px] h-7 border-white/10 text-white/80 hover:bg-white/5"
+                                            onClick={() => setReplyMessage("Thanks for reporting this bug! We have investigated and resolved the issue. Let us know if you run into anything else.")}
+                                        >
+                                            🔧 Resolved Bug thanks
+                                        </Button>
+                                    )}
+                                    {replyingFeedback.type === 'feature_request' && (
+                                        <Button
+                                            type="button"
+                                            size="sm"
+                                            variant="outline"
+                                            className="text-[10px] h-7 border-white/10 text-white/80 hover:bg-white/5"
+                                            onClick={() => setReplyMessage("Thanks for this great feature suggestion! We have added it to our product roadmap. We appreciate your input.")}
+                                        >
+                                            💡 Roadmap addition
+                                        </Button>
+                                    )}
+                                    <Button
+                                        type="button"
+                                        size="sm"
+                                        variant="outline"
+                                        className="text-[10px] h-7 border-white/10 text-white/80 hover:bg-white/5"
+                                        onClick={() => setReplyMessage("Thank you for your feedback! We have reviewed it and are taking steps to improve the experience.")}
+                                    >
+                                        💬 General feedback thanks
+                                    </Button>
+                                </div>
+                            </div>
+
+                            {/* Reply Input Area */}
+                            <div className="space-y-2">
+                                <Label htmlFor="reply-text" className="text-xs text-white/60 font-semibold">Your Response:</Label>
+                                <Textarea
+                                    id="reply-text"
+                                    placeholder="Write your custom response here..."
+                                    className="bg-black/50 border-white/10 text-white placeholder:text-white/30 text-xs min-h-[100px] focus-visible:ring-blue-500"
+                                    value={replyMessage}
+                                    onChange={(e) => setReplyMessage(e.target.value)}
+                                />
+                            </div>
+
+                            {/* Option to Mark as Resolved */}
+                            {!replyingFeedback.resolved && (
+                                <div className="flex items-center space-x-2 pt-1">
+                                    <input
+                                        type="checkbox"
+                                        id="resolve-check"
+                                        className="h-4 w-4 rounded border-white/10 bg-black/50 text-blue-600 focus:ring-blue-500 focus:ring-offset-black"
+                                        checked={replyResolve}
+                                        onChange={(e) => setReplyResolve(e.target.checked)}
+                                    />
+                                    <Label htmlFor="resolve-check" className="text-xs text-white/70 select-none cursor-pointer">
+                                        Mark this report as resolved upon sending response
+                                    </Label>
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    <DialogFooter className="border-t border-white/5 pt-3 flex flex-col sm:flex-row gap-2 justify-between items-center w-full">
+                        <div className="flex justify-start w-full sm:w-auto">
+                            <Button 
+                                variant="outline" 
+                                className="border-white/10 text-white hover:bg-white/5"
+                                onClick={() => setReplyingFeedback(null)}
+                                disabled={sendingReply}
+                            >
+                                Cancel
+                            </Button>
+                        </div>
+                        <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                            {/* Add to Queue Button */}
+                            <Button
+                                variant="secondary"
+                                className="bg-zinc-800 hover:bg-zinc-700 text-white border border-white/10 font-semibold flex items-center gap-1.5"
+                                onClick={() => {
+                                    if (!replyingFeedback || !replyingFeedback.id) return
+                                    const fid = replyingFeedback.id
+                                    if (!replyMessage.trim()) {
+                                        toast({ title: 'Reply message cannot be empty', variant: 'destructive' })
+                                        return
+                                    }
+                                    setReplyQueue(prev => ({
+                                        ...prev,
+                                        [fid]: {
+                                            message: replyMessage,
+                                            resolve: replyResolve
+                                        }
+                                    }))
+                                    toast({
+                                        title: replyQueue[fid] ? 'Draft Updated' : 'Added to Queue',
+                                        description: 'The response draft has been queued for bulk transmission.',
+                                        variant: 'success'
+                                    })
+                                    setReplyingFeedback(null)
+                                }}
+                                disabled={sendingReply}
+                            >
+                                <Clock className="h-3.5 w-3.5" />
+                                {replyingFeedback && replyingFeedback.id && replyQueue[replyingFeedback.id] ? 'Update Draft' : 'Add to Queue'}
+                            </Button>
+
+                            {/* Send Instantly Button */}
+                            <Button 
+                                className="bg-blue-600 hover:bg-blue-700 text-white font-semibold flex items-center gap-1.5"
+                                onClick={async () => {
+                                    if (!user || !replyingFeedback || !replyingFeedback.id) return
+                                    const fid = replyingFeedback.id
+                                    if (!replyMessage.trim()) {
+                                        toast({ title: 'Reply message cannot be empty', variant: 'destructive' })
+                                        return
+                                    }
+                                    setSendingReply(true)
+                                    try {
+                                        await replyToFeedback(replyingFeedback, replyMessage, user.uid, replyResolve)
+                                        
+                                        // Update local state list so it updates in real time
+                                        setFeedbacks(prev =>
+                                            prev.map(f => {
+                                                if (f.id === fid) {
+                                                    return {
+                                                        ...f,
+                                                        adminReply: replyMessage,
+                                                        repliedAt: { seconds: Date.now() / 1000 },
+                                                        repliedBy: user.uid,
+                                                        resolved: replyResolve ? true : f.resolved,
+                                                        resolvedAt: replyResolve ? { seconds: Date.now() / 1000 } : f.resolvedAt,
+                                                        resolvedBy: replyResolve ? user.uid : f.resolvedBy,
+                                                    }
+                                                }
+                                                return f
+                                            })
+                                        )
+
+                                        // Remove from local queue if it was in there
+                                        setReplyQueue(prev => {
+                                            const updated = { ...prev }
+                                            delete updated[fid]
+                                            return updated
+                                        })
+
+                                        toast({
+                                            title: 'Reply Sent Successfully',
+                                            description: 'The user has been notified with your response.',
+                                            variant: 'success'
+                                        })
+                                        setReplyingFeedback(null)
+                                    } catch (err) {
+                                        console.error('Error replying to feedback:', err)
+                                        toast({
+                                            title: 'Failed to Send Reply',
+                                            description: 'There was an error updating or notifying.',
+                                            variant: 'destructive'
+                                        })
+                                    } finally {
+                                        setSendingReply(false)
+                                    }
+                                }}
+                                disabled={sendingReply}
+                            >
+                                {sendingReply ? (
+                                    <>
+                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                        Sending...
+                                    </>
+                                ) : (
+                                    <>
+                                        <MessageSquare className="h-3.5 w-3.5" />
+                                        Send Instantly
+                                    </>
+                                )}
+                            </Button>
+                        </div>
+                    </DialogFooter>
                 </DialogContent>
             </Dialog>
         </DashboardLayout>

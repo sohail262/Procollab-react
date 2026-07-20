@@ -129,6 +129,12 @@ export function NotificationsDropdown() {
                 return '📋'
             case 'project_update':
                 return '🔔'
+            case 'success':
+                return '🎉'
+            case 'info':
+                return '💬'
+            case 'warning':
+                return '🚨'
             default:
                 return '📢'
         }

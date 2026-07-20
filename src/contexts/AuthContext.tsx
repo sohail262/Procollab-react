@@ -38,6 +38,13 @@ import {
 } from '@/services/fcmService'
 import { trackSessionStart } from '@/services/analyticsService'
 import { LoadingScreen } from '@/components/LoadingScreen'
+import { BANNER_PRESETS } from '@/components/BannerPresets'
+
+const getRandomBannerStyle = () => {
+    if (!BANNER_PRESETS || BANNER_PRESETS.length === 0) return 'aurora-glow'
+    const randomIndex = Math.floor(Math.random() * BANNER_PRESETS.length)
+    return BANNER_PRESETS[randomIndex].id
+}
 
 // ─────────────────────────────────────────────────────────
 // Types
@@ -184,6 +191,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
                                 email: firebaseUser.email,
                                 displayName: firebaseUser.displayName,
                                 photoURL: firebaseUser.photoURL,
+                                bannerStyle: getRandomBannerStyle(),
                                 createdAt: serverTimestamp(),
                                 lastLogin: serverTimestamp(),
                                 lastActivity: serverTimestamp(),
@@ -333,6 +341,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
                 lastActivity: serverTimestamp(),
                 sessionExtended: serverTimestamp(),
                 photoURL: newUser.photoURL || null,
+                bannerStyle: getRandomBannerStyle(),
                 emailVerified: newUser.emailVerified,
                 disabled: false,
                 loginAttempts: 0,
@@ -410,6 +419,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
                     lastName: nameParts.slice(1).join(' '),
                     displayName: oauthUser.displayName,
                     photoURL: oauthUser.photoURL,
+                    bannerStyle: getRandomBannerStyle(),
                     createdAt: serverTimestamp(),
                     lastLogin: serverTimestamp(),
                     lastActivity: serverTimestamp(),
@@ -473,6 +483,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
                     lastName: nameParts.slice(1).join(' '),
                     displayName: oauthUser.displayName,
                     photoURL: oauthUser.photoURL,
+                    bannerStyle: getRandomBannerStyle(),
                     createdAt: serverTimestamp(),
                     lastLogin: serverTimestamp(),
                     lastActivity: serverTimestamp(),
