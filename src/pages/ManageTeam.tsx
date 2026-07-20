@@ -29,7 +29,7 @@ import {
     ArrowLeft, Mail, Trash2, Users, ClipboardList,
     Settings, Shield, Kanban, FileText, MessageSquare,
     Calendar, LayoutDashboard, Pencil, ExternalLink, X,
-    Clock, AlertTriangle, Zap, Loader2,
+    Clock, AlertTriangle, Zap, Loader2, Tag,
 } from 'lucide-react'
 import {
     doc, getDoc, getDocs, collection, query, where,
@@ -41,6 +41,7 @@ import { db } from '@/lib/firebase'
 import { useAuth } from '@/hooks/use-auth'
 import { useToast } from '@/hooks/use-toast'
 import { useProjectRole } from '@/hooks/use-project-role'
+import { ProjectTagsManager } from '@/components/dashboard/ProjectTagsManager'
 import { trackTeammateInvited, trackTeamFormed, trackApplicationResolved } from '@/services/analyticsService'
 
 import {
@@ -172,6 +173,7 @@ export function ManageTeam() {
     const [invitations,   setInvitations]   = useState<Invitation[]>([])
     const [joinRequests,  setJoinRequests]  = useState<JoinRequest[]>([])
     const [selectedMember,setSelectedMember]= useState<TeamMember | null>(null)
+    const [projectTagsModalOpen, setProjectTagsModalOpen] = useState(false)
     const [searchParams] = useSearchParams()
     const initialTab = searchParams.get('tab') || 'members'
     const [activeTab,     setActiveTab]     = useState(initialTab)
@@ -1448,13 +1450,31 @@ export function ManageTeam() {
 
                             {/* Members list */}
                             <Card className="lg:col-span-2">
-                                <CardHeader>
-                                    <CardTitle className="text-lg">
-                                        Team Members ({members.length})
-                                    </CardTitle>
-                                    <CardDescription>
-                                        Click a member to edit their permissions.
-                                    </CardDescription>
+                                <CardHeader className="flex flex-row items-center justify-between">
+                                    <div>
+                                        <CardTitle className="text-lg">
+                                            Team Members ({members.length})
+                                        </CardTitle>
+                                        <CardDescription>
+                                            Click a member to edit their permissions.
+                                        </CardDescription>
+                                    </div>
+                                    {canManageTeam && (
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => setProjectTagsModalOpen(true)}
+                                            className="h-8 gap-1.5 text-xs font-medium border-primary/20 hover:border-primary/50 text-primary hover:bg-primary/5 shrink-0"
+                                        >
+                                            <Tag className="h-3.5 w-3.5" />
+                                            <span>Manage Tags</span>
+                                            {(project?.projectTags || []).length > 0 && (
+                                                <Badge variant="secondary" className="text-[9px] px-1 py-0 h-4 font-bold ml-0.5">
+                                                    {(project?.projectTags || []).length}
+                                                </Badge>
+                                            )}
+                                        </Button>
+                                    )}
                                 </CardHeader>
                                 <CardContent>
                                     <div className="space-y-3">
@@ -1463,86 +1483,111 @@ export function ManageTeam() {
                                                 No members yet. Invite people using the form.
                                             </p>
                                         ) : (
-                                            members.map(member => (
-                                                <div
-                                                    key={member.id}
-                                                    className="flex items-center justify-between p-3 border rounded-lg cursor-pointer hover:bg-accent/50 transition-colors"
-                                                    onClick={() => {
-                                                        setSelectedMember(member)
-                                                        setActiveTab('permissions')
-                                                    }}
-                                                >
-                                                    <div className="flex items-center gap-3">
-                                                        <Avatar>
-                                                            {member.avatar && (
-                                                                <AvatarImage src={member.avatar} />
-                                                            )}
-                                                            <AvatarFallback>
-                                                                {(member.name || 'U').charAt(0).toUpperCase()}
-                                                            </AvatarFallback>
-                                                        </Avatar>
-                                                        <div>
-                                                            <div className="flex items-center gap-2 flex-wrap">
-                                                                <p className="font-medium">
-                                                                    {member.name}
+                                            members.map(member => {
+                                                const assignedTagKeys = project?.memberTags?.[member.uid] || (member as any).tags || []
+                                                const assignedProjectTags = (project?.projectTags || []).filter(
+                                                    (t: any) => assignedTagKeys.includes(t.id) || assignedTagKeys.includes(t.name)
+                                                )
+
+                                                return (
+                                                    <div
+                                                        key={member.id}
+                                                        className="flex items-center justify-between p-3 border rounded-lg cursor-pointer hover:bg-accent/50 transition-colors"
+                                                        onClick={() => {
+                                                            setSelectedMember(member)
+                                                            setActiveTab('permissions')
+                                                        }}
+                                                    >
+                                                        <div className="flex items-center gap-3">
+                                                            <Avatar>
+                                                                {member.avatar && (
+                                                                    <AvatarImage src={member.avatar} />
+                                                                )}
+                                                                <AvatarFallback>
+                                                                    {(member.name || 'U').charAt(0).toUpperCase()}
+                                                                </AvatarFallback>
+                                                            </Avatar>
+                                                            <div>
+                                                                <div className="flex items-center gap-2 flex-wrap">
+                                                                    <p className="font-medium">
+                                                                        {member.name}
+                                                                    </p>
+                                                                    <Badge
+                                                                        className={`${getRoleBadgeColor(member.role)} border-none text-[9px] px-1.5 py-0 font-semibold rounded-md capitalize shrink-0`}
+                                                                    >
+                                                                        {member.role}
+                                                                    </Badge>
+                                                                </div>
+                                                                <p className="text-xs text-muted-foreground">
+                                                                    {member.email}
                                                                 </p>
-                                                                <Badge
-                                                                    className={`${getRoleBadgeColor(member.role)} border-none text-[9px] px-1.5 py-0 font-semibold rounded-md capitalize shrink-0`}
-                                                                >
-                                                                    {member.role}
-                                                                </Badge>
+                                                                {assignedProjectTags.length > 0 && (
+                                                                    <div className="flex flex-wrap gap-1 mt-1.5">
+                                                                        {assignedProjectTags.map((tag: any) => (
+                                                                            <Badge
+                                                                                key={tag.id}
+                                                                                className="px-1.5 py-0.5 text-[9px] font-medium rounded-full border flex items-center gap-1 shrink-0"
+                                                                                style={{
+                                                                                    backgroundColor: `${tag.color}18`,
+                                                                                    color: tag.color,
+                                                                                    borderColor: `${tag.color}40`,
+                                                                                }}
+                                                                            >
+                                                                                <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: tag.color }} />
+                                                                                {tag.name}
+                                                                            </Badge>
+                                                                        ))}
+                                                                    </div>
+                                                                )}
                                                             </div>
-                                                            <p className="text-xs text-muted-foreground">
-                                                                {member.email}
-                                                            </p>
+                                                        </div>
+                                                        <div className="flex items-center gap-2">
+                                                            {member.role !== 'owner' && (
+                                                                <Select
+                                                                    value={member.role}
+                                                                    onValueChange={v =>
+                                                                        handleUpdateRole(
+                                                                            member.id,
+                                                                            member.uid,
+                                                                            v
+                                                                        )
+                                                                    }
+                                                                >
+                                                                    <SelectTrigger
+                                                                        className="w-28 h-7 text-xs"
+                                                                        onClick={e => e.stopPropagation()}
+                                                                    >
+                                                                        <SelectValue />
+                                                                    </SelectTrigger>
+                                                                    <SelectContent>
+                                                                        <SelectItem value="admin">
+                                                                            Admin
+                                                                        </SelectItem>
+                                                                        <SelectItem value="member">
+                                                                            Member
+                                                                        </SelectItem>
+                                                                        <SelectItem value="viewer">
+                                                                            Viewer
+                                                                        </SelectItem>
+                                                                    </SelectContent>
+                                                                </Select>
+                                                            )}
+                                                            {member.role !== 'owner' && (
+                                                                <Button
+                                                                    variant="ghost"
+                                                                    size="icon"
+                                                                    onClick={e => {
+                                                                        e.stopPropagation()
+                                                                        confirmRemoveMember(member)
+                                                                    }}
+                                                                >
+                                                                    <Trash2 className="h-4 w-4 text-destructive" />
+                                                                </Button>
+                                                            )}
                                                         </div>
                                                     </div>
-                                                    <div className="flex items-center gap-2">
-                                                        {member.role !== 'owner' && (
-                                                            <Select
-                                                                value={member.role}
-                                                                onValueChange={v =>
-                                                                    handleUpdateRole(
-                                                                        member.id,
-                                                                        member.uid,
-                                                                        v
-                                                                    )
-                                                                }
-                                                            >
-                                                                <SelectTrigger
-                                                                    className="w-28 h-7 text-xs"
-                                                                    onClick={e => e.stopPropagation()}
-                                                                >
-                                                                    <SelectValue />
-                                                                </SelectTrigger>
-                                                                <SelectContent>
-                                                                    <SelectItem value="admin">
-                                                                        Admin
-                                                                    </SelectItem>
-                                                                    <SelectItem value="member">
-                                                                        Member
-                                                                    </SelectItem>
-                                                                    <SelectItem value="viewer">
-                                                                        Viewer
-                                                                    </SelectItem>
-                                                                </SelectContent>
-                                                            </Select>
-                                                        )}
-                                                        {member.role !== 'owner' && (
-                                                            <Button
-                                                                variant="ghost"
-                                                                size="icon"
-                                                                onClick={e => {
-                                                                    e.stopPropagation()
-                                                                    confirmRemoveMember(member)
-                                                                }}
-                                                            >
-                                                                <Trash2 className="h-4 w-4 text-destructive" />
-                                                            </Button>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            ))
+                                                )
+                                            })
                                         )}
                                     </div>
                                 </CardContent>
@@ -1970,6 +2015,21 @@ export function ManageTeam() {
                         </div>
                     </TabsContent>
                 </Tabs>
+
+                <ProjectTagsManager
+                    projectId={id!}
+                    open={projectTagsModalOpen}
+                    onOpenChange={setProjectTagsModalOpen}
+                    members={members.map(m => ({
+                        uid: m.uid,
+                        displayName: m.name,
+                        name: m.name,
+                        email: m.email,
+                        avatar: m.avatar,
+                        photoURL: m.avatar,
+                        role: m.role,
+                    }))}
+                />
             </div>
         </DashboardLayout>
     )

@@ -4,11 +4,11 @@ import {
     Card, CardContent, CardHeader,
     CardTitle, CardDescription,
 } from '@/components/ui/card'
-import { Progress }  from '@/components/ui/progress'
+import { Progress } from '@/components/ui/progress'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { Badge }     from '@/components/ui/badge'
-import { Button }    from '@/components/ui/button'
-import { Input }     from '@/components/ui/input'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
     Select, SelectContent,
@@ -35,10 +35,10 @@ import {
     doc, getDoc, updateDoc,
     serverTimestamp,
 } from 'firebase/firestore'
-import { db }        from '@/lib/firebase'
+import { db } from '@/lib/firebase'
 import { useParams } from 'react-router-dom'
-import { useAuth }   from '@/hooks/use-auth'
-import { useToast }  from '@/hooks/use-toast'
+import { useAuth } from '@/hooks/use-auth'
+import { useToast } from '@/hooks/use-toast'
 import { useProjectRole } from '@/hooks/use-project-role'
 import {
     Users, BarChart3, CheckCircle2,
@@ -51,48 +51,52 @@ import {
     Tag,
 } from 'lucide-react'
 import { format, formatDistanceToNow, differenceInDays } from 'date-fns'
-import type { Task } from '@/types/project'
+import type { Task, ProjectTag } from '@/types/project'
 import { ProjectReviews } from './ProjectReviews'
+import { ProjectTagsManager } from './ProjectTagsManager'
+
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface TeamMemberRole {
-    role:     string
+    role: string
     joinedAt?: any
-    skills?:  string[]
+    skills?: string[]
 }
 
 interface UserProfile {
-    uid:         string
+    uid: string
     displayName: string
-    email:       string
-    photoURL:    string
-    role:        string
-    joinedAt:    any
-    skills:      string[]
-    discipline:  string
+    email: string
+    photoURL: string
+    role: string
+    joinedAt: any
+    skills: string[]
+    discipline: string
     // computed
-    tasks:             Task[]
-    totalTasks:        number
-    completedTasks:    number
-    inProgressTasks:   number
-    reviewTasks:       number
-    backlogTasks:      number
-    todoTasks:         number
-    overdueTasks:      number
-    completionRate:    number
+    tasks: Task[]
+    totalTasks: number
+    completedTasks: number
+    inProgressTasks: number
+    reviewTasks: number
+    backlogTasks: number
+    todoTasks: number
+    overdueTasks: number
+    completionRate: number
     // velocity = tasks completed in last 7 days
-    velocity:          number
+    velocity: number
     // contribution score 0-100
     contributionScore: number
     // health: 'healthy' | 'idle' | 'overloaded' | 'blocked'
-    health:            'healthy' | 'idle' | 'overloaded' | 'blocked'
+    health: 'healthy' | 'idle' | 'overloaded' | 'blocked'
     // recent activity: last task update
-    lastActiveAt:      Date | null
+    lastActiveAt: Date | null
     // skill match: % of open tasks whose tags match member skills
-    skillMatchPct:     number
+    skillMatchPct: number
     // streak: consecutive days with at least one task completed
-    streak:            number
+    streak: number
+    // custom assigned project tags
+    projectTags?: ProjectTag[]
 }
 
 const ROLE_CONFIG: Record<string, {
@@ -121,34 +125,34 @@ const ROLE_CONFIG: Record<string, {
 }
 
 const STATUS_COLORS: Record<string, string> = {
-    backlog:       '#94a3b8',
-    todo:          '#64748b',
+    backlog: '#94a3b8',
+    todo: '#64748b',
     'in-progress': '#3b82f6',
-    review:        '#a855f7',
-    done:          '#22c55e',
+    review: '#a855f7',
+    done: '#22c55e',
 }
 
 const PRIORITY_COLORS: Record<string, string> = {
-    low:    '#22c55e',
+    low: '#22c55e',
     medium: '#3b82f6',
-    high:   '#f97316',
+    high: '#f97316',
     urgent: '#ef4444',
 }
 
 const HEALTH_CONFIG = {
-    healthy:    { label: 'Healthy',    color: 'text-green-500',  bg: 'bg-green-100 dark:bg-green-900/20',  border: 'border-green-200',  icon: CheckCircle2 },
-    idle:       { label: 'Idle',       color: 'text-gray-400',   bg: 'bg-gray-100 dark:bg-gray-800/40',    border: 'border-gray-200',   icon: Circle       },
-    overloaded: { label: 'Overloaded', color: 'text-orange-500', bg: 'bg-orange-100 dark:bg-orange-900/20',border: 'border-orange-200', icon: Flame        },
-    blocked:    { label: 'Blocked',    color: 'text-red-500',    bg: 'bg-red-100 dark:bg-red-900/20',      border: 'border-red-200',    icon: AlertTriangle},
+    healthy: { label: 'Healthy', color: 'text-green-500', bg: 'bg-green-100 dark:bg-green-900/20', border: 'border-green-200', icon: CheckCircle2 },
+    idle: { label: 'Idle', color: 'text-gray-400', bg: 'bg-gray-100 dark:bg-gray-800/40', border: 'border-gray-200', icon: Circle },
+    overloaded: { label: 'Overloaded', color: 'text-orange-500', bg: 'bg-orange-100 dark:bg-orange-900/20', border: 'border-orange-200', icon: Flame },
+    blocked: { label: 'Blocked', color: 'text-red-500', bg: 'bg-red-100 dark:bg-red-900/20', border: 'border-red-200', icon: AlertTriangle },
 }
 function normalizeRole(raw: string | undefined): string {
     if (!raw) return 'Member'
     const map: Record<string, string> = {
-        'owner':        'Owner',
+        'owner': 'Owner',
         'project lead': 'Owner',
-        'admin':        'Admin',
-        'member':       'Member',
-        'viewer':       'Viewer',
+        'admin': 'Admin',
+        'member': 'Member',
+        'viewer': 'Viewer',
     }
     return map[raw.toLowerCase()] ?? raw
 }
@@ -164,11 +168,11 @@ const toDate = (val: any): Date | null => {
 // ─── Compute contribution score (0–100) ──────────────────────────────────────
 function computeScore(m: Partial<UserProfile>, totalTasks: number): number {
     if (!totalTasks) return 0
-    const donePts       = ((m.completedTasks   ?? 0) / Math.max(totalTasks, 1)) * 40
-    const activePts     = Math.min((m.inProgressTasks ?? 0) * 5, 20)
-    const velocityPts   = Math.min((m.velocity ?? 0) * 8, 20)
-    const skillPts      = ((m.skillMatchPct ?? 0) / 100) * 10
-    const streakPts     = Math.min((m.streak ?? 0) * 2, 10)
+    const donePts = ((m.completedTasks ?? 0) / Math.max(totalTasks, 1)) * 40
+    const activePts = Math.min((m.inProgressTasks ?? 0) * 5, 20)
+    const velocityPts = Math.min((m.velocity ?? 0) * 8, 20)
+    const skillPts = ((m.skillMatchPct ?? 0) / 100) * 10
+    const streakPts = Math.min((m.streak ?? 0) * 2, 10)
     return Math.round(Math.min(donePts + activePts + velocityPts + skillPts + streakPts, 100))
 }
 
@@ -188,16 +192,15 @@ function MemberCard({
 }: {
     member: UserProfile; onClick: () => void; isCurrentUser: boolean
 }) {
-    const RoleIcon    = ROLE_CONFIG[member.role]?.icon ?? UserIcon
-    const healthConf  = HEALTH_CONFIG[member.health]
-    const HealthIcon  = healthConf.icon
+    const RoleIcon = ROLE_CONFIG[member.role]?.icon ?? UserIcon
+    const healthConf = HEALTH_CONFIG[member.health]
+    const HealthIcon = healthConf.icon
 
     return (
         <Card
             className={`cursor-pointer transition-all duration-200
-                hover:shadow-lg hover:-translate-y-1 border-2 ${
-                isCurrentUser ? 'border-primary/50' : 'border-transparent'
-            } ${healthConf.border}`}
+                hover:shadow-lg hover:-translate-y-1 border-2 ${isCurrentUser ? 'border-primary/50' : 'border-transparent'
+                } ${healthConf.border}`}
             onClick={onClick}
         >
             <CardContent className="p-4">
@@ -226,21 +229,38 @@ function MemberCard({
                                     {member.displayName}
                                 </p>
                                 <Badge
-                                    className={`px-1.5 py-0 text-[9px] font-semibold rounded-md border-none scale-90 origin-left shrink-0 ${
-                                        ROLE_CONFIG[member.role]?.badgeClass ?? ''
-                                    }`}
+                                    className={`px-1.5 py-0 text-[9px] font-semibold rounded-md border-none scale-90 origin-left shrink-0 ${ROLE_CONFIG[member.role]?.badgeClass ?? ''
+                                        }`}
                                 >
                                     {ROLE_CONFIG[member.role]?.label ?? member.role}
                                 </Badge>
                             </div>
                             <div className="flex items-center gap-1 mt-0.5">
-                                <RoleIcon className={`h-3 w-3 ${
-                                    ROLE_CONFIG[member.role]?.color
-                                }`} />
+                                <RoleIcon className={`h-3 w-3 ${ROLE_CONFIG[member.role]?.color
+                                    }`} />
                                 <span className="text-xs text-muted-foreground">
                                     {ROLE_CONFIG[member.role]?.label ?? member.role}
                                 </span>
                             </div>
+                            {member.projectTags && member.projectTags.length > 0 && (
+                                <div className="flex flex-wrap gap-1 mt-1.5">
+                                    {member.projectTags.map((tag) => (
+                                        <Badge
+                                            key={tag.id}
+                                            className="px-1.5 py-0.5 text-[9px] font-medium rounded-full border shadow-2xs flex items-center gap-1 shrink-0"
+                                            style={{
+                                                backgroundColor: `${tag.color}18`,
+                                                color: tag.color,
+                                                borderColor: `${tag.color}40`,
+                                            }}
+                                            title={tag.description || tag.name}
+                                        >
+                                            <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: tag.color }} />
+                                            <span className="truncate max-w-[100px]">{tag.name}</span>
+                                        </Badge>
+                                    ))}
+                                </div>
+                            )}
                         </div>
                     </div>
 
@@ -260,10 +280,10 @@ function MemberCard({
                                     {member.health === 'blocked'
                                         ? `${member.overdueTasks} overdue tasks need attention`
                                         : member.health === 'overloaded'
-                                        ? `${member.inProgressTasks} tasks in progress`
-                                        : member.health === 'idle'
-                                        ? 'No recent activity detected'
-                                        : 'Member is on track'}
+                                            ? `${member.inProgressTasks} tasks in progress`
+                                            : member.health === 'idle'
+                                                ? 'No recent activity detected'
+                                                : 'Member is on track'}
                                 </p>
                             </TooltipContent>
                         </Tooltip>
@@ -273,10 +293,10 @@ function MemberCard({
                 {/* ── Task stats ── */}
                 <div className="grid grid-cols-4 gap-1.5 mb-3">
                     {[
-                        { label: 'Total',    value: member.totalTasks,     color: 'bg-muted/60' },
-                        { label: 'Active',   value: member.inProgressTasks, color: 'bg-blue-100 dark:bg-blue-900/20' },
-                        { label: 'Review',   value: member.reviewTasks,     color: 'bg-purple-100 dark:bg-purple-900/20' },
-                        { label: 'Done',     value: member.completedTasks,  color: 'bg-green-100 dark:bg-green-900/20' },
+                        { label: 'Total', value: member.totalTasks, color: 'bg-muted/60' },
+                        { label: 'Active', value: member.inProgressTasks, color: 'bg-blue-100 dark:bg-blue-900/20' },
+                        { label: 'Review', value: member.reviewTasks, color: 'bg-purple-100 dark:bg-purple-900/20' },
+                        { label: 'Done', value: member.completedTasks, color: 'bg-green-100 dark:bg-green-900/20' },
                     ].map(s => (
                         <div key={s.label}
                             className={`${s.color} rounded-lg p-1.5 text-center`}>
@@ -398,16 +418,16 @@ function MemberDetailDialog({
     currentUserUid,
     onOpenReview,
 }: {
-    member:         UserProfile | null
-    tasks:          Task[]
-    open:           boolean
-    onClose:        () => void
+    member: UserProfile | null
+    tasks: Task[]
+    open: boolean
+    onClose: () => void
     /** Only the project owner may change member roles */
-    canEditRoles:   boolean
-    projectId:      string
-    onRoleChange:   (uid: string, role: string) => void
+    canEditRoles: boolean
+    projectId: string
+    onRoleChange: (uid: string, role: string) => void
     currentUserUid?: string
-    onOpenReview?:  () => void
+    onOpenReview?: () => void
 }) {
     const [activeTab, setActiveTab] = useState('overview')
 
@@ -417,16 +437,16 @@ function MemberDetailDialog({
 
     // Radar data
     const radarData = [
-        { subject: 'Done',     A: member.completedTasks  },
-        { subject: 'Active',   A: member.inProgressTasks },
-        { subject: 'Review',   A: member.reviewTasks     },
-        { subject: 'Todo',     A: member.todoTasks       },
-        { subject: 'Backlog',  A: member.backlogTasks    },
+        { subject: 'Done', A: member.completedTasks },
+        { subject: 'Active', A: member.inProgressTasks },
+        { subject: 'Review', A: member.reviewTasks },
+        { subject: 'Todo', A: member.todoTasks },
+        { subject: 'Backlog', A: member.backlogTasks },
     ]
 
     // Priority breakdown
-    const priorityData = ['urgent','high','medium','low'].map(p => ({
-        name:  p.charAt(0).toUpperCase() + p.slice(1),
+    const priorityData = ['urgent', 'high', 'medium', 'low'].map(p => ({
+        name: p.charAt(0).toUpperCase() + p.slice(1),
         value: member.tasks.filter(t => t.priority === p).length,
         color: PRIORITY_COLORS[p],
     })).filter(d => d.value > 0)
@@ -462,31 +482,31 @@ function MemberDetailDialog({
         {
             label: 'Completion',
             value: Math.min(Math.round((member.completedTasks / Math.max(member.totalTasks, 1)) * 40), 40),
-            max:   40,
+            max: 40,
             color: '#22c55e',
         },
         {
             label: 'Activity',
             value: Math.min(member.inProgressTasks * 5, 20),
-            max:   20,
+            max: 20,
             color: '#3b82f6',
         },
         {
             label: 'Velocity',
             value: Math.min(member.velocity * 8, 20),
-            max:   20,
+            max: 20,
             color: '#f59e0b',
         },
         {
             label: 'Skill Match',
             value: Math.round((member.skillMatchPct / 100) * 10),
-            max:   10,
+            max: 10,
             color: '#a855f7',
         },
         {
             label: 'Streak',
             value: Math.min(member.streak * 2, 10),
-            max:   10,
+            max: 10,
             color: '#f97316',
         },
     ]
@@ -518,9 +538,8 @@ function MemberDetailDialog({
                             <div className="flex flex-wrap items-center gap-2 mt-2">
                                 {/* Role selector */}
                                 <div className="flex items-center gap-1.5">
-                                    <RoleIcon className={`h-4 w-4 ${
-                                        ROLE_CONFIG[member.role]?.color
-                                    }`} />
+                                    <RoleIcon className={`h-4 w-4 ${ROLE_CONFIG[member.role]?.color
+                                        }`} />
                                     {canEditRoles ? (
                                         <Select
                                             value={member.role}
@@ -610,10 +629,10 @@ function MemberDetailDialog({
                             {/* Stat strip */}
                             <div className="grid grid-cols-4 gap-3">
                                 {[
-                                    { label: 'Total Tasks',   value: member.totalTasks,      color: 'text-foreground'  },
-                                    { label: 'Completed',     value: member.completedTasks,   color: 'text-green-500'   },
-                                    { label: '7-day Velocity',value: `${member.velocity}`,    color: 'text-blue-500'    },
-                                    { label: 'Active Streak', value: `${member.streak}d`,     color: 'text-orange-500'  },
+                                    { label: 'Total Tasks', value: member.totalTasks, color: 'text-foreground' },
+                                    { label: 'Completed', value: member.completedTasks, color: 'text-green-500' },
+                                    { label: '7-day Velocity', value: `${member.velocity}`, color: 'text-blue-500' },
+                                    { label: 'Active Streak', value: `${member.streak}d`, color: 'text-orange-500' },
                                 ].map(s => (
                                     <div key={s.label}
                                         className="bg-muted/50 rounded-lg p-3 text-center">
@@ -671,7 +690,7 @@ function MemberDetailDialog({
                                                         tick={{ fontSize: 11 }} />
                                                     <ReTooltip />
                                                     <Bar dataKey="value"
-                                                        radius={[4,4,0,0]}>
+                                                        radius={[4, 4, 0, 0]}>
                                                         {priorityData.map((e, i) => (
                                                             <Cell key={i}
                                                                 fill={e.color} />
@@ -728,20 +747,19 @@ function MemberDetailDialog({
                         <TabsContent value="tasks" className="mt-0 space-y-2">
                             {/* Filter strip */}
                             <div className="flex flex-wrap gap-1.5 mb-3">
-                                {['all','in-progress','review','todo','done','backlog'].map(s => (
+                                {['all', 'in-progress', 'review', 'todo', 'done', 'backlog'].map(s => (
                                     <Badge
                                         key={s}
                                         variant="outline"
                                         className="cursor-pointer capitalize text-xs"
                                         style={s !== 'all' ? {
                                             borderColor: STATUS_COLORS[s] + '80',
-                                            color:       STATUS_COLORS[s],
+                                            color: STATUS_COLORS[s],
                                         } : {}}
                                     >
                                         {s === 'all'
                                             ? `All (${member.totalTasks})`
-                                            : `${s.replace('-',' ')} (${
-                                                member.tasks.filter(t => t.status === s).length
+                                            : `${s.replace('-', ' ')} (${member.tasks.filter(t => t.status === s).length
                                             })`
                                         }
                                     </Badge>
@@ -762,13 +780,12 @@ function MemberDetailDialog({
                                     return (
                                         <div key={task.id}
                                             className={`border rounded-lg p-3
-                                                flex items-start gap-3 ${
-                                                isOverdue
+                                                flex items-start gap-3 ${isOverdue
                                                     ? 'border-destructive/40 bg-destructive/5'
                                                     : task.status === 'done'
-                                                    ? 'opacity-60'
-                                                    : ''
-                                            }`}
+                                                        ? 'opacity-60'
+                                                        : ''
+                                                }`}
                                         >
                                             <div
                                                 className="w-2 h-2 rounded-full
@@ -782,11 +799,10 @@ function MemberDetailDialog({
                                                 <div className="flex items-start
                                                     justify-between gap-2">
                                                     <p className={`text-sm font-medium
-                                                        leading-tight ${
-                                                        task.status === 'done'
+                                                        leading-tight ${task.status === 'done'
                                                             ? 'line-through text-muted-foreground'
                                                             : ''
-                                                    }`}>
+                                                        }`}>
                                                         {task.title}
                                                     </p>
                                                     <div className="flex items-center
@@ -878,11 +894,10 @@ function MemberDetailDialog({
                                                         variant={isMatched
                                                             ? 'default'
                                                             : 'secondary'}
-                                                        className={`text-sm ${
-                                                            isMatched
+                                                        className={`text-sm ${isMatched
                                                                 ? 'bg-green-600 hover:bg-green-700'
                                                                 : ''
-                                                        }`}
+                                                            }`}
                                                     >
                                                         {isMatched && (
                                                             <CheckCircle2 className="h-3 w-3 mr-1" />
@@ -941,7 +956,7 @@ function MemberDetailDialog({
                                                 </p>
                                             )
                                         }
-                                        return unassigned.slice(0,5).map(task => (
+                                        return unassigned.slice(0, 5).map(task => (
                                             <div key={task.id}
                                                 className="flex items-center
                                                     gap-3 border rounded-lg p-2.5">
@@ -1075,23 +1090,27 @@ interface ResourceManagementProps {
 
 export function ResourceManagement({ readOnly = false }: ResourceManagementProps) {
     const { id: projectId } = useParams()
-    const { user }          = useAuth()
-    const { toast }         = useToast()
+    const { user } = useAuth()
+    const { toast } = useToast()
     const { role: myProjectRole } = useProjectRole()
     const canEditRoles = myProjectRole === 'owner' && !readOnly
 
-    const [tasks,       setTasks]       = useState<Task[]>([])
-    const [rawMembers,  setRawMembers]  = useState<Record<string, any>>({})
-    const [profiles,    setProfiles]    = useState<Record<string, any>>({})
-    const [loading,     setLoading]     = useState(true)
-    const [activeView,  setActiveView]  = useState('grid')
+    const [tasks, setTasks] = useState<Task[]>([])
+    const [rawMembers, setRawMembers] = useState<Record<string, any>>({})
+    const [profiles, setProfiles] = useState<Record<string, any>>({})
+    const [loading, setLoading] = useState(true)
+    const [activeView, setActiveView] = useState('grid')
     const [searchQuery, setSearchQuery] = useState('')
-    const [sortBy,      setSortBy]      = useState<
-        'name'|'tasks'|'score'|'velocity'|'completion'
+    const [sortBy, setSortBy] = useState<
+        'name' | 'tasks' | 'score' | 'velocity' | 'completion'
     >('score')
-    const [sortAsc,     setSortAsc]     = useState(false)
-    const [filterRole,  setFilterRole]  = useState('all')
-    const [filterHealth,setFilterHealth]= useState('all')
+    const [sortAsc, setSortAsc] = useState(false)
+    const [filterRole, setFilterRole] = useState('all')
+    const [filterHealth, setFilterHealth] = useState('all')
+    const [filterTag, setFilterTag] = useState('all')
+    const [projectTags, setProjectTags] = useState<ProjectTag[]>([])
+    const [memberTags, setMemberTags] = useState<Record<string, string[]>>({})
+    const [projectTagsModalOpen, setProjectTagsModalOpen] = useState(false)
     const [selectedMember, setSelectedMember] = useState<UserProfile | null>(null)
 
     const [reviewOpen, setReviewOpen] = useState(false)
@@ -1099,144 +1118,148 @@ export function ResourceManagement({ readOnly = false }: ResourceManagementProps
 
     useEffect(() => {
         if (!projectId) return
-        getDoc(doc(db, 'projects', projectId)).then(snap => {
+        const unsub = onSnapshot(doc(db, 'projects', projectId), snap => {
             if (snap.exists()) {
-                setProjectTitle(snap.data().title || '')
+                const data = snap.data()
+                setProjectTitle(data.title || '')
+                setProjectTags(data.projectTags || [])
+                setMemberTags(data.memberTags || {})
             }
         })
+        return () => unsub()
     }, [projectId])
 
-  useEffect(() => {
-    if (!projectId || !user) return
+    useEffect(() => {
+        if (!projectId || !user) return
 
-    // ✅ FIX: Read from members sub-collection (where ManageTeam writes)
-    // Also watch root doc for role changes synced there
-    const membersUnsub = onSnapshot(
-        collection(db, 'projects', projectId, 'members'),
-        async snap => {
-            if (snap.empty) {
-                // ── Fallback: try teamMembers map on root doc ──────────────
-                // Handles legacy data written before the sub-collection fix
-                const projSnap = await getDoc(doc(db, 'projects', projectId))
-                if (!projSnap.exists()) { setLoading(false); return }
+        // ✅ FIX: Read from members sub-collection (where ManageTeam writes)
+        // Also watch root doc for role changes synced there
+        const membersUnsub = onSnapshot(
+            collection(db, 'projects', projectId, 'members'),
+            async snap => {
+                if (snap.empty) {
+                    // ── Fallback: try teamMembers map on root doc ──────────────
+                    // Handles legacy data written before the sub-collection fix
+                    const projSnap = await getDoc(doc(db, 'projects', projectId))
+                    if (!projSnap.exists()) { setLoading(false); return }
 
-                const teamMembersMap = projSnap.data().teamMembers ?? {}
-                if (Object.keys(teamMembersMap).length === 0) {
-                    setRawMembers({})
-                    setProfiles({})
+                    const teamMembersMap = projSnap.data().teamMembers ?? {}
+                    if (Object.keys(teamMembersMap).length === 0) {
+                        setRawMembers({})
+                        setProfiles({})
+                        setLoading(false)
+                        return
+                    }
+
+                    // Build rawMembers from root doc map as fallback
+                    setRawMembers(teamMembersMap)
+                    const profileMap: Record<string, any> = {}
+                    await Promise.all(
+                        Object.keys(teamMembersMap).map(async uid => {
+                            try {
+                                const uSnap = await getDoc(doc(db, 'users', uid))
+                                profileMap[uid] = uSnap.exists()
+                                    ? { uid, ...uSnap.data() }
+                                    : { uid, displayName: 'Unknown', email: '', photoURL: '', skills: [] }
+                            } catch {
+                                profileMap[uid] = { uid, displayName: 'Unknown', email: '', photoURL: '', skills: [] }
+                            }
+                        })
+                    )
+                    setProfiles(profileMap)
                     setLoading(false)
                     return
                 }
 
-                // Build rawMembers from root doc map as fallback
-                setRawMembers(teamMembersMap)
+                // ✅ PRIMARY PATH: build rawMembers from sub-collection docs
+                // This matches exactly what ManageTeam writes
+                const membersMap: Record<string, any> = {}
+                snap.docs.forEach(d => {
+                    const data = d.data()
+                    membersMap[d.id] = {
+                        // Normalize role casing — ManageTeam writes lowercase 'member'
+                        // but ROLE_CONFIG expects 'Member', 'Admin', etc.
+                        role: normalizeRole(data.role),
+                        joinedAt: data.joinedAt,
+                        permissions: data.permissions,
+                        // Keep full data for profile enrichment fallback
+                        _name: data.name || data.displayName || '',
+                        _email: data.email || '',
+                        _avatar: data.avatar || data.photoURL || '',
+                    }
+                })
+                setRawMembers(membersMap)
+
+                // Fetch user profiles for enriched data
                 const profileMap: Record<string, any> = {}
                 await Promise.all(
-                    Object.keys(teamMembersMap).map(async uid => {
+                    snap.docs.map(async d => {
+                        const uid = d.id
+                        const subData = d.data()
                         try {
                             const uSnap = await getDoc(doc(db, 'users', uid))
-                            profileMap[uid] = uSnap.exists()
-                                ? { uid, ...uSnap.data() }
-                                : { uid, displayName: 'Unknown', email: '', photoURL: '', skills: [] }
+                            if (uSnap.exists()) {
+                                profileMap[uid] = { uid, ...uSnap.data() }
+                            } else {
+                                // User profile missing — use data from sub-collection doc
+                                profileMap[uid] = {
+                                    uid,
+                                    displayName: subData.name || subData.displayName || 'Unknown',
+                                    email: subData.email || '',
+                                    photoURL: subData.avatar || subData.photoURL || '',
+                                    skills: [],
+                                }
+                            }
                         } catch {
-                            profileMap[uid] = { uid, displayName: 'Unknown', email: '', photoURL: '', skills: [] }
+                            profileMap[uid] = {
+                                uid,
+                                displayName: subData.name || 'Unknown',
+                                email: subData.email || '',
+                                photoURL: subData.avatar || '',
+                                skills: [],
+                            }
                         }
                     })
                 )
                 setProfiles(profileMap)
                 setLoading(false)
-                return
+            },
+            err => {
+                console.error('Members sub-collection listener:', err)
+                setLoading(false)
             }
-
-            // ✅ PRIMARY PATH: build rawMembers from sub-collection docs
-            // This matches exactly what ManageTeam writes
-            const membersMap: Record<string, any> = {}
-            snap.docs.forEach(d => {
-                const data = d.data()
-                membersMap[d.id] = {
-                    // Normalize role casing — ManageTeam writes lowercase 'member'
-                    // but ROLE_CONFIG expects 'Member', 'Admin', etc.
-                    role: normalizeRole(data.role),
-                    joinedAt: data.joinedAt,
-                    permissions: data.permissions,
-                    // Keep full data for profile enrichment fallback
-                    _name:   data.name   || data.displayName || '',
-                    _email:  data.email  || '',
-                    _avatar: data.avatar || data.photoURL    || '',
-                }
-            })
-            setRawMembers(membersMap)
-
-            // Fetch user profiles for enriched data
-            const profileMap: Record<string, any> = {}
-            await Promise.all(
-                snap.docs.map(async d => {
-                    const uid      = d.id
-                    const subData  = d.data()
-                    try {
-                        const uSnap = await getDoc(doc(db, 'users', uid))
-                        if (uSnap.exists()) {
-                            profileMap[uid] = { uid, ...uSnap.data() }
-                        } else {
-                            // User profile missing — use data from sub-collection doc
-                            profileMap[uid] = {
-                                uid,
-                                displayName: subData.name || subData.displayName || 'Unknown',
-                                email:       subData.email   || '',
-                                photoURL:    subData.avatar  || subData.photoURL || '',
-                                skills:      [],
-                            }
-                        }
-                    } catch {
-                        profileMap[uid] = {
-                            uid,
-                            displayName: subData.name || 'Unknown',
-                            email:       subData.email || '',
-                            photoURL:    subData.avatar || '',
-                            skills:      [],
-                        }
-                    }
-                })
-            )
-            setProfiles(profileMap)
-            setLoading(false)
-        },
-        err => {
-            console.error('Members sub-collection listener:', err)
-            setLoading(false)
-        }
-    )
-
-    // Tasks listener (unchanged)
-    const tasksUnsub = onSnapshot(
-        query(collection(db, 'projects', projectId, 'tasks')),
-        snap => setTasks(
-            snap.docs.map(d => ({ id: d.id, ...d.data() } as Task))
         )
-    )
 
-    return () => {
-        membersUnsub()
-        tasksUnsub()
-    }
-}, [projectId, user])
+        // Tasks listener (unchanged)
+        const tasksUnsub = onSnapshot(
+            query(collection(db, 'projects', projectId, 'tasks')),
+            snap => setTasks(
+                snap.docs.map(d => ({ id: d.id, ...d.data() } as Task))
+            )
+        )
+
+        return () => {
+            membersUnsub()
+            tasksUnsub()
+        }
+    }, [projectId, user])
 
     // ── Build enriched profiles ───────────────────────────────────────────────
     const members: UserProfile[] = useMemo(() => {
-        const now    = new Date()
-        const week   = 7 * 24 * 60 * 60 * 1000
+        const now = new Date()
+        const week = 7 * 24 * 60 * 60 * 1000
         const openTasks = tasks.filter(t => t.status !== 'done')
 
         return Object.entries(rawMembers).map(([uid, memberData]) => {
-            const profile      = profiles[uid] ?? {}
-            const memberTasks  = tasks.filter(t => t.assignee?.id === uid)
+            const profile = profiles[uid] ?? {}
+            const memberTasks = tasks.filter(t => t.assignee?.id === uid)
 
-            const completedTasks  = memberTasks.filter(t => t.status === 'done').length
+            const completedTasks = memberTasks.filter(t => t.status === 'done').length
             const inProgressTasks = memberTasks.filter(t => t.status === 'in-progress').length
-            const reviewTasks     = memberTasks.filter(t => t.status === 'review').length
-            const backlogTasks    = memberTasks.filter(t => t.status === 'backlog').length
-            const todoTasks       = memberTasks.filter(t => t.status === 'todo').length
-            const overdueTasks    = memberTasks.filter(t =>
+            const reviewTasks = memberTasks.filter(t => t.status === 'review').length
+            const backlogTasks = memberTasks.filter(t => t.status === 'backlog').length
+            const todoTasks = memberTasks.filter(t => t.status === 'todo').length
+            const overdueTasks = memberTasks.filter(t =>
                 t.dueDate &&
                 now > (toDate(t.dueDate) ?? now) &&
                 t.status !== 'done'
@@ -1278,12 +1301,12 @@ export function ResourceManagement({ readOnly = false }: ResourceManagementProps
             const skills: string[] = Array.isArray(rawSkills)
                 ? rawSkills
                 : rawSkills
-                ? [
-                    ...(rawSkills.technical ?? []),
-                    ...(rawSkills.soft      ?? []),
-                    ...(rawSkills.tools     ?? []),
-                  ]
-                : []
+                    ? [
+                        ...(rawSkills.technical ?? []),
+                        ...(rawSkills.soft ?? []),
+                        ...(rawSkills.tools ?? []),
+                    ]
+                    : []
 
             // Skill match % against open tasks
             const skillMatchPct = skills.length > 0 && openTasks.length > 0
@@ -1295,7 +1318,7 @@ export function ResourceManagement({ readOnly = false }: ResourceManagementProps
                             )
                         )
                     ).length / openTasks.length) * 100
-                  )
+                )
                 : 0
 
             const completionRate = memberTasks.length > 0
@@ -1312,43 +1335,49 @@ export function ResourceManagement({ readOnly = false }: ResourceManagementProps
             }
 
             const contributionScore = computeScore(partial, tasks.length)
-            const health            = computeHealth({
+            const health = computeHealth({
                 ...partial, overdueTasks, lastActiveAt,
             })
 
-            return {
-                uid,
-                displayName: profile.displayName
-                ?? profile.name
-                ?? rawMembers[uid]?._name
-                ?? 'Unknown',
-                email: profile.email ?? rawMembers[uid]?._email ?? '',
-                photoURL: profile.photoURL
-                ?? profile.avatar
-                ?? rawMembers[uid]?._avatar
-                ?? '',
-                role,
-                joinedAt:    typeof memberData === 'object' ? memberData?.joinedAt : null,
-                skills,
-                discipline:  profile.discipline ?? '',
-                tasks:       memberTasks,
-                totalTasks:  memberTasks.length,
-                completedTasks,
-                inProgressTasks,
-                reviewTasks,
-                backlogTasks,
-                todoTasks,
-                overdueTasks,
-                completionRate,
-                velocity,
-                streak,
-                lastActiveAt,
-                skillMatchPct,
-                contributionScore,
-                health,
-            } as UserProfile
-        })
-    }, [rawMembers, profiles, tasks])
+                const assignedTagKeys = memberTags[uid] || []
+                const assignedProjectTags = projectTags.filter(
+                    t => assignedTagKeys.includes(t.id) || assignedTagKeys.includes(t.name)
+                )
+
+                return {
+                    uid,
+                    displayName: profile.displayName
+                        ?? profile.name
+                        ?? rawMembers[uid]?._name
+                        ?? 'Unknown',
+                    email: profile.email ?? rawMembers[uid]?._email ?? '',
+                    photoURL: profile.photoURL
+                        ?? profile.avatar
+                        ?? rawMembers[uid]?._avatar
+                        ?? '',
+                    role,
+                    joinedAt: typeof memberData === 'object' ? memberData?.joinedAt : null,
+                    skills,
+                    discipline: profile.discipline ?? '',
+                    tasks: memberTasks,
+                    totalTasks: memberTasks.length,
+                    completedTasks,
+                    inProgressTasks,
+                    reviewTasks,
+                    backlogTasks,
+                    todoTasks,
+                    overdueTasks,
+                    completionRate,
+                    velocity,
+                    streak,
+                    lastActiveAt,
+                    skillMatchPct,
+                    contributionScore,
+                    health,
+                    projectTags: assignedProjectTags,
+                } as UserProfile
+            })
+        }, [rawMembers, profiles, tasks, projectTags, memberTags])
 
     // ── Filtered + sorted ─────────────────────────────────────────────────────
     const filteredMembers = useMemo(() => {
@@ -1357,44 +1386,45 @@ export function ResourceManagement({ readOnly = false }: ResourceManagementProps
                 m.displayName.toLowerCase().includes(searchQuery.toLowerCase()) ||
                 m.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
                 m.skills.some(s => s.toLowerCase().includes(searchQuery.toLowerCase()))
-            const matchRole   = filterRole   === 'all' || m.role   === filterRole
+            const matchRole = filterRole === 'all' || m.role === filterRole
             const matchHealth = filterHealth === 'all' || m.health === filterHealth
-            return matchSearch && matchRole && matchHealth
+            const matchTag = filterTag === 'all' || (m.projectTags && m.projectTags.some(t => t.id === filterTag || t.name === filterTag))
+            return matchSearch && matchRole && matchHealth && matchTag
         })
         list.sort((a, b) => {
             let cmp = 0
             switch (sortBy) {
-                case 'name':       cmp = a.displayName.localeCompare(b.displayName); break
-                case 'tasks':      cmp = a.totalTasks - b.totalTasks;                break
-                case 'score':      cmp = a.contributionScore - b.contributionScore;  break
-                case 'velocity':   cmp = a.velocity - b.velocity;                   break
-                case 'completion': cmp = a.completionRate - b.completionRate;        break
+                case 'name': cmp = a.displayName.localeCompare(b.displayName); break
+                case 'tasks': cmp = a.totalTasks - b.totalTasks; break
+                case 'score': cmp = a.contributionScore - b.contributionScore; break
+                case 'velocity': cmp = a.velocity - b.velocity; break
+                case 'completion': cmp = a.completionRate - b.completionRate; break
             }
             return sortAsc ? cmp : -cmp
         })
         return list
-    }, [members, searchQuery, filterRole, filterHealth, sortBy, sortAsc])
+    }, [members, searchQuery, filterRole, filterHealth, filterTag, sortBy, sortAsc])
 
     // ── Team aggregate stats ──────────────────────────────────────────────────
     const stats = useMemo(() => {
-        const total       = members.length
-        const totalTasks  = tasks.length
-        const doneTasks   = tasks.filter(t => t.status === 'done').length
-        const overdue     = tasks.filter(t =>
+        const total = members.length
+        const totalTasks = tasks.length
+        const doneTasks = tasks.filter(t => t.status === 'done').length
+        const overdue = tasks.filter(t =>
             t.dueDate &&
             new Date() > (toDate(t.dueDate) ?? new Date()) &&
             t.status !== 'done'
         ).length
-        const avgScore    = members.length > 0
+        const avgScore = members.length > 0
             ? Math.round(
                 members.reduce((s, m) => s + m.contributionScore, 0) / members.length
-              )
+            )
             : 0
         const topPerformer = [...members].sort(
             (a, b) => b.contributionScore - a.contributionScore
         )[0]
         const blocked = members.filter(m => m.health === 'blocked').length
-        const idle    = members.filter(m => m.health === 'idle').length
+        const idle = members.filter(m => m.health === 'idle').length
         const unassigned = tasks.filter(t => !t.assignee?.id && t.status !== 'done').length
 
         return {
@@ -1425,10 +1455,10 @@ export function ResourceManagement({ readOnly = false }: ResourceManagementProps
         return (
             <div className="space-y-4">
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    {[1,2,3,4].map(i => <Skeleton key={i} className="h-24" />)}
+                    {[1, 2, 3, 4].map(i => <Skeleton key={i} className="h-24" />)}
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {[1,2,3].map(i => <Skeleton key={i} className="h-56" />)}
+                    {[1, 2, 3].map(i => <Skeleton key={i} className="h-56" />)}
                 </div>
             </div>
         )
@@ -1436,338 +1466,300 @@ export function ResourceManagement({ readOnly = false }: ResourceManagementProps
 
     // ── Chart data ────────────────────────────────────────────────────────────
     const chartData = filteredMembers.map(m => ({
-        name:       m.displayName.split(' ')[0],
-        fullName:   m.displayName,
-        tasks:      m.totalTasks,
-        done:       m.completedTasks,
-        velocity:   m.velocity,
-        score:      m.contributionScore,
+        name: m.displayName.split(' ')[0],
+        fullName: m.displayName,
+        tasks: m.totalTasks,
+        done: m.completedTasks,
+        velocity: m.velocity,
+        score: m.contributionScore,
         completion: m.completionRate,
     }))
 
     // ─────────────────────────────────────────────────────────────────────────
     return (
         <TooltipProvider>
-        <div className="space-y-5">
+            <div className="space-y-5">
 
-            {/* ── Top Stats ── */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {[
-                    {
-                        label: 'Team Members',
-                        value: stats.total,
-                        sub:   `${stats.idle} idle · ${stats.blocked} blocked`,
-                        icon:  Users,
-                        color: 'text-blue-500',
-                        bg:    'bg-blue-50 dark:bg-blue-900/20',
-                    },
-                    {
-                        label: 'Tasks Done',
-                        value: `${stats.doneTasks}/${stats.totalTasks}`,
-                        sub:   `${stats.unassigned} unassigned`,
-                        icon:  CheckCircle2,
-                        color: 'text-green-500',
-                        bg:    'bg-green-50 dark:bg-green-900/20',
-                    },
-                    {
-                        label: 'Avg Score',
-                        value: stats.avgScore,
-                        sub:   'Contribution score',
-                        icon:  Star,
-                        color: 'text-amber-500',
-                        bg:    'bg-amber-50 dark:bg-amber-900/20',
-                    },
-                    {
-                        label: 'Top Performer',
-                        value: stats.topPerformer?.displayName.split(' ')[0] ?? '—',
-                        sub:   stats.topPerformer
-                            ? `Score: ${stats.topPerformer.contributionScore}`
-                            : 'No data yet',
-                        icon:  Award,
-                        color: 'text-purple-500',
-                        bg:    'bg-purple-50 dark:bg-purple-900/20',
-                    },
-                ].map(s => (
-                    <Card key={s.label} className={`border-none ${s.bg}`}>
-                        <CardContent className="pt-4 pb-3 flex items-start gap-3">
-                            <div className={`p-2 rounded-lg bg-white/70 dark:bg-black/20 ${s.color}`}>
-                                <s.icon className="h-5 w-5" />
-                            </div>
-                            <div>
-                                <p className="text-2xl font-bold">{s.value}</p>
-                                <p className="text-xs font-medium">{s.label}</p>
-                                <p className="text-xs text-muted-foreground">{s.sub}</p>
-                            </div>
-                        </CardContent>
-                    </Card>
-                ))}
-            </div>
-
-            {/* ── Controls ── */}
-            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 flex-wrap">
-                <div className="relative flex-1 min-w-[200px]">
-                    <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                    <Input
-                        placeholder="Search by name or skill…"
-                        className="pl-9"
-                        value={searchQuery}
-                        onChange={e => setSearchQuery(e.target.value)}
-                    />
-                </div>
-
-                <Select value={filterRole} onValueChange={setFilterRole}>
-                    <SelectTrigger className="w-[140px]">
-                        <Filter className="h-3.5 w-3.5 mr-2" />
-                        <SelectValue placeholder="All roles" />
-                    </SelectTrigger>
-                    <SelectContent>
-                        <SelectItem value="all">All Roles</SelectItem>
-                        {Object.keys(ROLE_CONFIG).map(r => (
-                            <SelectItem key={r} value={r}>{r}</SelectItem>
-                        ))}
-                    </SelectContent>
-                </Select>
-
-                <Select value={filterHealth} onValueChange={setFilterHealth}>
-                    <SelectTrigger className="w-[140px]">
-                        <Activity className="h-3.5 w-3.5 mr-2" />
-                        <SelectValue placeholder="All health" />
-                    </SelectTrigger>
-                    <SelectContent>
-                        <SelectItem value="all">All Health</SelectItem>
-                        {Object.entries(                        HEALTH_CONFIG).map(([key, conf]) => (
-                            <SelectItem key={key} value={key}>
-                                {conf.label}
-                            </SelectItem>
-                        ))}
-                    </SelectContent>
-                </Select>
-
-                <Select value={sortBy} onValueChange={v => setSortBy(v as any)}>
-                    <SelectTrigger className="w-[160px]">
-                        <SelectValue placeholder="Sort by…" />
-                    </SelectTrigger>
-                    <SelectContent>
-                        <SelectItem value="score">Contribution Score</SelectItem>
-                        <SelectItem value="name">Name</SelectItem>
-                        <SelectItem value="tasks">Task Count</SelectItem>
-                        <SelectItem value="velocity">Velocity</SelectItem>
-                        <SelectItem value="completion">Completion Rate</SelectItem>
-                    </SelectContent>
-                </Select>
-
-                <Button
-                    variant="outline"
-                    size="icon"
-                    onClick={() => setSortAsc(a => !a)}
-                    title={sortAsc ? 'Ascending' : 'Descending'}
-                >
-                    {sortAsc
-                        ? <ChevronUp   className="h-4 w-4" />
-                        : <ChevronDown className="h-4 w-4" />}
-                </Button>
-
-                {/* View toggle */}
-                <div className="flex bg-muted rounded-lg p-1 gap-1 ml-auto">
+                {/* ── Top Stats ── */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                     {[
-                        { val: 'grid',  label: 'Cards'   },
-                        { val: 'chart', label: 'Charts'  },
-                        { val: 'table', label: 'Table'   },
-                    ].map(v => (
-                        <button
-                            key={v.val}
-                            onClick={() => setActiveView(v.val)}
-                            className={`px-3 py-1 text-xs rounded-md
-                                transition-colors font-medium ${
-                                activeView === v.val
-                                    ? 'bg-background shadow-sm text-foreground'
-                                    : 'text-muted-foreground hover:text-foreground'
-                            }`}
-                        >
-                            {v.label}
-                        </button>
-                    ))}
-                </div>
-            </div>
-
-            {/* ── Alerts strip ── */}
-            {(stats.blocked > 0 || stats.idle > 0 || stats.unassigned > 0) && (
-                <div className="flex flex-wrap gap-2">
-                    {stats.blocked > 0 && (
-                        <div className="flex items-center gap-2 bg-red-50
-                            dark:bg-red-900/20 border border-red-200
-                            dark:border-red-800 rounded-lg px-3 py-2 text-sm">
-                            <AlertTriangle className="h-4 w-4 text-red-500" />
-                            <span className="text-red-700 dark:text-red-400 font-medium">
-                                {stats.blocked} member{stats.blocked > 1 ? 's' : ''} blocked
-                                — overdue tasks need attention
-                            </span>
-                        </div>
-                    )}
-                    {stats.idle > 0 && (
-                        <div className="flex items-center gap-2 bg-gray-50
-                            dark:bg-gray-800/40 border border-gray-200
-                            dark:border-gray-700 rounded-lg px-3 py-2 text-sm">
-                            <Circle className="h-4 w-4 text-gray-400" />
-                            <span className="text-gray-600 dark:text-gray-400 font-medium">
-                                {stats.idle} member{stats.idle > 1 ? 's' : ''} idle
-                                — consider assigning tasks
-                            </span>
-                        </div>
-                    )}
-                    {stats.unassigned > 0 && (
-                        <div className="flex items-center gap-2 bg-blue-50
-                            dark:bg-blue-900/20 border border-blue-200
-                            dark:border-blue-800 rounded-lg px-3 py-2 text-sm">
-                            <Target className="h-4 w-4 text-blue-500" />
-                            <span className="text-blue-700 dark:text-blue-400 font-medium">
-                                {stats.unassigned} task{stats.unassigned > 1 ? 's' : ''} unassigned
-                                — check skill matches to assign
-                            </span>
-                        </div>
-                    )}
-                </div>
-            )}
-
-            {/* ── Empty state ── */}
-            {filteredMembers.length === 0 && !loading && (
-                <div className="text-center py-16 text-muted-foreground">
-                    <Users className="h-12 w-12 mx-auto mb-3 opacity-20" />
-                    <p className="font-medium">
-                        {members.length === 0
-                            ? 'No team members yet'
-                            : 'No members match your filters'}
-                    </p>
-                    <p className="text-sm mt-1">
-                        {members.length === 0
-                            ? 'Add team members from the project settings.'
-                            : 'Try adjusting your search or filters.'}
-                    </p>
-                </div>
-            )}
-
-            {/* ════ VIEW: Cards Grid ════ */}
-            {activeView === 'grid' && filteredMembers.length > 0 && (
-                <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-                    {filteredMembers.map(member => (
-                        <MemberCard
-                            key={member.uid}
-                            member={member}
-                            onClick={() => setSelectedMember(member)}
-                            isCurrentUser={member.uid === user?.uid}
-                        />
-                    ))}
-                </div>
-            )}
-
-            {/* ════ VIEW: Charts ════ */}
-            {activeView === 'chart' && filteredMembers.length > 0 && (
-                <div className="space-y-4">
-
-                    {/* Contribution scores */}
-                    <Card>
-                        <CardHeader>
-                            <CardTitle>Contribution Scores</CardTitle>
-                            <CardDescription>
-                                Overall engagement score per member (0–100)
-                            </CardDescription>
-                        </CardHeader>
-                        <CardContent className="h-[280px]">
-                            <ResponsiveContainer width="100%" height="100%">
-                                <BarChart data={chartData}
-                                    margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
-                                    <XAxis dataKey="name" tick={{ fontSize: 12 }} />
-                                    <YAxis domain={[0, 100]}
-                                        tick={{ fontSize: 12 }} />
-                                    <ReTooltip
-                                        formatter={(v, _n, p) => [
-                                            v, p.payload.fullName,
-                                        ]}
-                                    />
-                                    <Bar dataKey="score"
-                                        name="Score"
-                                        radius={[4,4,0,0]}>
-                                        {chartData.map((entry, i) => (
-                                            <Cell
-                                                key={i}
-                                                fill={
-                                                    entry.score >= 70 ? '#22c55e' :
-                                                    entry.score >= 40 ? '#f59e0b' :
-                                                                        '#ef4444'
-                                                }
-                                            />
-                                        ))}
-                                    </Bar>
-                                </BarChart>
-                            </ResponsiveContainer>
-                        </CardContent>
-                    </Card>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-
-                        {/* Tasks done vs total */}
-                        <Card>
-                            <CardHeader>
-                                <CardTitle>Tasks: Total vs Done</CardTitle>
-                                <CardDescription>
-                                    Completed tasks per member
-                                </CardDescription>
-                            </CardHeader>
-                            <CardContent className="h-[260px]">
-                                <ResponsiveContainer width="100%" height="100%">
-                                    <BarChart data={chartData}
-                                        layout="vertical"
-                                        margin={{ left: 10 }}>
-                                        <XAxis type="number"
-                                            allowDecimals={false}
-                                            tick={{ fontSize: 11 }} />
-                                        <YAxis dataKey="name" type="category"
-                                            width={80}
-                                            tick={{ fontSize: 11 }} />
-                                        <ReTooltip />
-                                        <Legend />
-                                        <Bar dataKey="tasks" name="Total"
-                                            fill="#94a3b8"
-                                            radius={[0,4,4,0]} />
-                                        <Bar dataKey="done"  name="Done"
-                                            fill="#22c55e"
-                                            radius={[0,4,4,0]} />
-                                    </BarChart>
-                                </ResponsiveContainer>
+                        {
+                            label: 'Team Members',
+                            value: stats.total,
+                            sub: `${stats.idle} idle · ${stats.blocked} blocked`,
+                            icon: Users,
+                            color: 'text-blue-500',
+                            bg: 'bg-blue-50 dark:bg-blue-900/20',
+                        },
+                        {
+                            label: 'Tasks Done',
+                            value: `${stats.doneTasks}/${stats.totalTasks}`,
+                            sub: `${stats.unassigned} unassigned`,
+                            icon: CheckCircle2,
+                            color: 'text-green-500',
+                            bg: 'bg-green-50 dark:bg-green-900/20',
+                        },
+                        {
+                            label: 'Avg Score',
+                            value: stats.avgScore,
+                            sub: 'Contribution score',
+                            icon: Star,
+                            color: 'text-amber-500',
+                            bg: 'bg-amber-50 dark:bg-amber-900/20',
+                        },
+                        {
+                            label: 'Top Performer',
+                            value: stats.topPerformer?.displayName.split(' ')[0] ?? '—',
+                            sub: stats.topPerformer
+                                ? `Score: ${stats.topPerformer.contributionScore}`
+                                : 'No data yet',
+                            icon: Award,
+                            color: 'text-purple-500',
+                            bg: 'bg-purple-50 dark:bg-purple-900/20',
+                        },
+                    ].map(s => (
+                        <Card key={s.label} className={`border-none ${s.bg}`}>
+                            <CardContent className="pt-4 pb-3 flex items-start gap-3">
+                                <div className={`p-2 rounded-lg bg-white/70 dark:bg-black/20 ${s.color}`}>
+                                    <s.icon className="h-5 w-5" />
+                                </div>
+                                <div>
+                                    <p className="text-2xl font-bold">{s.value}</p>
+                                    <p className="text-xs font-medium">{s.label}</p>
+                                    <p className="text-xs text-muted-foreground">{s.sub}</p>
+                                </div>
                             </CardContent>
                         </Card>
+                    ))}
+                </div>
 
-                        {/* 7-day velocity */}
+                {/* ── Controls ── */}
+                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 flex-wrap">
+                    <div className="relative flex-1 min-w-[200px]">
+                        <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                        <Input
+                            placeholder="Search by name or skill…"
+                            className="pl-9"
+                            value={searchQuery}
+                            onChange={e => setSearchQuery(e.target.value)}
+                        />
+                    </div>
+
+                    <Select value={filterRole} onValueChange={setFilterRole}>
+                        <SelectTrigger className="w-[140px]">
+                            <Filter className="h-3.5 w-3.5 mr-2" />
+                            <SelectValue placeholder="All roles" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="all">All Roles</SelectItem>
+                            {Object.keys(ROLE_CONFIG).map(r => (
+                                <SelectItem key={r} value={r}>{r}</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+
+                    <Select value={filterHealth} onValueChange={setFilterHealth}>
+                        <SelectTrigger className="w-[140px]">
+                            <Activity className="h-3.5 w-3.5 mr-2" />
+                            <SelectValue placeholder="All health" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="all">All Health</SelectItem>
+                            {Object.entries(HEALTH_CONFIG).map(([key, conf]) => (
+                                <SelectItem key={key} value={key}>
+                                    {conf.label}
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+
+                    {projectTags.length > 0 && (
+                        <Select value={filterTag} onValueChange={setFilterTag}>
+                            <SelectTrigger className="w-[150px]">
+                                <Tag className="h-3.5 w-3.5 mr-2 text-primary" />
+                                <SelectValue placeholder="All tags" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">All Project Tags</SelectItem>
+                                {projectTags.map(t => (
+                                    <SelectItem key={t.id} value={t.id}>
+                                        <div className="flex items-center gap-2">
+                                            <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: t.color }} />
+                                            <span>{t.name}</span>
+                                        </div>
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+                    )}
+
+                    {(myProjectRole === 'owner' || myProjectRole === 'admin') && (
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setProjectTagsModalOpen(true)}
+                            className="h-9 gap-1.5 text-xs font-medium border-primary/20 hover:border-primary/50 text-primary hover:bg-primary/5 shrink-0"
+                        >
+                            <Tag className="h-3.5 w-3.5" />
+                            <span>Manage Tags</span>
+                            {projectTags.length > 0 && (
+                                <Badge variant="secondary" className="text-[9px] px-1 py-0 h-4 font-bold ml-0.5">
+                                    {projectTags.length}
+                                </Badge>
+                            )}
+                        </Button>
+                    )}
+
+                    <Select value={sortBy} onValueChange={v => setSortBy(v as any)}>
+                        <SelectTrigger className="w-[160px]">
+                            <SelectValue placeholder="Sort by…" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="score">Contribution Score</SelectItem>
+                            <SelectItem value="name">Name</SelectItem>
+                            <SelectItem value="tasks">Task Count</SelectItem>
+                            <SelectItem value="velocity">Velocity</SelectItem>
+                            <SelectItem value="completion">Completion Rate</SelectItem>
+                        </SelectContent>
+                    </Select>
+
+                    <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={() => setSortAsc(a => !a)}
+                        title={sortAsc ? 'Ascending' : 'Descending'}
+                    >
+                        {sortAsc
+                            ? <ChevronUp className="h-4 w-4" />
+                            : <ChevronDown className="h-4 w-4" />}
+                    </Button>
+
+                    {/* View toggle */}
+                    <div className="flex bg-muted rounded-lg p-1 gap-1 ml-auto">
+                        {[
+                            { val: 'grid', label: 'Cards' },
+                            { val: 'chart', label: 'Charts' },
+                            { val: 'table', label: 'Table' },
+                        ].map(v => (
+                            <button
+                                key={v.val}
+                                onClick={() => setActiveView(v.val)}
+                                className={`px-3 py-1 text-xs rounded-md
+                                transition-colors font-medium ${activeView === v.val
+                                        ? 'bg-background shadow-sm text-foreground'
+                                        : 'text-muted-foreground hover:text-foreground'
+                                    }`}
+                            >
+                                {v.label}
+                            </button>
+                        ))}
+                    </div>
+                </div>
+
+                {/* ── Alerts strip ── */}
+                {(stats.blocked > 0 || stats.idle > 0 || stats.unassigned > 0) && (
+                    <div className="flex flex-wrap gap-2">
+                        {stats.blocked > 0 && (
+                            <div className="flex items-center gap-2 bg-red-50
+                            dark:bg-red-900/20 border border-red-200
+                            dark:border-red-800 rounded-lg px-3 py-2 text-sm">
+                                <AlertTriangle className="h-4 w-4 text-red-500" />
+                                <span className="text-red-700 dark:text-red-400 font-medium">
+                                    {stats.blocked} member{stats.blocked > 1 ? 's' : ''} blocked
+                                    — overdue tasks need attention
+                                </span>
+                            </div>
+                        )}
+                        {stats.idle > 0 && (
+                            <div className="flex items-center gap-2 bg-gray-50
+                            dark:bg-gray-800/40 border border-gray-200
+                            dark:border-gray-700 rounded-lg px-3 py-2 text-sm">
+                                <Circle className="h-4 w-4 text-gray-400" />
+                                <span className="text-gray-600 dark:text-gray-400 font-medium">
+                                    {stats.idle} member{stats.idle > 1 ? 's' : ''} idle
+                                    — consider assigning tasks
+                                </span>
+                            </div>
+                        )}
+                        {stats.unassigned > 0 && (
+                            <div className="flex items-center gap-2 bg-blue-50
+                            dark:bg-blue-900/20 border border-blue-200
+                            dark:border-blue-800 rounded-lg px-3 py-2 text-sm">
+                                <Target className="h-4 w-4 text-blue-500" />
+                                <span className="text-blue-700 dark:text-blue-400 font-medium">
+                                    {stats.unassigned} task{stats.unassigned > 1 ? 's' : ''} unassigned
+                                    — check skill matches to assign
+                                </span>
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {/* ── Empty state ── */}
+                {filteredMembers.length === 0 && !loading && (
+                    <div className="text-center py-16 text-muted-foreground">
+                        <Users className="h-12 w-12 mx-auto mb-3 opacity-20" />
+                        <p className="font-medium">
+                            {members.length === 0
+                                ? 'No team members yet'
+                                : 'No members match your filters'}
+                        </p>
+                        <p className="text-sm mt-1">
+                            {members.length === 0
+                                ? 'Add team members from the project settings.'
+                                : 'Try adjusting your search or filters.'}
+                        </p>
+                    </div>
+                )}
+
+                {/* ════ VIEW: Cards Grid ════ */}
+                {activeView === 'grid' && filteredMembers.length > 0 && (
+                    <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
+                        {filteredMembers.map(member => (
+                            <MemberCard
+                                key={member.uid}
+                                member={member}
+                                onClick={() => setSelectedMember(member)}
+                                isCurrentUser={member.uid === user?.uid}
+                            />
+                        ))}
+                    </div>
+                )}
+
+                {/* ════ VIEW: Charts ════ */}
+                {activeView === 'chart' && filteredMembers.length > 0 && (
+                    <div className="space-y-4">
+
+                        {/* Contribution scores */}
                         <Card>
                             <CardHeader>
-                                <CardTitle>7-Day Velocity</CardTitle>
+                                <CardTitle>Contribution Scores</CardTitle>
                                 <CardDescription>
-                                    Tasks completed in the last 7 days
+                                    Overall engagement score per member (0–100)
                                 </CardDescription>
                             </CardHeader>
-                            <CardContent className="h-[260px]">
+                            <CardContent className="h-[280px]">
                                 <ResponsiveContainer width="100%" height="100%">
                                     <BarChart data={chartData}
-                                        margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+                                        margin={{ top: 5, right: 20, left: 0, bottom: 5 }}>
                                         <XAxis dataKey="name" tick={{ fontSize: 12 }} />
-                                        <YAxis allowDecimals={false}
+                                        <YAxis domain={[0, 100]}
                                             tick={{ fontSize: 12 }} />
                                         <ReTooltip
                                             formatter={(v, _n, p) => [
-                                                `${v} tasks`, p.payload.fullName,
+                                                v, p.payload.fullName,
                                             ]}
                                         />
-                                        <Bar dataKey="velocity"
-                                            name="Tasks / 7d"
-                                            fill="#8884d8"
-                                            radius={[4,4,0,0]}>
+                                        <Bar dataKey="score"
+                                            name="Score"
+                                            radius={[4, 4, 0, 0]}>
                                             {chartData.map((entry, i) => (
                                                 <Cell
                                                     key={i}
                                                     fill={
-                                                        entry.velocity >= 3 ? '#22c55e' :
-                                                        entry.velocity >= 1 ? '#8884d8' :
-                                                                              '#e2e8f0'
+                                                        entry.score >= 70 ? '#22c55e' :
+                                                            entry.score >= 40 ? '#f59e0b' :
+                                                                '#ef4444'
                                                     }
                                                 />
                                             ))}
@@ -1776,239 +1768,343 @@ export function ResourceManagement({ readOnly = false }: ResourceManagementProps
                                 </ResponsiveContainer>
                             </CardContent>
                         </Card>
-                    </div>
 
-                    {/* Health overview */}
-                    <Card>
-                        <CardHeader>
-                            <CardTitle>Team Health Overview</CardTitle>
-                            <CardDescription>
-                                Member status at a glance
-                            </CardDescription>
-                        </CardHeader>
-                        <CardContent>
-                            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                                {Object.entries(HEALTH_CONFIG).map(([key, conf]) => {
-                                    const count = members.filter(
-                                        m => m.health === key
-                                    ).length
-                                    const Icon = conf.icon
-                                    return (
-                                        <div key={key}
-                                            className={`rounded-xl p-4 text-center
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+                            {/* Tasks done vs total */}
+                            <Card>
+                                <CardHeader>
+                                    <CardTitle>Tasks: Total vs Done</CardTitle>
+                                    <CardDescription>
+                                        Completed tasks per member
+                                    </CardDescription>
+                                </CardHeader>
+                                <CardContent className="h-[260px]">
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <BarChart data={chartData}
+                                            layout="vertical"
+                                            margin={{ left: 10 }}>
+                                            <XAxis type="number"
+                                                allowDecimals={false}
+                                                tick={{ fontSize: 11 }} />
+                                            <YAxis dataKey="name" type="category"
+                                                width={80}
+                                                tick={{ fontSize: 11 }} />
+                                            <ReTooltip />
+                                            <Legend />
+                                            <Bar dataKey="tasks" name="Total"
+                                                fill="#94a3b8"
+                                                radius={[0, 4, 4, 0]} />
+                                            <Bar dataKey="done" name="Done"
+                                                fill="#22c55e"
+                                                radius={[0, 4, 4, 0]} />
+                                        </BarChart>
+                                    </ResponsiveContainer>
+                                </CardContent>
+                            </Card>
+
+                            {/* 7-day velocity */}
+                            <Card>
+                                <CardHeader>
+                                    <CardTitle>7-Day Velocity</CardTitle>
+                                    <CardDescription>
+                                        Tasks completed in the last 7 days
+                                    </CardDescription>
+                                </CardHeader>
+                                <CardContent className="h-[260px]">
+                                    <ResponsiveContainer width="100%" height="100%">
+                                        <BarChart data={chartData}
+                                            margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+                                            <XAxis dataKey="name" tick={{ fontSize: 12 }} />
+                                            <YAxis allowDecimals={false}
+                                                tick={{ fontSize: 12 }} />
+                                            <ReTooltip
+                                                formatter={(v, _n, p) => [
+                                                    `${v} tasks`, p.payload.fullName,
+                                                ]}
+                                            />
+                                            <Bar dataKey="velocity"
+                                                name="Tasks / 7d"
+                                                fill="#8884d8"
+                                                radius={[4, 4, 0, 0]}>
+                                                {chartData.map((entry, i) => (
+                                                    <Cell
+                                                        key={i}
+                                                        fill={
+                                                            entry.velocity >= 3 ? '#22c55e' :
+                                                                entry.velocity >= 1 ? '#8884d8' :
+                                                                    '#e2e8f0'
+                                                        }
+                                                    />
+                                                ))}
+                                            </Bar>
+                                        </BarChart>
+                                    </ResponsiveContainer>
+                                </CardContent>
+                            </Card>
+                        </div>
+
+                        {/* Health overview */}
+                        <Card>
+                            <CardHeader>
+                                <CardTitle>Team Health Overview</CardTitle>
+                                <CardDescription>
+                                    Member status at a glance
+                                </CardDescription>
+                            </CardHeader>
+                            <CardContent>
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                                    {Object.entries(HEALTH_CONFIG).map(([key, conf]) => {
+                                        const count = members.filter(
+                                            m => m.health === key
+                                        ).length
+                                        const Icon = conf.icon
+                                        return (
+                                            <div key={key}
+                                                className={`rounded-xl p-4 text-center
                                                 border ${conf.bg} ${conf.border}`}>
-                                            <Icon className={`h-6 w-6 mx-auto mb-2 ${conf.color}`} />
-                                            <p className={`text-2xl font-bold ${conf.color}`}>
-                                                {count}
-                                            </p>
-                                            <p className="text-sm font-medium mt-1">
-                                                {conf.label}
-                                            </p>
-                                            <p className="text-xs text-muted-foreground">
-                                                {count === 1 ? 'member' : 'members'}
-                                            </p>
-                                        </div>
-                                    )
-                                })}
-                            </div>
-                        </CardContent>
-                    </Card>
-                </div>
-            )}
+                                                <Icon className={`h-6 w-6 mx-auto mb-2 ${conf.color}`} />
+                                                <p className={`text-2xl font-bold ${conf.color}`}>
+                                                    {count}
+                                                </p>
+                                                <p className="text-sm font-medium mt-1">
+                                                    {conf.label}
+                                                </p>
+                                                <p className="text-xs text-muted-foreground">
+                                                    {count === 1 ? 'member' : 'members'}
+                                                </p>
+                                            </div>
+                                        )
+                                    })}
+                                </div>
+                            </CardContent>
+                        </Card>
+                    </div>
+                )}
 
-            {/* ════ VIEW: Table ════ */}
-            {activeView === 'table' && filteredMembers.length > 0 && (
-                <Card>
-                    <CardContent className="p-0">
-                        <div className="overflow-x-auto">
-                            <table className="w-full text-sm">
-                                <thead>
-                                    <tr className="border-b bg-muted/40">
-                                        {[
-                                            'Member', 'Role', 'Health',
-                                            'Tasks', 'Done', 'Active',
-                                            'Overdue', 'Velocity',
-                                            'Completion', 'Score',
-                                        ].map(h => (
-                                            <th key={h}
-                                                className="text-left py-3 px-4
+                {/* ════ VIEW: Table ════ */}
+                {activeView === 'table' && filteredMembers.length > 0 && (
+                    <Card>
+                        <CardContent className="p-0">
+                            <div className="overflow-x-auto">
+                                <table className="w-full text-sm">
+                                    <thead>
+                                        <tr className="border-b bg-muted/40">
+                                            {[
+                                                'Member', 'Role', 'Project Tags', 'Health',
+                                                'Tasks', 'Done', 'Active',
+                                                'Overdue', 'Velocity',
+                                                'Completion', 'Score',
+                                            ].map(h => (
+                                                <th key={h}
+                                                    className="text-left py-3 px-4
                                                     text-xs font-semibold
                                                     text-muted-foreground
                                                     whitespace-nowrap">
-                                                {h}
-                                            </th>
-                                        ))}
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {filteredMembers.map((m, i) => {
-                                        const RoleIcon =
-                                            ROLE_CONFIG[m.role]?.icon ?? UserIcon
-                                        const healthConf = HEALTH_CONFIG[m.health]
-                                        const HIcon = healthConf.icon
-                                        return (
-                                            <tr
-                                                key={m.uid}
-                                                onClick={() => setSelectedMember(m)}
-                                                className={`border-b last:border-0
+                                                    {h}
+                                                </th>
+                                            ))}
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {filteredMembers.map((m, i) => {
+                                            const RoleIcon =
+                                                ROLE_CONFIG[m.role]?.icon ?? UserIcon
+                                            const healthConf = HEALTH_CONFIG[m.health]
+                                            const HIcon = healthConf.icon
+                                            return (
+                                                <tr
+                                                    key={m.uid}
+                                                    onClick={() => setSelectedMember(m)}
+                                                    className={`border-b last:border-0
                                                     hover:bg-muted/30 cursor-pointer
-                                                    transition-colors ${
-                                                    i % 2 === 0 ? '' : 'bg-muted/10'
-                                                }`}
-                                            >
-                                                 <td className="py-3 px-4">
-                                                     <div className="flex items-center gap-2">
-                                                         <Avatar className="h-7 w-7">
-                                                             <AvatarImage src={m.photoURL} />
-                                                             <AvatarFallback className="text-xs">
-                                                                 {m.displayName.charAt(0)}
-                                                             </AvatarFallback>
-                                                         </Avatar>
-                                                         <div className="flex items-center gap-1.5 min-w-0">
-                                                             <p className="font-medium max-w-[120px] truncate">
-                                                                 {m.displayName}
-                                                             </p>
-                                                             <Badge
-                                                                 className={`px-1 py-0 text-[8px] font-semibold rounded-md border-none scale-90 origin-left shrink-0 ${
-                                                                     ROLE_CONFIG[m.role]?.badgeClass ?? ''
-                                                                 }`}
-                                                             >
-                                                                 {ROLE_CONFIG[m.role]?.label ?? m.role}
-                                                             </Badge>
-                                                             {m.uid === user?.uid && (
-                                                                 <span className="text-[10px] text-primary font-medium shrink-0">
-                                                                     You
-                                                                 </span>
-                                                             )}
-                                                         </div>
-                                                     </div>
-                                                 </td>
-                                                {/* Role */}
-                                                <td className="py-3 px-4">
-                                                    <div className="flex items-center gap-1">
-                                                        <RoleIcon className={`h-3.5 w-3.5 ${
-                                                            ROLE_CONFIG[m.role]?.color
-                                                        }`} />
-                                                        <span className="text-xs">
-                                                            {m.role}
-                                                        </span>
-                                                    </div>
-                                                </td>
-                                                {/* Health */}
-                                                <td className="py-3 px-4">
-                                                    <div className={`flex items-center
+                                                    transition-colors ${i % 2 === 0 ? '' : 'bg-muted/10'
+                                                        }`}
+                                                >
+                                                    {/* Member */}
+                                                    <td className="py-3 px-4">
+                                                        <div className="flex items-center gap-2">
+                                                            <Avatar className="h-7 w-7">
+                                                                <AvatarImage src={m.photoURL} />
+                                                                <AvatarFallback className="text-xs">
+                                                                    {m.displayName.charAt(0)}
+                                                                </AvatarFallback>
+                                                            </Avatar>
+                                                            <div>
+                                                                <p className="font-medium
+                                                                max-w-[120px] truncate">
+                                                                    {m.displayName}
+                                                                </p>
+                                                                {m.uid === user?.uid && (
+                                                                    <span className="text-[10px]
+                                                                    text-primary font-medium">
+                                                                        You
+                                                                    </span>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    </td>
+                                                    {/* Role */}
+                                                    <td className="py-3 px-4">
+                                                        <div className="flex items-center gap-1">
+                                                            <RoleIcon className={`h-3.5 w-3.5 ${ROLE_CONFIG[m.role]?.color
+                                                                }`} />
+                                                            <span className="text-xs">
+                                                                {m.role}
+                                                            </span>
+                                                        </div>
+                                                    </td>
+                                                    {/* Project Tags */}
+                                                    <td className="py-3 px-4">
+                                                        {m.projectTags && m.projectTags.length > 0 ? (
+                                                            <div className="flex flex-wrap gap-1 max-w-[180px]">
+                                                                {m.projectTags.map(tag => (
+                                                                    <Badge
+                                                                        key={tag.id}
+                                                                        className="px-1.5 py-0.5 text-[9px] font-medium rounded-full border flex items-center gap-1 shrink-0"
+                                                                        style={{
+                                                                            backgroundColor: `${tag.color}18`,
+                                                                            color: tag.color,
+                                                                            borderColor: `${tag.color}40`,
+                                                                        }}
+                                                                    >
+                                                                        <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: tag.color }} />
+                                                                        {tag.name}
+                                                                    </Badge>
+                                                                ))}
+                                                            </div>
+                                                        ) : (
+                                                            <span className="text-xs text-muted-foreground">—</span>
+                                                        )}
+                                                    </td>
+                                                    {/* Health */}
+                                                    <td className="py-3 px-4">
+                                                        <div className={`flex items-center
                                                         gap-1 px-2 py-0.5 rounded-full
                                                         text-xs font-medium w-fit
                                                         ${healthConf.bg} ${healthConf.color}`}>
-                                                        <HIcon className="h-3 w-3" />
-                                                        {healthConf.label}
-                                                    </div>
-                                                </td>
-                                                {/* Tasks */}
-                                                <td className="py-3 px-4 font-semibold">
-                                                    {m.totalTasks}
-                                                </td>
-                                                {/* Done */}
-                                                <td className="py-3 px-4 text-green-600 font-semibold">
-                                                    {m.completedTasks}
-                                                </td>
-                                                {/* Active */}
-                                                <td className="py-3 px-4 text-blue-600 font-semibold">
-                                                    {m.inProgressTasks}
-                                                </td>
-                                                {/* Overdue */}
-                                                <td className="py-3 px-4">
-                                                    {m.overdueTasks > 0 ? (
-                                                        <span className="text-destructive
+                                                            <HIcon className="h-3 w-3" />
+                                                            {healthConf.label}
+                                                        </div>
+                                                    </td>
+                                                    {/* Tasks */}
+                                                    <td className="py-3 px-4 font-semibold">
+                                                        {m.totalTasks}
+                                                    </td>
+                                                    {/* Done */}
+                                                    <td className="py-3 px-4 text-green-600 font-semibold">
+                                                        {m.completedTasks}
+                                                    </td>
+                                                    {/* Active */}
+                                                    <td className="py-3 px-4 text-blue-600 font-semibold">
+                                                        {m.inProgressTasks}
+                                                    </td>
+                                                    {/* Overdue */}
+                                                    <td className="py-3 px-4">
+                                                        {m.overdueTasks > 0 ? (
+                                                            <span className="text-destructive
                                                             font-semibold flex items-center gap-1">
-                                                            <AlertTriangle className="h-3 w-3" />
-                                                            {m.overdueTasks}
-                                                        </span>
-                                                    ) : (
-                                                        <span className="text-muted-foreground">—</span>
-                                                    )}
-                                                </td>
-                                                {/* Velocity */}
-                                                <td className="py-3 px-4">
-                                                    <div className="flex items-center gap-1">
-                                                        <Zap className={`h-3.5 w-3.5 ${
-                                                            m.velocity >= 3 ? 'text-green-500' :
-                                                            m.velocity >= 1 ? 'text-yellow-500' :
-                                                                              'text-muted-foreground'
-                                                        }`} />
-                                                        <span className="font-medium">
-                                                            {m.velocity}
-                                                        </span>
-                                                    </div>
-                                                </td>
-                                                {/* Completion */}
-                                                <td className="py-3 px-4">
-                                                    <div className="flex items-center gap-2">
-                                                        <div className="h-1.5 w-16
+                                                                <AlertTriangle className="h-3 w-3" />
+                                                                {m.overdueTasks}
+                                                            </span>
+                                                        ) : (
+                                                            <span className="text-muted-foreground">—</span>
+                                                        )}
+                                                    </td>
+                                                    {/* Velocity */}
+                                                    <td className="py-3 px-4">
+                                                        <div className="flex items-center gap-1">
+                                                            <Zap className={`h-3.5 w-3.5 ${m.velocity >= 3 ? 'text-green-500' :
+                                                                    m.velocity >= 1 ? 'text-yellow-500' :
+                                                                        'text-muted-foreground'
+                                                                }`} />
+                                                            <span className="font-medium">
+                                                                {m.velocity}
+                                                            </span>
+                                                        </div>
+                                                    </td>
+                                                    {/* Completion */}
+                                                    <td className="py-3 px-4">
+                                                        <div className="flex items-center gap-2">
+                                                            <div className="h-1.5 w-16
                                                             bg-muted rounded-full
                                                             overflow-hidden">
-                                                            <div
-                                                                className="h-full bg-green-500
+                                                                <div
+                                                                    className="h-full bg-green-500
                                                                     rounded-full"
-                                                                style={{
-                                                                    width: `${m.completionRate}%`,
-                                                                }}
-                                                            />
+                                                                    style={{
+                                                                        width: `${m.completionRate}%`,
+                                                                    }}
+                                                                />
+                                                            </div>
+                                                            <span className="text-xs font-medium">
+                                                                {m.completionRate}%
+                                                            </span>
                                                         </div>
-                                                        <span className="text-xs font-medium">
-                                                            {m.completionRate}%
-                                                        </span>
-                                                    </div>
-                                                </td>
-                                                {/* Score */}
-                                                <td className="py-3 px-4">
-                                                    <div className="flex items-center gap-1">
-                                                        <Star className="h-3.5 w-3.5 text-amber-400" />
-                                                        <span className={`font-bold ${
-                                                            m.contributionScore >= 70
-                                                                ? 'text-green-600' :
-                                                            m.contributionScore >= 40
-                                                                ? 'text-amber-500' :
-                                                                  'text-muted-foreground'
-                                                        }`}>
-                                                            {m.contributionScore}
-                                                        </span>
-                                                    </div>
-                                                </td>
-                                            </tr>
-                                        )
-                                    })}
-                                </tbody>
-                            </table>
-                        </div>
-                    </CardContent>
-                </Card>
-            )}
+                                                    </td>
+                                                    {/* Score */}
+                                                    <td className="py-3 px-4">
+                                                        <div className="flex items-center gap-1">
+                                                            <Star className="h-3.5 w-3.5 text-amber-400" />
+                                                            <span className={`font-bold ${m.contributionScore >= 70
+                                                                    ? 'text-green-600' :
+                                                                    m.contributionScore >= 40
+                                                                        ? 'text-amber-500' :
+                                                                        'text-muted-foreground'
+                                                                }`}>
+                                                                {m.contributionScore}
+                                                            </span>
+                                                        </div>
+                                                    </td>
+                                                </tr>
+                                            )
+                                        })}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </CardContent>
+                    </Card>
+                )}
 
-            {/* ── Member Detail Dialog ── */}
-            <MemberDetailDialog
-                member={selectedMember}
-                tasks={tasks}
-                open={!!selectedMember}
-                onClose={() => setSelectedMember(null)}
-                canEditRoles={canEditRoles}
-                projectId={projectId!}
-                onRoleChange={handleRoleChange}
-                currentUserUid={user?.uid}
-                onOpenReview={() => setReviewOpen(true)}
-            />
-
-            {selectedMember && (
-                <ProjectReviews
-                    open={reviewOpen}
-                    onOpenChange={setReviewOpen}
+                {/* ── Member Detail Dialog ── */}
+                <MemberDetailDialog
+                    member={selectedMember}
+                    tasks={tasks}
+                    open={!!selectedMember}
+                    onClose={() => setSelectedMember(null)}
+                    canEditRoles={canEditRoles}
                     projectId={projectId!}
-                    projectName={projectTitle || 'this project'}
-                    targetUserId={selectedMember.uid}
-                    targetUserName={selectedMember.displayName}
+                    onRoleChange={handleRoleChange}
+                    currentUserUid={user?.uid}
+                    onOpenReview={() => setReviewOpen(true)}
                 />
-            )}
-        </div>
+
+                {selectedMember && (
+                    <ProjectReviews
+                        open={reviewOpen}
+                        onOpenChange={setReviewOpen}
+                        projectId={projectId!}
+                        projectName={projectTitle || 'this project'}
+                        targetUserId={selectedMember.uid}
+                        targetUserName={selectedMember.displayName}
+                    />
+                )}
+
+                <ProjectTagsManager
+                    projectId={projectId!}
+                    open={projectTagsModalOpen}
+                    onOpenChange={setProjectTagsModalOpen}
+                    members={members.map(m => ({
+                        uid: m.uid,
+                        displayName: m.displayName,
+                        name: m.displayName,
+                        email: m.email,
+                        avatar: m.photoURL,
+                        photoURL: m.photoURL,
+                        role: m.role,
+                    }))}
+                />
+            </div>
         </TooltipProvider>
     )
 }
