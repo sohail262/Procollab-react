@@ -185,6 +185,53 @@ const compressImage = (file: File, quality: number = 0.75): Promise<Blob> => {
     })
 }
 
+const compressAvatar = (file: File): Promise<Blob> => {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = (e) => {
+            const img = new Image()
+            img.onload = () => {
+                const canvas = document.createElement('canvas')
+                const size = 400
+                canvas.width = size
+                canvas.height = size
+                const ctx = canvas.getContext('2d')
+                if (!ctx) {
+                    reject(new Error('Failed to get 2D canvas context'))
+                    return
+                }
+
+                // Draw image centered and cropped to square
+                const minSide = Math.min(img.naturalWidth, img.naturalHeight)
+                const sx = (img.naturalWidth - minSide) / 2
+                const sy = (img.naturalHeight - minSide) / 2
+
+                ctx.drawImage(
+                    img,
+                    sx, sy, minSide, minSide,
+                    0, 0, size, size
+                )
+
+                canvas.toBlob(
+                    (blob) => {
+                        if (blob) {
+                            resolve(blob)
+                        } else {
+                            reject(new Error('Avatar compression returned null blob'))
+                        }
+                    },
+                    'image/jpeg',
+                    0.85
+                )
+            }
+            img.onerror = (err) => reject(err)
+            img.src = e.target?.result as string
+        }
+        reader.onerror = (err) => reject(err)
+        reader.readAsDataURL(file)
+    })
+}
+
 export default function Profile() {
     const { id, username: usernameParam } = useParams<{ id?: string; username?: string }>()
     const { user: currentUser, logout } = useAuth()
@@ -209,6 +256,7 @@ export default function Profile() {
     const [showAllNetwork, setShowAllNetwork] = useState(false)
     const [showBannerPicker, setShowBannerPicker] = useState(false)
     const [savingBanner, setSavingBanner] = useState(false)
+    const [savingAvatar, setSavingAvatar] = useState(false)
     const [connectionsSearch, setConnectionsSearch] = useState('')
 
 
@@ -279,6 +327,51 @@ export default function Profile() {
             toast({ title: 'Could not upload custom banner', variant: 'destructive' })
         } finally {
             setSavingBanner(false)
+            // Reset the input value so the user can re-upload the same file if needed
+            e.target.value = ''
+        }
+    }
+
+    const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0]
+        if (!file || !currentUser || !isOwnProfile) return
+
+        setSavingAvatar(true)
+        try {
+            // Compress and crop the avatar image before upload
+            const compressedBlob = await compressAvatar(file)
+
+            // 1. Delete previous custom avatar from Firebase Storage if it exists to avoid orphaned files
+            if (profile?.photoURL?.includes('firebasestorage.googleapis.com')) {
+                try {
+                    const oldRef = ref(storage, profile.photoURL)
+                    await deleteObject(oldRef)
+                } catch (deleteErr) {
+                    console.warn('Could not delete old avatar from storage:', deleteErr)
+                }
+            }
+
+            // 2. Upload compressed image to Firebase Storage
+            const uniqueFileName = `users/${currentUser.uid}/avatar/avatar_${Date.now()}.jpg`
+            const storageRef = ref(storage, uniqueFileName)
+            await uploadBytes(storageRef, compressedBlob)
+            
+            // 3. Get the public download URL
+            const downloadURL = await getDownloadURL(storageRef)
+
+            // 4. Update user document in Firestore
+            await updateDoc(doc(db, 'users', currentUser.uid), { photoURL: downloadURL })
+            setProfile(prev => prev ? { ...prev, photoURL: downloadURL } : prev)
+            
+            // 5. Clear session cache so settings and other cached views get updated
+            try { sessionStorage.removeItem(`profile_${currentUser.uid}`) } catch { /* ignore */ }
+
+            toast({ title: 'Profile picture updated!' })
+        } catch (err) {
+            console.error('Error uploading custom avatar:', err)
+            toast({ title: 'Could not upload profile picture', variant: 'destructive' })
+        } finally {
+            setSavingAvatar(false)
             // Reset the input value so the user can re-upload the same file if needed
             e.target.value = ''
         }
@@ -1021,8 +1114,8 @@ export default function Profile() {
                         {/* Avatar + actions row */}
                         <div className="flex flex-wrap justify-between items-start gap-3 -mt-10 sm:-mt-12 mb-3">
                             {/* Avatar with ring */}
-                            <div className="relative shrink-0">
-                                <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full ring-4 ring-zinc-950 overflow-hidden bg-zinc-950 shadow-md">
+                            <div className="relative shrink-0 group">
+                                <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full ring-4 ring-zinc-950 overflow-hidden bg-zinc-950 shadow-md relative">
                                     <img
                                         src={
                                             profile.photoURL ||
@@ -1031,6 +1124,28 @@ export default function Profile() {
                                         alt={`${profile.firstName} ${profile.lastName}`}
                                         className="w-full h-full object-cover"
                                     />
+                                    {isOwnProfile && (
+                                        <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity duration-200 cursor-pointer">
+                                            {savingAvatar ? (
+                                                <div className="flex flex-col items-center gap-1">
+                                                    <Loader2 className="h-4.5 w-4.5 text-white animate-spin" />
+                                                    <span className="text-[9px] text-zinc-300 font-medium">Uploading</span>
+                                                </div>
+                                            ) : (
+                                                <>
+                                                    <Upload className="h-4.5 w-4.5 text-white mb-0.5" />
+                                                    <span className="text-[10px] text-white font-semibold">Change</span>
+                                                </>
+                                            )}
+                                            <input
+                                                type="file"
+                                                accept="image/*"
+                                                className="absolute inset-0 opacity-0 cursor-pointer"
+                                                onChange={handleAvatarUpload}
+                                                disabled={savingAvatar}
+                                            />
+                                        </div>
+                                    )}
                                 </div>
                             </div>
 
