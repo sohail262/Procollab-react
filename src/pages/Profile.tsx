@@ -1760,64 +1760,7 @@ export default function Profile() {
                             </div>
                         )}
 
-                        {/* Portfolio Showcase */}
-                        <div>
-                            <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-                                <ImageIcon className="h-5 w-5 text-indigo-505" />
-                                Project Showcase
-                            </h2>
-                            {profile.pastProjectsShowcase && profile.pastProjectsShowcase.length > 0 ? (
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    {profile.pastProjectsShowcase.map((proj, idx) => (
-                                        <Card key={idx} className="overflow-hidden border border-gray-200 dark:border-gray-800 hover:shadow-lg transition-all duration-300 flex flex-col">
-                                            {proj.screenshotURL && (
-                                                <div className="h-40 w-full overflow-hidden bg-gray-105 dark:bg-gray-800 relative">
-                                                    <img 
-                                                        src={proj.screenshotURL} 
-                                                        alt={proj.title}
-                                                        className="w-full h-full object-cover hover:scale-105 transition-transform duration-300"
-                                                        onError={(e) => {
-                                                            (e.target as HTMLElement).style.display = 'none';
-                                                        }}
-                                                    />
-                                                </div>
-                                            )}
-                                            <CardContent className="p-5 flex-1 flex flex-col justify-between">
-                                                <div>
-                                                    <h3 className="font-bold text-sm text-gray-900 dark:text-white mb-2">{proj.title}</h3>
-                                                    <p className="text-xs text-gray-600 dark:text-gray-300 mb-4 line-clamp-3 leading-relaxed">{proj.description}</p>
-                                                </div>
-                                                {proj.outcome && (
-                                                    <div className="mt-auto pt-3 border-t border-gray-100 dark:border-gray-800/60">
-                                                        <span className="text-[9px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">Impact / Outcome</span>
-                                                        <p className="text-xs font-semibold text-gray-800 dark:text-gray-200 mt-0.5 leading-relaxed">{proj.outcome}</p>
-                                                    </div>
-                                                )}
-                                            </CardContent>
-                                        </Card>
-                                    ))}
-                                </div>
-                            ) : (
-                                <Card className="border-dashed border-2">
-                                    <CardContent className="p-8 text-center text-gray-500">
-                                        <ImageIcon className="h-10 w-10 mx-auto mb-3 text-gray-300 dark:text-gray-700" />
-                                        <p className="text-sm font-medium mb-1">No showcase projects yet</p>
-                                        {isOwnProfile && (
-                                            <p className="text-xs text-gray-400 mb-4">Add projects you've worked on outside of ProCollab to build credibility.</p>
-                                        )}
-                                        {isOwnProfile && (
-                                            <Button 
-                                                size="sm" 
-                                                variant="outline"
-                                                onClick={() => navigate('/settings/profile')}
-                                            >
-                                                Add Project
-                                            </Button>
-                                        )}
-                                    </CardContent>
-                                </Card>
-                            )}
-                        </div>
+
 
                         {/* Applications — own profile only */}
                         {isOwnProfile && (
