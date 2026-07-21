@@ -17,20 +17,20 @@ const requiredEnvVars = [
 ]
 
 for (const envVar of requiredEnvVars) {
-    if (!import.meta.env[envVar]) {
+    if (!import.meta.env[envVar] && !firebaseConfig[envVar.replace('VITE_FIREBASE_', '').toLowerCase() as keyof typeof firebaseConfig]) {
         console.warn(`Missing environment variable: ${envVar}`)
     }
 }
 
 const firebaseConfig = {
-    apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-    databaseURL: import.meta.env.VITE_FIREBASE_DATABASE_URL,
-    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-    storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-    messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-    appId: import.meta.env.VITE_FIREBASE_APP_ID,
-    measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID
+    apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyDBUImEHJh2V_kblqlOVgKICjUP_P02gcc',
+    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || 'projectmap-f1155.firebaseapp.com',
+    databaseURL: import.meta.env.VITE_FIREBASE_DATABASE_URL || 'https://projectmap-f1155-default-rtdb.firebaseio.com',
+    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || 'projectmap-f1155',
+    storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || 'projectmap-f1155.firebasestorage.app',
+    messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || '907011304023',
+    appId: import.meta.env.VITE_FIREBASE_APP_ID || '1:907011304023:web:3b0a3b22b6ace96fdc9112',
+    measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || 'G-45SKG36DW1'
 }
 
 // ✅ Prevent duplicate app initialization (important for FCM)

@@ -615,43 +615,7 @@ export default function PublicProfile() {
                     )}
                 </div>
 
-                {/* Portfolio & Showcase Projects */}
-                <div className="space-y-4">
-                    <h2 className="text-lg font-bold text-white uppercase tracking-wider flex items-center gap-2">
-                        <Sparkles className="h-5 w-5 text-blue-500" /> Portfolio Showcase
-                    </h2>
-                    {!profileUser.pastProjectsShowcase || profileUser.pastProjectsShowcase.length === 0 ? (
-                        <p className="text-sm italic text-slate-500">No showcase projects added to the portfolio.</p>
-                    ) : (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                            {profileUser.pastProjectsShowcase.map((p: any, index: number) => (
-                                <Card key={index} className="border-slate-800 bg-slate-900/20 backdrop-blur-xl overflow-hidden shadow-lg flex flex-col">
-                                    {p.screenshotURL && (
-                                        <div className="h-44 w-full bg-slate-950 overflow-hidden relative border-b border-slate-800">
-                                            <img 
-                                                src={p.screenshotURL} 
-                                                alt={p.title} 
-                                                className="w-full h-full object-cover opacity-80 hover:opacity-100 transition-opacity" 
-                                            />
-                                        </div>
-                                    )}
-                                    <CardContent className="p-5 flex-1 flex flex-col justify-between">
-                                        <div className="space-y-2">
-                                            <h4 className="font-bold text-base text-white">{p.title}</h4>
-                                            <p className="text-xs text-slate-400 leading-relaxed">{p.description}</p>
-                                        </div>
-                                        {p.outcome && (
-                                            <div className="mt-4 pt-3 border-t border-slate-850 flex flex-col space-y-1">
-                                                <span className="text-[10px] uppercase font-bold tracking-widest text-slate-500">Outcome</span>
-                                                <p className="text-xs text-emerald-400 font-medium">{p.outcome}</p>
-                                            </div>
-                                        )}
-                                    </CardContent>
-                                </Card>
-                            ))}
-                        </div>
-                    )}
-                </div>
+
 
                 {/* Project History */}
                 <div className="space-y-4">

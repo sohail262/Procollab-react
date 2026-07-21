@@ -75,15 +75,6 @@ export function Settings() {
 
     const [preferredRoles, setPreferredRoles] = useState<string[]>([])
     const [roleInput, setRoleInput] = useState('')
-    const [pastProjectsShowcase, setPastProjectsShowcase] = useState<any[]>([])
-
-    // New project showcase form state
-    const [newProject, setNewProject] = useState({
-        title: '',
-        description: '',
-        outcome: '',
-        screenshotURL: ''
-    })
 
     const disciplines = [
         'Computer Science',
@@ -149,7 +140,6 @@ export function Settings() {
                 })
                 setSelectedSkills(data.skills || [])
                 setPreferredRoles(data.preferredRoles || [])
-                setPastProjectsShowcase(data.pastProjectsShowcase || [])
 
                 // Load avatar settings
                 if (data.avatarStyle) {
@@ -194,7 +184,7 @@ export function Settings() {
             setUsernameTaken(null)
             return
         }
-        
+
         setUsernameError(null)
 
         const debounceId = setTimeout(async () => {
@@ -280,34 +270,6 @@ export function Settings() {
         setPreferredRoles(prev => prev.filter(r => r !== roleToRemove))
     }
 
-    // Showcase Project helpers
-    const handleAddShowcaseProject = () => {
-        if (!newProject.title || !newProject.description) {
-            toast({
-                title: 'Missing Fields',
-                description: 'Title and Description are required for showcase projects.',
-                variant: 'destructive'
-            })
-            return
-        }
-        setPastProjectsShowcase(prev => [...prev, { ...newProject }])
-        setNewProject({
-            title: '',
-            description: '',
-            outcome: '',
-            screenshotURL: ''
-        })
-        toast({
-            title: 'Project added to list',
-            description: 'Save changes to persist the showcase list.',
-            variant: 'success'
-        })
-    }
-
-    const handleRemoveShowcaseProject = (index: number) => {
-        setPastProjectsShowcase(prev => prev.filter((_, i) => i !== index))
-    }
-
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault()
         if (!user) return
@@ -345,7 +307,6 @@ export function Settings() {
                 username: queryUsername,
                 skills: selectedSkills,
                 preferredRoles,
-                pastProjectsShowcase,
                 avatarStyle: selectedStyle,
                 avatarSeed: avatarSeed,
                 photoURL: newAvatarUrl,
@@ -615,14 +576,14 @@ export function Settings() {
 
                                     <div className="relative md:col-span-2">
                                         <label className="block text-sm font-medium mb-2">Skills</label>
-                                        
+
                                         {/* Selected Skills Badges */}
                                         <div className="flex flex-wrap gap-2 mb-3">
                                             {selectedSkills.length > 0 ? (
                                                 selectedSkills.map((skill, index) => (
-                                                    <Badge 
-                                                        key={index} 
-                                                        variant="secondary" 
+                                                    <Badge
+                                                        key={index}
+                                                        variant="secondary"
                                                         className="flex items-center gap-1.5 py-1.5 px-3 rounded-full text-xs font-medium bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300 border border-blue-100 dark:border-blue-900/50 hover:bg-blue-100 dark:hover:bg-blue-950/60 transition-colors"
                                                     >
                                                         {skill}
@@ -729,86 +690,7 @@ export function Settings() {
                         </CardContent>
                     </Card>
 
-                    {/* Past Work Showcase Card */}
-                    <Card>
-                        <CardHeader>
-                            <CardTitle>Portfolio Showcase</CardTitle>
-                            <CardDescription>
-                                Showcase past projects you have completed, including outcomes and descriptions.
-                            </CardDescription>
-                        </CardHeader>
-                        <CardContent className="space-y-6">
-                            {/* Showcase list */}
-                            <div className="space-y-4">
-                                {pastProjectsShowcase.length === 0 ? (
-                                    <p className="text-sm text-slate-500 italic">No showcase projects added yet.</p>
-                                ) : (
-                                    <div className="grid grid-cols-1 gap-3">
-                                        {pastProjectsShowcase.map((p, index) => (
-                                            <div key={index} className="flex justify-between items-start p-4 rounded-xl border border-slate-800 bg-slate-950/20 gap-4">
-                                                <div className="min-w-0 flex-1">
-                                                    <h4 className="font-bold text-sm text-white">{p.title}</h4>
-                                                    <p className="text-xs text-slate-400 mt-1">{p.description}</p>
-                                                    {p.outcome && (
-                                                        <p className="text-xs text-emerald-400 mt-1.5 font-medium">Outcome: {p.outcome}</p>
-                                                    )}
-                                                    {p.screenshotURL && (
-                                                        <p className="text-[10px] text-indigo-400 mt-1 break-all">Screenshot URL: {p.screenshotURL}</p>
-                                                    )}
-                                                </div>
-                                                <Button type="button" variant="ghost" size="sm" onClick={() => handleRemoveShowcaseProject(index)} className="text-red-500 hover:text-red-400 shrink-0">
-                                                    Remove
-                                                </Button>
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
 
-                            {/* Add new showcase project form */}
-                            <div className="border-t border-slate-800 pt-4 space-y-4">
-                                <h3 className="text-sm font-bold text-white">Add Showcase Project</h3>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <div>
-                                        <label className="block text-xs text-slate-400 mb-1">Project Title *</label>
-                                        <Input
-                                            placeholder="e.g. E-Commerce Replatform"
-                                            value={newProject.title}
-                                            onChange={e => setNewProject({ ...newProject, title: e.target.value })}
-                                        />
-                                    </div>
-                                    <div>
-                                        <label className="block text-xs text-slate-400 mb-1">Screenshot / Image URL (optional)</label>
-                                        <Input
-                                            placeholder="e.g. https://myportfolio.com/images/shot.jpg"
-                                            value={newProject.screenshotURL}
-                                            onChange={e => setNewProject({ ...newProject, screenshotURL: e.target.value })}
-                                        />
-                                    </div>
-                                    <div className="md:col-span-2">
-                                        <label className="block text-xs text-slate-400 mb-1">Description *</label>
-                                        <Textarea
-                                            placeholder="What was this project about? What did you build?"
-                                            rows={3}
-                                            value={newProject.description}
-                                            onChange={e => setNewProject({ ...newProject, description: e.target.value })}
-                                        />
-                                    </div>
-                                    <div className="md:col-span-2">
-                                        <label className="block text-xs text-slate-400 mb-1">Outcome / Result</label>
-                                        <Input
-                                            placeholder="e.g. Built responsive cart system, improved checkout load time by 40%"
-                                            value={newProject.outcome}
-                                            onChange={e => setNewProject({ ...newProject, outcome: e.target.value })}
-                                        />
-                                    </div>
-                                </div>
-                                <Button type="button" size="sm" onClick={handleAddShowcaseProject} className="bg-slate-800 hover:bg-slate-700 text-white">
-                                    Add Project to Showcase
-                                </Button>
-                            </div>
-                        </CardContent>
-                    </Card>
 
                     <Card>
                         <CardContent className="pt-6">
