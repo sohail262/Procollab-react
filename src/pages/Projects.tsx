@@ -236,6 +236,9 @@ export function Projects() {
             return matchesSearch && matchesStatus && matchesDiscipline && isNotOwnProject && isVisible && isNotFull && isNotCompleted
         })
         .sort((a, b) => {
+            const aHigh = (a as any).isHighlighted ? 1 : 0
+            const bHigh = (b as any).isHighlighted ? 1 : 0
+            if (aHigh !== bHigh) return bHigh - aHigh
             switch (sortBy) {
                 case 'newest':      return b.createdAt.getTime() - a.createdAt.getTime()
                 case 'oldest':      return a.createdAt.getTime() - b.createdAt.getTime()
