@@ -3,10 +3,17 @@ import { useAuth } from '@/contexts/AuthContext'
 import { DashboardLayout } from '@/components/layout/DashboardLayout'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
-import { Plus, Loader2, FolderKanban, Eye, Edit, Users, LayoutDashboard, Trash2 } from 'lucide-react'
+import { Plus, Loader2, FolderKanban, Eye, Edit, Users, LayoutDashboard, Trash2, MoreVertical, Star } from 'lucide-react'
 import { collection, query, where, orderBy, deleteDoc, doc, getDocs } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
 import { cachedQuery } from '@/lib/queryUtils'
+import { updateProjectHighlightStatus } from '@/services/dashboardService'
+import {
+    DropdownMenu,
+    DropdownMenuTrigger,
+    DropdownMenuContent,
+    DropdownMenuItem,
+} from '@/components/ui/dropdown-menu'
 
 // ── sessionStorage cache ────────────────────────────────────────────────────────────────
 const SS_MY_PROJECTS_TTL = 3 * 60 * 1000 // 3 minutes
@@ -106,13 +113,22 @@ export default function MyProjects() {
                     createdAt: d.data().createdAt?.toDate() || new Date()
                 })) as Project[]
 
+            const sortByHighlight = (arr: Project[]) => {
+                return [...arr].sort((a, b) => {
+                    const aHigh = (a as any).isHighlighted ? 1 : 0
+                    const bHigh = (b as any).isHighlighted ? 1 : 0
+                    if (aHigh !== bHigh) return bHigh - aHigh
+                    return (b.createdAt?.getTime?.() || 0) - (a.createdAt?.getTime?.() || 0)
+                })
+            }
+
             // Split active vs completed
-            const activeCreated = created.filter(p => p.status !== 'completed')
-            const activeJoined  = joined.filter(p => p.status !== 'completed')
-            const completedAll  = [
+            const activeCreated = sortByHighlight(created.filter(p => p.status !== 'completed'))
+            const activeJoined  = sortByHighlight(joined.filter(p => p.status !== 'completed'))
+            const completedAll  = sortByHighlight([
                 ...created.filter(p => p.status === 'completed'),
                 ...joined.filter(p => p.status === 'completed'),
-            ].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+            ])
 
             setCreatedProjects(activeCreated)
             setJoinedProjects(activeJoined)
@@ -197,6 +213,30 @@ export default function MyProjects() {
         const currentMembers = membersList.length + (hasOwner ? 0 : 1)
         const maxMembers = project.maxMembers || project.teamSize || 5
         const isOwner = project.createdBy === user?.uid
+        const isHighlighted = (project as any).isHighlighted || false
+
+        const handleToggleHighlight = async (e: React.MouseEvent) => {
+            e.stopPropagation()
+            try {
+                const nextStatus = !isHighlighted
+                await updateProjectHighlightStatus(project.id, nextStatus)
+                if (user) {
+                    sessionStorage.removeItem(`my_projects_${user.uid}`)
+                    loadProjects(true)
+                }
+                toast({
+                    title: nextStatus ? 'Added to Highlights' : 'Removed from Highlight',
+                    description: `Project "${project.title}" highlight status updated.`,
+                })
+            } catch (error) {
+                console.error('Error toggling highlight status:', error)
+                toast({
+                    variant: 'destructive',
+                    title: 'Error',
+                    description: 'Failed to update highlight status.',
+                })
+            }
+        }
 
         const getStatusStyle = (status: string) => {
             const s = status.toLowerCase()
@@ -220,9 +260,30 @@ export default function MyProjects() {
                         <span className={`inline-flex items-center text-[9px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full ${getStatusStyle(project.status)}`}>
                             {project.status}
                         </span>
-                        <span className="text-[10px] text-white/40 shrink-0 ml-1">
-                            {formatDate(project.createdAt)}
-                        </span>
+                        <div className="flex items-center gap-1.5 shrink-0 ml-1">
+                            <span className="text-[10px] text-white/40">
+                                {formatDate(project.createdAt)}
+                            </span>
+                            {isOwner && (
+                                <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                        <button
+                                            onClick={e => e.stopPropagation()}
+                                            className="p-1 rounded-md hover:bg-white/10 text-white/50 hover:text-white transition-colors"
+                                            title="Project actions"
+                                        >
+                                            <MoreVertical className="h-3.5 w-3.5" />
+                                        </button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent align="end" onClick={e => e.stopPropagation()} className="w-48 bg-slate-900 border border-slate-800 text-white z-50">
+                                        <DropdownMenuItem onClick={handleToggleHighlight} className="cursor-pointer hover:bg-slate-800 focus:bg-slate-800 text-xs py-2 flex items-center gap-2">
+                                            <Star className={`h-3.5 w-3.5 ${isHighlighted ? 'fill-yellow-400 text-yellow-400' : 'text-slate-400'}`} />
+                                            {isHighlighted ? 'Remove from Highlight' : 'Add to Highlights'}
+                                        </DropdownMenuItem>
+                                    </DropdownMenuContent>
+                                </DropdownMenu>
+                            )}
+                        </div>
                     </div>
 
                     {/* Main Content Wrapper (title, description, tags) that will stretch */}

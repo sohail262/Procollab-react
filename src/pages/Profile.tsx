@@ -12,8 +12,15 @@ import {
     LayoutDashboard, FileText, Users, ImageIcon, X, Award, Star,
     Zap, CheckCircle, ShieldAlert, Crown, Heart, Code2, Compass, Shield,
     ShieldCheck, Clock, GitBranch, Layers, Briefcase, BarChart3, Share2, Search,
-    Lock, Upload, Info
+    Lock, Upload, Info, MoreVertical
 } from 'lucide-react'
+import {
+    DropdownMenu,
+    DropdownMenuTrigger,
+    DropdownMenuContent,
+    DropdownMenuItem,
+} from '@/components/ui/dropdown-menu'
+import { updateProjectHighlightStatus } from '@/services/dashboardService'
 import {
     doc, getDoc, collection, query, where,
     getDocs, deleteDoc, onSnapshot, updateDoc,
@@ -258,6 +265,48 @@ export default function Profile() {
     const [savingBanner, setSavingBanner] = useState(false)
     const [savingAvatar, setSavingAvatar] = useState(false)
     const [connectionsSearch, setConnectionsSearch] = useState('')
+
+    const handleToggleProjectHighlight = async (e: React.MouseEvent, projectId: string, currentHighlighted: boolean) => {
+        e.stopPropagation()
+        try {
+            const nextStatus = !currentHighlighted
+
+            // 1. Attempt updating project document in Firestore
+            try {
+                await updateProjectHighlightStatus(projectId, nextStatus)
+            } catch (projErr) {
+                console.warn('Could not update project doc directly:', projErr)
+            }
+
+            // 2. Also save to user document's highlightedProjectIds list (fallback & user-level profile persistence)
+            if (currentUser) {
+                const userRef = doc(db, 'users', currentUser.uid)
+                const currentHighlights: string[] = profile?.highlightedProjectIds || []
+                const updatedHighlights = nextStatus
+                    ? Array.from(new Set([...currentHighlights, projectId]))
+                    : currentHighlights.filter(id => id !== projectId)
+
+                await updateDoc(userRef, { highlightedProjectIds: updatedHighlights })
+                setProfile(prev => prev ? { ...prev, highlightedProjectIds: updatedHighlights } : prev)
+            }
+
+            // 3. Update local projects state
+            setProjects(prev => prev.map(p => p.id === projectId ? { ...p, isHighlighted: nextStatus } : p))
+            try { sessionStorage.removeItem(`profile_${currentUser?.uid}`) } catch {}
+
+            toast({
+                title: nextStatus ? 'Added to Highlights' : 'Removed from Highlight',
+                description: nextStatus ? 'Project is now highlighted on your profile.' : 'Project removed from highlights.',
+            })
+        } catch (error) {
+            console.error('Error toggling project highlight:', error)
+            toast({
+                variant: 'destructive',
+                title: 'Error',
+                description: 'Failed to update highlight status.',
+            })
+        }
+    }
 
 
     // Invite-to-project state
@@ -1847,42 +1896,83 @@ export default function Profile() {
                             </div>
 
                             {(() => {
-                                const filtered = projects.filter(p => projectFilter === 'completed' ? p.status === 'completed' : p.status !== 'completed')
+                                const isProjectHighlighted = (p: any) => !!p.isHighlighted || (profile?.highlightedProjectIds?.includes(p.id) ?? false)
+                                const filtered = projects
+                                    .filter(p => projectFilter === 'completed' ? p.status === 'completed' : p.status !== 'completed')
+                                    .sort((a, b) => {
+                                        const aHigh = isProjectHighlighted(a) ? 1 : 0
+                                        const bHigh = isProjectHighlighted(b) ? 1 : 0
+                                        return bHigh - aHigh
+                                    })
                                 if (filtered.length > 0) {
                                     return (
                                         <div className="space-y-4">
-                                            {filtered.map(project => (
+                                            {filtered.map((project: any) => {
+                                                const isHighlighted = !!project.isHighlighted || (profile?.highlightedProjectIds?.includes(project.id) ?? false)
+                                                return (
                                                 <Card
                                                     key={project.id}
-                                                    className="hover:shadow-md transition-shadow cursor-pointer"
+                                                    className={`hover:shadow-md transition-all cursor-pointer relative ${isHighlighted ? 'border-amber-500/40 bg-amber-500/[0.02]' : ''}`}
                                                     onClick={() => navigate(`/project/${project.id}`)}
                                                 >
-                                                    <CardContent className="p-6">
-                                                        <div className="flex justify-between items-start mb-2">
-                                                            <div>
-                                                                <h3 className="font-semibold text-lg text-blue-600 dark:text-blue-400 mb-1 flex items-center gap-1.5 flex-wrap">
-                                                                    {project.title}
-                                                                    {project.status === 'completed' && project.activityVerified && (
-                                                                        <span className="inline-flex items-center gap-0.5 text-[9px] font-bold bg-emerald-100 dark:bg-emerald-950/45 text-emerald-755 dark:text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-900/50 uppercase tracking-wide">
-                                                                            <Check className="h-2.5 w-2.5" />
-                                                                            Verified Work
-                                                                        </span>
+                                                        <CardContent className="p-6">
+                                                            <div className="flex justify-between items-start mb-2">
+                                                                <div>
+                                                                    <h3 className="font-semibold text-lg text-blue-600 dark:text-blue-400 mb-1 flex items-center gap-1.5 flex-wrap">
+                                                                        {project.title}
+                                                                        {isHighlighted && (
+                                                                            <span className="inline-flex items-center gap-0.5 text-[9px] font-bold bg-amber-500/10 text-amber-400 px-2 py-0.5 rounded-full border border-amber-500/20 uppercase tracking-wide">
+                                                                                <Star className="h-2.5 w-2.5 fill-amber-400 text-amber-400" />
+                                                                                Highlighted
+                                                                            </span>
+                                                                        )}
+                                                                        {project.status === 'completed' && project.activityVerified && (
+                                                                            <span className="inline-flex items-center gap-0.5 text-[9px] font-bold bg-emerald-100 dark:bg-emerald-950/45 text-emerald-755 dark:text-emerald-400 px-2 py-0.5 rounded-full border border-emerald-200 dark:border-emerald-900/50 uppercase tracking-wide">
+                                                                                <Check className="h-2.5 w-2.5" />
+                                                                                Verified Work
+                                                                            </span>
+                                                                        )}
+                                                                    </h3>
+                                                                    <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
+                                                                        {project.primaryDiscipline}
+                                                                    </p>
+                                                                </div>
+                                                                <div className="flex items-center gap-2">
+                                                                    <Badge
+                                                                        variant={
+                                                                            project.status === 'recruiting'
+                                                                                ? 'default'
+                                                                                : 'secondary'
+                                                                        }
+                                                                    >
+                                                                        {project.status}
+                                                                    </Badge>
+
+                                                                    {isOwnProfile && (
+                                                                        <DropdownMenu>
+                                                                            <DropdownMenuTrigger asChild>
+                                                                                <button
+                                                                                    type="button"
+                                                                                    onClick={e => e.stopPropagation()}
+                                                                                    className="p-1 rounded-md hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors"
+                                                                                    title="Project options"
+                                                                                >
+                                                                                    <MoreVertical className="h-4 w-4" />
+                                                                                </button>
+                                                                            </DropdownMenuTrigger>
+                                                                            <DropdownMenuContent align="end" onClick={e => e.stopPropagation()} className="w-48 bg-zinc-950 border border-zinc-800 text-white z-50">
+                                                                                <DropdownMenuItem
+                                                                                    onClick={(e) => handleToggleProjectHighlight(e, project.id, isHighlighted)}
+                                                                                    className="cursor-pointer hover:bg-zinc-900 focus:bg-zinc-900 text-xs py-2 flex items-center gap-2"
+                                                                                >
+                                                                                    <Star className={`h-3.5 w-3.5 ${isHighlighted ? 'fill-yellow-400 text-yellow-400' : 'text-zinc-400'}`} />
+                                                                                    {isHighlighted ? 'Remove from Highlight' : 'Add to Highlights'}
+                                                                                </DropdownMenuItem>
+                                                                            </DropdownMenuContent>
+                                                                        </DropdownMenu>
                                                                     )}
-                                                                </h3>
-                                                                <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
-                                                                    {project.primaryDiscipline}
-                                                                </p>
+                                                                </div>
                                                             </div>
-                                                            <Badge
-                                                                variant={
-                                                                    project.status === 'recruiting'
-                                                                        ? 'default'
-                                                                        : 'secondary'
-                                                                }
-                                                            >
-                                                                {project.status}
-                                                            </Badge>
-                                                        </div>
                                                         <p className="text-gray-600 dark:text-gray-300 mb-4 line-clamp-2">
                                                             {project.description}
                                                         </p>
@@ -1905,8 +1995,9 @@ export default function Profile() {
                                                         </div>
                                                     </CardContent>
                                                 </Card>
-                                            ))}
-                                        </div>
+                                            )
+                                        })}
+                                    </div>
                                     )
                                 } else {
                                     return (
@@ -1965,64 +2056,7 @@ export default function Profile() {
                             </div>
                         )}
 
-                        {/* Portfolio Showcase */}
-                        <div>
-                            <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-                                <ImageIcon className="h-5 w-5 text-indigo-505" />
-                                Project Showcase
-                            </h2>
-                            {profile.pastProjectsShowcase && profile.pastProjectsShowcase.length > 0 ? (
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    {profile.pastProjectsShowcase.map((proj, idx) => (
-                                        <Card key={idx} className="overflow-hidden border border-gray-200 dark:border-gray-800 hover:shadow-lg transition-all duration-300 flex flex-col">
-                                            {proj.screenshotURL && (
-                                                <div className="h-40 w-full overflow-hidden bg-gray-105 dark:bg-gray-800 relative">
-                                                    <img 
-                                                        src={proj.screenshotURL} 
-                                                        alt={proj.title}
-                                                        className="w-full h-full object-cover hover:scale-105 transition-transform duration-300"
-                                                        onError={(e) => {
-                                                            (e.target as HTMLElement).style.display = 'none';
-                                                        }}
-                                                    />
-                                                </div>
-                                            )}
-                                            <CardContent className="p-5 flex-1 flex flex-col justify-between">
-                                                <div>
-                                                    <h3 className="font-bold text-sm text-gray-900 dark:text-white mb-2">{proj.title}</h3>
-                                                    <p className="text-xs text-gray-600 dark:text-gray-300 mb-4 line-clamp-3 leading-relaxed">{proj.description}</p>
-                                                </div>
-                                                {proj.outcome && (
-                                                    <div className="mt-auto pt-3 border-t border-gray-100 dark:border-gray-800/60">
-                                                        <span className="text-[9px] font-bold uppercase tracking-wider text-emerald-600 dark:text-emerald-400">Impact / Outcome</span>
-                                                        <p className="text-xs font-semibold text-gray-800 dark:text-gray-200 mt-0.5 leading-relaxed">{proj.outcome}</p>
-                                                    </div>
-                                                )}
-                                            </CardContent>
-                                        </Card>
-                                    ))}
-                                </div>
-                            ) : (
-                                <Card className="border-dashed border-2">
-                                    <CardContent className="p-8 text-center text-gray-500">
-                                        <ImageIcon className="h-10 w-10 mx-auto mb-3 text-gray-300 dark:text-gray-700" />
-                                        <p className="text-sm font-medium mb-1">No showcase projects yet</p>
-                                        {isOwnProfile && (
-                                            <p className="text-xs text-gray-400 mb-4">Add projects you've worked on outside of ProCollab to build credibility.</p>
-                                        )}
-                                        {isOwnProfile && (
-                                            <Button 
-                                                size="sm" 
-                                                variant="outline"
-                                                onClick={() => navigate('/settings/profile')}
-                                            >
-                                                Add Project
-                                            </Button>
-                                        )}
-                                    </CardContent>
-                                </Card>
-                            )}
-                        </div>
+
 
                         {/* Applications — own profile only */}
                         {isOwnProfile && (

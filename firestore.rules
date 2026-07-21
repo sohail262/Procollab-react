@@ -278,10 +278,10 @@ service cloud.firestore {
         isProjectOwner(projectId)    ||
         isProjectTeamLead(projectId) ||
         isAdmin()                    ||
-        // Allow team members to cast completion votes or mark as completed
+        // Allow team members to cast completion votes, mark as completed, or toggle highlight
         (
           isProjectTeamMember(projectId) &&
-          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['completionVotes', 'status', 'completedAt'])
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['completionVotes', 'status', 'completedAt', 'isHighlighted'])
         ) ||
         // Invited user accepting — adds themselves to members[], teamMembers map, and increments currentMembers
         // Only the invited user themselves can trigger this path (they add only their own uid)

@@ -231,19 +231,13 @@ export default function PublicProject() {
         return (
             <div className="flex flex-col items-center justify-center min-h-screen bg-slate-900 text-white px-4 text-center">
                 <AlertCircle className="h-14 w-14 text-red-500 mb-4" />
-                <h2 className="text-2xl font-bold mb-2">Project Showcase Unavailable</h2>
-                <p className="text-sm text-slate-400 max-w-sm mb-6">{error || 'This project showcase is currently unreachable.'}</p>
+                <h2 className="text-2xl font-bold mb-2">Project Unavailable</h2>
+                <p className="text-sm text-slate-400 max-w-sm mb-6">{error || 'This project is currently unreachable.'}</p>
                 <Button variant="outline" className="border-slate-800 text-slate-300 hover:text-white" onClick={() => navigate('/discover')}>
                     Browse Collaborations
                 </Button>
             </div>
         )
-    }
-
-    // Redirect completed projects to the recruiter-ready showcase layout
-    if (project.status === 'completed') {
-        navigate(`/project/public/${project.id}`, { replace: true })
-        return null
     }
 
     // Check if Restricted View

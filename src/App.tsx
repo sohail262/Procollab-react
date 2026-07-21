@@ -9,31 +9,59 @@ import { Toaster } from '@/components/ui/toaster'
 import { usePageTracking } from '@/hooks/usePageTracking'
 // Static import — must NOT be lazy so it renders immediately with no blank flash
 import { LoadingScreen } from '@/components/LoadingScreen'
-const InviteAccept = lazy(() => import('@/pages/InviteAccept'))
+// Helper for dynamic imports with auto-reload retry on chunk fetch failures
+const lazyWithRetry = <T extends React.ComponentType<any>>(
+  componentImport: () => Promise<{ default: T } | any>
+) =>
+  lazy(async () => {
+    const pageHasAlreadyBeenRefreshed = JSON.parse(
+      window.sessionStorage.getItem('page-has-been-refreshed') || 'false'
+    )
+    try {
+      const component = await componentImport()
+      window.sessionStorage.setItem('page-has-been-refreshed', 'false')
+      return component
+    } catch (error: any) {
+      if (
+        !pageHasAlreadyBeenRefreshed &&
+        (error?.name === 'TypeError' ||
+          error?.message?.includes('Failed to fetch dynamically imported module') ||
+          error?.message?.includes('Importing a module script failed'))
+      ) {
+        window.sessionStorage.setItem('page-has-been-refreshed', 'true')
+        window.location.reload()
+        return new Promise(() => {})
+      }
+      window.sessionStorage.setItem('page-has-been-refreshed', 'false')
+      throw error;
+    }
+  })
+
+const InviteAccept = lazyWithRetry(() => import('@/pages/InviteAccept'))
 // Lazy load components to reduce initial bundle size
-const Landing = lazy(() => import('@/pages/Landing').then(module => ({ default: module.Landing })))
-const Login = lazy(() => import('@/pages/Login').then(module => ({ default: module.Login })))
-const Register = lazy(() => import('@/pages/Register').then(module => ({ default: module.Register })))
-const ForgotPassword = lazy(() => import('@/pages/ForgotPassword').then(module => ({ default: module.ForgotPassword })))
-const Dashboard = lazy(() => import('@/pages/Dashboard').then(module => ({ default: module.Dashboard })))
-const Discover = lazy(() => import('@/pages/Discover').then(module => ({ default: module.Discover })))
-const Projects = lazy(() => import('@/pages/Projects').then(module => ({ default: module.Projects })))
-const Profile = lazy(() => import('@/pages/Profile'))
-const MyProjects = lazy(() => import('@/pages/MyProjects'))
-const ProjectDetails = lazy(() => import('@/pages/ProjectDetails').then(module => ({ default: module.ProjectDetails })))
-const SavedProjects = lazy(() => import('@/pages/SavedProjects').then(module => ({ default: module.SavedProjects })))
-const CreateProject = lazy(() => import('@/pages/CreateProject').then(module => ({ default: module.CreateProject })))
-const Settings = lazy(() => import('@/pages/Settings').then(module => ({ default: module.Settings })))
-const EditProject = lazy(() => import('@/pages/EditProject').then(module => ({ default: module.EditProject })))
-const ProjectDashboard = lazy(() => import('@/pages/ProjectDashboard').then(module => ({ default: module.ProjectDashboard })))
-const ManageTeam = lazy(() => import('@/pages/ManageTeam').then(module => ({ default: module.ManageTeam })))
-const Applications = lazy(() => import('@/pages/Applications').then(module => ({ default: module.Applications })))
-const AdminDashboard = lazy(() => import('@/pages/AdminDashboard').then(module => ({ default: module.AdminDashboard })))
-const Notifications = lazy(() => import('@/pages/Notifications').then(module => ({ default: module.Notifications })))
-const PublicProjectShowcase = lazy(() => import('@/pages/PublicProjectShowcase'))
-const PublicProfile = lazy(() => import('@/pages/PublicProfile'))
-const PublicProject = lazy(() => import('@/pages/PublicProject'))
-const Feedback = lazy(() => import('@/pages/Feedback'))
+const Landing = lazyWithRetry(() => import('@/pages/Landing').then(module => ({ default: module.Landing })))
+const Login = lazyWithRetry(() => import('@/pages/Login').then(module => ({ default: module.Login })))
+const Register = lazyWithRetry(() => import('@/pages/Register').then(module => ({ default: module.Register })))
+const ForgotPassword = lazyWithRetry(() => import('@/pages/ForgotPassword').then(module => ({ default: module.ForgotPassword })))
+const Dashboard = lazyWithRetry(() => import('@/pages/Dashboard').then(module => ({ default: module.Dashboard })))
+const Discover = lazyWithRetry(() => import('@/pages/Discover').then(module => ({ default: module.Discover })))
+const Projects = lazyWithRetry(() => import('@/pages/Projects').then(module => ({ default: module.Projects })))
+const Profile = lazyWithRetry(() => import('@/pages/Profile'))
+const MyProjects = lazyWithRetry(() => import('@/pages/MyProjects'))
+const ProjectDetails = lazyWithRetry(() => import('@/pages/ProjectDetails').then(module => ({ default: module.ProjectDetails })))
+const SavedProjects = lazyWithRetry(() => import('@/pages/SavedProjects').then(module => ({ default: module.SavedProjects })))
+const CreateProject = lazyWithRetry(() => import('@/pages/CreateProject').then(module => ({ default: module.CreateProject })))
+const Settings = lazyWithRetry(() => import('@/pages/Settings').then(module => ({ default: module.Settings })))
+const EditProject = lazyWithRetry(() => import('@/pages/EditProject').then(module => ({ default: module.EditProject })))
+const ProjectDashboard = lazyWithRetry(() => import('@/pages/ProjectDashboard').then(module => ({ default: module.ProjectDashboard })))
+const ManageTeam = lazyWithRetry(() => import('@/pages/ManageTeam').then(module => ({ default: module.ManageTeam })))
+const Applications = lazyWithRetry(() => import('@/pages/Applications').then(module => ({ default: module.Applications })))
+const AdminDashboard = lazyWithRetry(() => import('@/pages/AdminDashboard').then(module => ({ default: module.AdminDashboard })))
+const Notifications = lazyWithRetry(() => import('@/pages/Notifications').then(module => ({ default: module.Notifications })))
+const PublicProjectShowcase = lazyWithRetry(() => import('@/pages/PublicProjectShowcase'))
+const PublicProfile = lazyWithRetry(() => import('@/pages/PublicProfile'))
+const PublicProject = lazyWithRetry(() => import('@/pages/PublicProject'))
+const Feedback = lazyWithRetry(() => import('@/pages/Feedback'))
 // PageLoader uses the statically-imported LoadingScreen — zero blank-screen flash
 const PageLoader = () => <LoadingScreen />
 

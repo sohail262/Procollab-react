@@ -37,8 +37,15 @@ import { database } from '@/lib/firebase'
 import type { Task } from '@/types/project'
 import { useAuth } from '@/hooks/use-auth'
 import { useProjectRole } from '@/hooks/use-project-role'
-import { ClipboardList, Star } from 'lucide-react'
+import { ClipboardList, Star, MoreVertical } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
+import {
+    DropdownMenu,
+    DropdownMenuTrigger,
+    DropdownMenuContent,
+    DropdownMenuItem,
+} from '@/components/ui/dropdown-menu'
+import { updateProjectHighlightStatus } from '@/services/dashboardService'
 import { formatDistanceToNow } from 'date-fns'
 import { ProjectGuide } from '@/components/dashboard/ProjectGuide'
 import { ProjectOnboardingModal, type OnboardingDecision } from '@/components/dashboard/ProjectOnboardingModal'
@@ -64,7 +71,6 @@ const TaskReviewPanel = lazy(() => import('@/components/dashboard/TaskReviewPane
 const TemplateGallery = lazy(() => import('@/components/dashboard/TemplateGallery').then(m => ({ default: m.TemplateGallery })))
 const TeamChat = lazy(() => import('@/components/dashboard/TeamChat').then(m => ({ default: m.TeamChat })))
 import { ProjectCompletionModal } from '@/components/dashboard/ProjectCompletionModal'
-import { ConfigureShowcaseModal } from '@/components/dashboard/ConfigureShowcaseModal'
 
 // Shared tab loading placeholder
 const TabLoader = () => (
@@ -183,7 +189,6 @@ export function ProjectDashboard() {
 
     const [updatingStatus, setUpdatingStatus] = useState(false)
     const [isCompletionModalOpen, setIsCompletionModalOpen] = useState(false)
-    const [isConfigureShowcaseOpen, setIsConfigureShowcaseOpen] = useState(false)
     const [shareDialogOpen, setShareDialogOpen] = useState(false)
     const [isReopenDialogOpen, setIsReopenDialogOpen] = useState(false)
     const [reopenStatus, setReopenStatus] = useState<'active' | 'recruiting'>('active')
@@ -434,6 +439,26 @@ export function ProjectDashboard() {
             })
         } finally {
             setUpdatingStatus(false)
+        }
+    }
+
+    const handleToggleHighlight = async () => {
+        if (!id) return
+        try {
+            const nextStatus = !project?.isHighlighted
+            await updateProjectHighlightStatus(id, nextStatus)
+            setProject((prev: any) => prev ? { ...prev, isHighlighted: nextStatus } : prev)
+            toast({
+                title: nextStatus ? 'Added to Highlights' : 'Removed from Highlight',
+                description: `Project "${project?.title}" highlight status updated successfully.`,
+            })
+        } catch (error) {
+            console.error('Error toggling project highlight:', error)
+            toast({
+                title: 'Error',
+                description: 'Failed to update highlight status.',
+                variant: 'destructive',
+            })
         }
     }
 
@@ -899,7 +924,7 @@ export function ProjectDashboard() {
                                 onClick={() => setIsCompletionModalOpen(true)}
                             >
                                 <Share2 className="h-4 w-4 mr-2" />
-                                Showcase & Resume
+                                Resume & Materials
                             </Button>
                         )}
 
@@ -917,17 +942,27 @@ export function ProjectDashboard() {
                         )}
 
                         {(isOwner || isAdmin || canManageTeam) && (
-                            <Button
-                                size="sm"
-                                variant="outline"
-                                className="border-violet-300 dark:border-violet-700 bg-violet-50/50 dark:bg-violet-950/20 text-violet-750 dark:text-violet-400 hover:bg-violet-100 dark:hover:bg-violet-900/50 h-8 flex items-center gap-1.5"
-                                onClick={() => setIsConfigureShowcaseOpen(true)}
-                                title="Configure recruiter showcase info"
-                            >
-                                <Sparkles className="h-4 w-4" />
-                                <span className="hidden sm:inline">Public Showcase Info</span>
-                                <span className="sm:hidden">Showcase</span>
-                            </Button>
+                            <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                    <Button
+                                        variant="outline"
+                                        size="icon"
+                                        className="h-8 w-8 hover:bg-zinc-900/50"
+                                        title="Project actions"
+                                    >
+                                        <MoreVertical className="h-4 w-4 text-muted-foreground" />
+                                    </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end" className="w-56 bg-zinc-950 border border-zinc-800 text-white">
+                                    <DropdownMenuItem
+                                        onClick={handleToggleHighlight}
+                                        className="cursor-pointer hover:bg-zinc-900 focus:bg-zinc-900 text-sm py-2 flex items-center gap-2"
+                                    >
+                                        <Star className={`h-4 w-4 ${project?.isHighlighted ? 'fill-yellow-400 text-yellow-400' : 'text-zinc-400'}`} />
+                                        {project?.isHighlighted ? 'Remove from Highlight' : 'Add to Highlights'}
+                                    </DropdownMenuItem>
+                                </DropdownMenuContent>
+                            </DropdownMenu>
                         )}
 
                         {(isOwner || isAdmin || canManageTeam) && (
@@ -1602,27 +1637,12 @@ export function ProjectDashboard() {
                 completedTaskCount={tasks.filter(t => t.status === 'done').length}
                 teamMemberCount={teamMembers.length}
                 onNavigateToReviews={() => setActiveTab('team')}
-                onEditShowcase={() => setIsConfigureShowcaseOpen(true)}
                 completedTasksList={tasks.filter(t => t.status === 'done' && t.assigneeId === user?.uid).map(t => t.title)}
                 primaryDiscipline={project?.primaryDiscipline || 'Software Development'}
                 tags={project?.tags || []}
                 activityVerified={project?.activityVerified || false}
             />
 
-            {/* Configure Recruiter Showcase Modal */}
-            <ConfigureShowcaseModal
-                open={isConfigureShowcaseOpen}
-                onOpenChange={setIsConfigureShowcaseOpen}
-                projectId={id!}
-                onSaved={() => {
-                    // Refetch project data from firestore to make sure page states refresh if needed
-                    cachedGetDoc(doc(db, 'projects', id!)).then(snap => {
-                        if (snap?.exists()) {
-                            setProject(snap.data())
-                        }
-                    })
-                }}
-            />
 
             {/* Share Dialog */}
             <Dialog open={shareDialogOpen} onOpenChange={setShareDialogOpen}>

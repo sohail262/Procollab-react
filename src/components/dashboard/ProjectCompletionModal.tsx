@@ -16,7 +16,6 @@ interface ProjectCompletionModalProps {
     completedTaskCount: number
     teamMemberCount: number
     onNavigateToReviews?: () => void
-    onEditShowcase?: () => void
     completedTasksList?: string[]
     primaryDiscipline?: string
     tags?: string[]
@@ -32,7 +31,6 @@ export function ProjectCompletionModal({
     completedTaskCount,
     teamMemberCount,
     onNavigateToReviews,
-    onEditShowcase,
     completedTasksList = [],
     primaryDiscipline = 'Software Development',
     tags = [],
@@ -216,20 +214,7 @@ You can view our full project showcase, contribution breakdown, and verified del
                                 Rate Teammates & Peers
                             </Button>
                         )}
-                        {onEditShowcase && (
-                            <Button
-                                type="button"
-                                variant="outline"
-                                onClick={() => {
-                                    onOpenChange(false)
-                                    onEditShowcase()
-                                }}
-                                className="text-xs border-violet-300 dark:border-violet-700 hover:bg-violet-50 dark:hover:bg-violet-950/20 text-violet-750 dark:text-violet-400 flex items-center gap-1"
-                            >
-                                <Sparkles className="h-3.5 w-3.5" />
-                                Edit Showcase Info
-                            </Button>
-                        )}
+
                     </div>
                     <Button
                         type="button"

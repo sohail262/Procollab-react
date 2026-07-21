@@ -1,13 +1,20 @@
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Bookmark, Users, Send, LayoutDashboard, CheckCircle, AlertTriangle } from 'lucide-react'
+import { Bookmark, Users, Send, LayoutDashboard, CheckCircle, AlertTriangle, MoreVertical, Star } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { doc, setDoc, deleteDoc, getDoc } from 'firebase/firestore'
 import { db, auth } from '@/lib/firebase'
 import { Button } from '@/components/ui/button'
-import { invalidateSavedProjectsCache } from '@/services/dashboardService'
+import { invalidateSavedProjectsCache, updateProjectHighlightStatus } from '@/services/dashboardService'
 import { getTagColorClass } from '@/lib/utils'
+import { useToast } from '@/hooks/use-toast'
+import {
+    DropdownMenu,
+    DropdownMenuTrigger,
+    DropdownMenuContent,
+    DropdownMenuItem,
+} from '@/components/ui/dropdown-menu'
 
 interface ProjectCardProps {
     project: {
@@ -34,9 +41,35 @@ interface ProjectCardProps {
 
 export function ProjectCard({ project, onApply, isAlreadyMember = false, hasApplied = false }: ProjectCardProps) {
     const navigate = useNavigate()
+    const { toast } = useToast()
     const [isSaved,         setIsSaved]         = useState(false)
     const [loading,         setLoading]         = useState(false)
     const [memberProfiles,  setMemberProfiles]  = useState<any[]>([])
+    const [isHighlighted,   setIsHighlighted]   = useState((project as any).isHighlighted || false)
+
+    useEffect(() => {
+        setIsHighlighted((project as any).isHighlighted || false)
+    }, [(project as any).isHighlighted])
+
+    const handleToggleHighlight = async (e: React.MouseEvent) => {
+        e.stopPropagation()
+        try {
+            const nextStatus = !isHighlighted
+            await updateProjectHighlightStatus(project.id, nextStatus)
+            setIsHighlighted(nextStatus)
+            toast({
+                title: nextStatus ? 'Added to Highlights' : 'Removed from Highlight',
+                description: `Project "${project.title}" highlight status updated.`,
+            })
+        } catch (error) {
+            console.error('Error toggling highlight status:', error)
+            toast({
+                variant: 'destructive',
+                title: 'Error',
+                description: 'Failed to update highlight status.',
+            })
+        }
+    }
 
     useEffect(() => {
         checkIfSaved()
@@ -268,9 +301,31 @@ export function ProjectCard({ project, onApply, isAlreadyMember = false, hasAppl
                         )}
                     </div>
 
-                    <span className="text-xs text-muted-foreground shrink-0 ml-2">
-                        {formatTimeAgo(project.createdAt)}
-                    </span>
+                    <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                        <span className="text-xs text-muted-foreground">
+                            {formatTimeAgo(project.createdAt)}
+                        </span>
+
+                        {isOwner && (
+                            <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                    <button
+                                        onClick={e => e.stopPropagation()}
+                                        className="p-1 rounded-md hover:bg-white/10 text-muted-foreground hover:text-foreground transition-colors"
+                                        title="Project actions"
+                                    >
+                                        <MoreVertical className="h-4 w-4" />
+                                    </button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end" onClick={e => e.stopPropagation()} className="w-48 bg-slate-900 border border-slate-800 text-white z-50">
+                                    <DropdownMenuItem onClick={handleToggleHighlight} className="cursor-pointer hover:bg-slate-800 focus:bg-slate-800 text-xs py-2 flex items-center gap-2">
+                                        <Star className={`h-3.5 w-3.5 ${isHighlighted ? 'fill-yellow-400 text-yellow-400' : 'text-slate-400'}`} />
+                                        {isHighlighted ? 'Remove from Highlight' : 'Add to Highlights'}
+                                    </DropdownMenuItem>
+                                </DropdownMenuContent>
+                            </DropdownMenu>
+                        )}
+                    </div>
                 </div>
 
                 {/* Main Content Wrapper (title, description, tags) that will stretch */}

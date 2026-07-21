@@ -1,4 +1,4 @@
-import { collection, query, where, getDocs, getDoc, orderBy, limit, doc, onSnapshot } from 'firebase/firestore'
+import { collection, query, where, getDocs, getDoc, orderBy, limit, doc, onSnapshot, updateDoc } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
 import { cachedQuery, cachedGetDoc, batchGetDocs, clearCache } from '@/lib/queryUtils'
 
@@ -723,4 +723,12 @@ function normalizeDiscipline(d: string): string {
         .replace(/-/g, '')
         .replace(/ /g, '')
         .trim();
+}
+
+/**
+ * Update project highlight status
+ */
+export async function updateProjectHighlightStatus(projectId: string, isHighlighted: boolean): Promise<void> {
+    const projectRef = doc(db, 'projects', projectId)
+    await updateDoc(projectRef, { isHighlighted })
 }
