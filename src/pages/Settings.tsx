@@ -184,7 +184,7 @@ export function Settings() {
             setUsernameTaken(null)
             return
         }
-        
+
         setUsernameError(null)
 
         const debounceId = setTimeout(async () => {
@@ -577,14 +577,14 @@ export function Settings() {
 
                                     <div className="relative md:col-span-2">
                                         <label className="block text-sm font-medium mb-2">Skills</label>
-                                        
+
                                         {/* Selected Skills Badges */}
                                         <div className="flex flex-wrap gap-2 mb-3">
                                             {selectedSkills.length > 0 ? (
                                                 selectedSkills.map((skill, index) => (
-                                                    <Badge 
-                                                        key={index} 
-                                                        variant="secondary" 
+                                                    <Badge
+                                                        key={index}
+                                                        variant="secondary"
                                                         className="flex items-center gap-1.5 py-1.5 px-3 rounded-full text-xs font-medium bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300 border border-blue-100 dark:border-blue-900/50 hover:bg-blue-100 dark:hover:bg-blue-950/60 transition-colors"
                                                     >
                                                         {skill}
@@ -690,6 +690,7 @@ export function Settings() {
                             </div>
                         </CardContent>
                     </Card>
+
 
 
                     <Card>
