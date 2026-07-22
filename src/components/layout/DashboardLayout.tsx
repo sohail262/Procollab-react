@@ -152,7 +152,6 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
         { name: 'Overview', href: '/dashboard', icon: LayoutDashboard },
         { name: 'Discover', href: '/discover', icon: Compass },
         { name: 'Projects', href: '/projects', icon: Grid3x3 },
-        { name: 'My Projects', href: '/dashboard/projects', icon: FolderKanban },
         { name: 'Applications', href: '/dashboard/applications', icon: Send },
         { name: 'Saved', href: '/dashboard/saved', icon: Bookmark },
 
