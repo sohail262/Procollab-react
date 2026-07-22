@@ -376,6 +376,15 @@ export function Projects() {
                         {filteredProjects.length}{' '}
                         {filteredProjects.length === 1 ? 'Project' : 'Projects'} Found
                     </h2>
+                    <Button
+                        onClick={() => navigate('/dashboard/projects')}
+                        variant="outline"
+                        size="sm"
+                        className="flex items-center gap-2 text-xs sm:text-sm bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20 text-white transition-all duration-300"
+                    >
+                        <FolderKanban className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-primary" />
+                        <span>My Projects</span>
+                    </Button>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-6">
