@@ -1022,18 +1022,6 @@ export function ProjectDashboard() {
                                 </TabsTrigger>
                             )}
 
-                            {canViewTab('gantt') && (
-                                <TabsTrigger value="gantt"
-                                    className="data-[state=active]:bg-transparent
-                                               data-[state=active]:border-b-2
-                                               data-[state=active]:border-primary
-                                               data-[state=active]:shadow-none
-                                               rounded-none h-full px-3 sm:px-4">
-                                    <GanttChartSquare className="h-4 w-4 sm:mr-2" />
-                                    <span className="hidden sm:inline">Gantt</span>
-                                </TabsTrigger>
-                            )}
-
                             {canViewTab('calendar') && (
                                 <TabsTrigger value="calendar"
                                     className="data-[state=active]:bg-transparent
@@ -1058,32 +1046,6 @@ export function ProjectDashboard() {
                                 </TabsTrigger>
                             )}
 
-                            {canViewTab('team') && (
-                                <TabsTrigger value="team"
-                                    className="data-[state=active]:bg-transparent
-                                               data-[state=active]:border-b-2
-                                               data-[state=active]:border-primary
-                                               data-[state=active]:shadow-none
-                                               rounded-none h-full px-3 sm:px-4">
-                                    <Users className="h-4 w-4 sm:mr-2" />
-                                    <span className="hidden sm:inline">Team</span>
-                                </TabsTrigger>
-                            )}
-
-                            {canViewTab('analytics') && (
-                                <TabsTrigger value="analytics"
-                                    className="data-[state=active]:bg-transparent
-                                               data-[state=active]:border-b-2
-                                               data-[state=active]:border-primary
-                                               data-[state=active]:shadow-none
-                                               rounded-none h-full px-3 sm:px-4">
-                                    <BarChart3 className="h-4 w-4 sm:mr-2" />
-                                    <span className="hidden sm:inline">Analytics</span>
-                                </TabsTrigger>
-                            )}
-
-
-
                             {canViewTab('documents') && (
                                 <TabsTrigger value="documents"
                                     className="data-[state=active]:bg-transparent
@@ -1093,20 +1055,6 @@ export function ProjectDashboard() {
                                                rounded-none h-full px-3 sm:px-4">
                                     <FolderOpen className="h-4 w-4 sm:mr-2" />
                                     <span className="hidden sm:inline">Drive Docs</span>
-                                </TabsTrigger>
-                            )}
-
-
-
-                            {canViewTab('budget') && (
-                                <TabsTrigger value="budget"
-                                    className="data-[state=active]:bg-transparent
-                                               data-[state=active]:border-b-2
-                                               data-[state=active]:border-primary
-                                               data-[state=active]:shadow-none
-                                               rounded-none h-full px-3 sm:px-4">
-                                    <BarChart3 className="h-4 w-4 sm:mr-2" />
-                                    <span className="hidden sm:inline">Budget</span>
                                 </TabsTrigger>
                             )}
 
@@ -1153,6 +1101,63 @@ export function ProjectDashboard() {
                                         </span>
                                     )}
                                 </TabsTrigger>
+                            )}
+
+                            {/* Analysis Dropdown Menu */}
+                            {(canViewTab('gantt') || canViewTab('team') || canViewTab('analytics') || canViewTab('budget')) && (
+                                <DropdownMenu>
+                                    <DropdownMenuTrigger asChild>
+                                        <button
+                                            className={`rounded-none h-full px-3 sm:px-4 text-sm font-medium transition-all relative border-b-2 outline-none flex items-center gap-1.5 sm:gap-2
+                                                ${['gantt', 'team', 'analytics', 'budget'].includes(activeTab)
+                                                    ? 'border-primary text-primary bg-transparent'
+                                                    : 'border-transparent text-muted-foreground hover:text-foreground'
+                                                }`}
+                                        >
+                                            <BarChart3 className="h-4 w-4" />
+                                            <span>Analysis</span>
+                                            <span className="text-[10px] opacity-70">▼</span>
+                                        </button>
+                                    </DropdownMenuTrigger>
+                                    <DropdownMenuContent className="bg-zinc-950 border border-zinc-800 text-white min-w-[140px]">
+                                        {canViewTab('gantt') && (
+                                            <DropdownMenuItem
+                                                onClick={() => setActiveTab('gantt')}
+                                                className={`cursor-pointer hover:bg-zinc-900 focus:bg-zinc-900 flex items-center gap-2 py-2 px-3 text-sm transition-colors rounded ${activeTab === 'gantt' ? 'text-primary font-semibold' : 'text-zinc-300'}`}
+                                            >
+                                                <GanttChartSquare className="h-4 w-4" />
+                                                <span>Gantt</span>
+                                            </DropdownMenuItem>
+                                        )}
+                                        {canViewTab('team') && (
+                                            <DropdownMenuItem
+                                                onClick={() => setActiveTab('team')}
+                                                className={`cursor-pointer hover:bg-zinc-900 focus:bg-zinc-900 flex items-center gap-2 py-2 px-3 text-sm transition-colors rounded ${activeTab === 'team' ? 'text-primary font-semibold' : 'text-zinc-300'}`}
+                                            >
+                                                <Users className="h-4 w-4" />
+                                                <span>Team</span>
+                                            </DropdownMenuItem>
+                                        )}
+                                        {canViewTab('analytics') && (
+                                            <DropdownMenuItem
+                                                onClick={() => setActiveTab('analytics')}
+                                                className={`cursor-pointer hover:bg-zinc-900 focus:bg-zinc-900 flex items-center gap-2 py-2 px-3 text-sm transition-colors rounded ${activeTab === 'analytics' ? 'text-primary font-semibold' : 'text-zinc-300'}`}
+                                            >
+                                                <BarChart3 className="h-4 w-4" />
+                                                <span>Analytics</span>
+                                            </DropdownMenuItem>
+                                        )}
+                                        {canViewTab('budget') && (
+                                            <DropdownMenuItem
+                                                onClick={() => setActiveTab('budget')}
+                                                className={`cursor-pointer hover:bg-zinc-900 focus:bg-zinc-900 flex items-center gap-2 py-2 px-3 text-sm transition-colors rounded ${activeTab === 'budget' ? 'text-primary font-semibold' : 'text-zinc-300'}`}
+                                            >
+                                                <DollarSign className="h-4 w-4" />
+                                                <span>Budget</span>
+                                            </DropdownMenuItem>
+                                        )}
+                                    </DropdownMenuContent>
+                                </DropdownMenu>
                             )}
 
                         </TabsList>
