@@ -342,10 +342,31 @@ export async function logAdminAction(
 // Additional Admin Functions for AdminDashboard
 // ─────────────────────────────────────────────────────────
 
+let cachedAdminStats: { timestamp: number; data: PlatformStats } | null = null
+
 /**
- * Load platform statistics
+ * Load platform statistics with 5-minute caching to prevent massive full-collection scans
  */
 export async function loadPlatformStats(): Promise<PlatformStats> {
+    const NOW = Date.now()
+    const CACHE_TTL = 5 * 60 * 1000
+
+    if (!cachedAdminStats) {
+        try {
+            const stored = sessionStorage.getItem('procollab_admin_platform_stats')
+            if (stored) {
+                const parsed = JSON.parse(stored)
+                if (NOW - parsed.timestamp < CACHE_TTL) {
+                    cachedAdminStats = parsed
+                }
+            }
+        } catch {}
+    }
+
+    if (cachedAdminStats && NOW - cachedAdminStats.timestamp < CACHE_TTL) {
+        return cachedAdminStats.data
+    }
+
     try {
         const [usersSnap, projectsSnap] = await Promise.all([
             getDocs(collection(db, 'users')),
@@ -370,13 +391,20 @@ export async function loadPlatformStats(): Promise<PlatformStats> {
             return createdDate > thirtyDaysAgo
         }).length
 
-        return {
+        const result: PlatformStats = {
             totalUsers,
             totalProjects,
             activeUsers,
             featuredProjects,
-            newSignups
+            newSignups,
         }
+
+        cachedAdminStats = { timestamp: NOW, data: result }
+        try {
+            sessionStorage.setItem('procollab_admin_platform_stats', JSON.stringify(cachedAdminStats))
+        } catch {}
+
+        return result
     } catch (error) {
         console.error('Error loading platform stats:', error)
         return {

@@ -423,56 +423,93 @@ export const calculateStreakMetrics = (activityMap: Record<string, ActivityDay>)
     }
 }
 
+let cachedLeaderboardData: { timestamp: number; data: Omit<LeaderboardUser, 'isCurrentUser' | 'rank'>[] } | null = null
+
 /**
  * Fetch 100% REAL global Procollab streak leaderboard from Firestore users.
  * Leaderboard score = Streak + Contributions
+ * Includes 5-minute cache to protect Firestore read limits.
  */
 export const fetchGlobalStreakLeaderboard = async (currentUserId?: string): Promise<LeaderboardUser[]> => {
     try {
-        const usersSnap = await getDocs(query(collection(db, 'users'), limit(50)))
-        const userProfiles: {
-            id: string
-            name: string
-            username?: string
-            photoURL?: string
-            role?: string
-            discipline?: string
-        }[] = []
+        const NOW = Date.now()
+        const CACHE_TTL = 5 * 60 * 1000 // 5 minutes
 
-        usersSnap.forEach(docSnap => {
-            const uData = docSnap.data()
-            const firstName = uData.firstName || uData.displayName || 'Member'
-            const lastName = uData.lastName || ''
-            userProfiles.push({
-                id: docSnap.id,
-                name: `${firstName} ${lastName}`.trim(),
-                username: uData.username,
-                photoURL: uData.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(uData.email || docSnap.id)}`,
-                role: uData.role || 'Collaborator',
-                discipline: uData.discipline || uData.department || 'Technology',
-            })
-        })
-
-        const leaderboardData = await Promise.all(
-            userProfiles.map(async (u) => {
-                const userActMap = await fetchUserActivityData(u.id)
-                const metrics = calculateStreakMetrics(userActMap)
-                const score = metrics.currentStreak + metrics.totalContributions
-                return {
-                    ...u,
-                    currentStreak: metrics.currentStreak,
-                    longestStreak: metrics.longestStreak,
-                    totalContributions: metrics.totalContributions,
-                    consistencyRate: metrics.consistencyRate,
-                    score,
+        // Check in-memory or sessionStorage cache
+        if (!cachedLeaderboardData) {
+            try {
+                const stored = sessionStorage.getItem('procollab_streak_leaderboard_cache')
+                if (stored) {
+                    const parsed = JSON.parse(stored)
+                    if (NOW - parsed.timestamp < CACHE_TTL) {
+                        cachedLeaderboardData = parsed
+                    }
                 }
+            } catch {
+                // Ignore storage parse errors
+            }
+        }
+
+        let rawLeaderboardData: Omit<LeaderboardUser, 'isCurrentUser' | 'rank'>[]
+
+        if (cachedLeaderboardData && NOW - cachedLeaderboardData.timestamp < CACHE_TTL) {
+            rawLeaderboardData = cachedLeaderboardData.data
+        } else {
+            const usersSnap = await getDocs(query(collection(db, 'users'), limit(50)))
+            const userProfiles: {
+                id: string
+                name: string
+                username?: string
+                photoURL?: string
+                role?: string
+                discipline?: string
+            }[] = []
+
+            usersSnap.forEach(docSnap => {
+                const uData = docSnap.data()
+                const firstName = uData.firstName || uData.displayName || 'Member'
+                const lastName = uData.lastName || ''
+                userProfiles.push({
+                    id: docSnap.id,
+                    name: `${firstName} ${lastName}`.trim(),
+                    username: uData.username,
+                    photoURL: uData.photoURL || `https://api.dicebear.com/7.x/avataaars/svg?seed=${encodeURIComponent(uData.email || docSnap.id)}`,
+                    role: uData.role || 'Collaborator',
+                    discipline: uData.discipline || uData.department || 'Technology',
+                })
             })
-        )
 
-        // Sort by Leaderboard Score = Streak + Contributions
-        leaderboardData.sort((a, b) => b.score - a.score || b.currentStreak - a.currentStreak)
+            const leaderboardData = await Promise.all(
+                userProfiles.map(async (u) => {
+                    const userActMap = await fetchUserActivityData(u.id)
+                    const metrics = calculateStreakMetrics(userActMap)
+                    const score = metrics.currentStreak + metrics.totalContributions
+                    return {
+                        ...u,
+                        currentStreak: metrics.currentStreak,
+                        longestStreak: metrics.longestStreak,
+                        totalContributions: metrics.totalContributions,
+                        consistencyRate: metrics.consistencyRate,
+                        score,
+                    }
+                })
+            )
 
-        return leaderboardData.map((user, idx) => ({
+            // Sort by Leaderboard Score = Streak + Contributions
+            leaderboardData.sort((a, b) => b.score - a.score || b.currentStreak - a.currentStreak)
+
+            rawLeaderboardData = leaderboardData
+
+            // Store in cache
+            cachedLeaderboardData = { timestamp: NOW, data: rawLeaderboardData }
+            try {
+                sessionStorage.setItem('procollab_streak_leaderboard_cache', JSON.stringify(cachedLeaderboardData))
+            } catch {
+                // Ignore quota errors
+            }
+        }
+
+        return rawLeaderboardData.map((user, idx) => ({
             ...user,
             rank: idx + 1,
             isCurrentUser: user.id === currentUserId

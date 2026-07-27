@@ -797,8 +797,11 @@ export default function Profile() {
                         collection(db, 'users', profileId!, 'badges'),
                         { ttl: 300_000, cacheKey: `profile-badges-${profileId}` }
                     ), '4. badges'),
-                    // 5. Joined project IDs
-                    wrapPromise(getDocs(collection(db, 'users', profileId!, 'joinedProjects')), '5. joinedProjects')
+                    // 5. Joined project IDs (cached)
+                    wrapPromise(cachedQuery(
+                        collection(db, 'users', profileId!, 'joinedProjects'),
+                        { ttl: 300_000, cacheKey: `profile-joined-${profileId}` }
+                    ), '5. joinedProjects')
                 ]
 
                 // 6. Applications — own profile only (cached)
@@ -1039,26 +1042,24 @@ export default function Profile() {
 
     const handleDeleteAccount = async () => {
         if (!currentUser || !isOwnProfile) return
-        if (
-            confirm(
-                'Are you sure you want to delete your account? This action cannot be undone.'
-            )
-        ) {
-            try {
-                setActionLoading(true)
-                await deleteDoc(doc(db, 'users', currentUser.uid))
-                await currentUser.delete()
-                navigate('/')
-            } catch (error) {
-                console.error('Error deleting account:', error)
-                toast({
-                    title: 'Delete Failed',
-                    description: 'Failed to delete account. You may need to re-login first.',
-                    variant: 'destructive',
-                })
-            } finally {
-                setActionLoading(false)
-            }
+        try {
+            setActionLoading(true)
+            await deleteDoc(doc(db, 'users', currentUser.uid))
+            await currentUser.delete()
+            setIsDeleteModalOpen(false)
+            navigate('/')
+        } catch (error: any) {
+            console.error('Error deleting account:', error)
+            const isRecentLoginError = error?.code === 'auth/requires-recent-login'
+            toast({
+                title: 'Delete Failed',
+                description: isRecentLoginError
+                    ? 'Security requirement: Please log out and log back in before deleting your account.'
+                    : 'Failed to delete account. Please try again or re-login.',
+                variant: 'destructive',
+            })
+        } finally {
+            setActionLoading(false)
         }
     }
 
@@ -1271,7 +1272,8 @@ export default function Profile() {
                                             variant="destructive"
                                             size="icon"
                                             className="h-8 w-8"
-                                            aria-label="Delete profile"
+                                            title="Delete account"
+                                            aria-label="Delete account"
                                             onClick={() => setIsDeleteModalOpen(true)}
                                         >
                                             <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />

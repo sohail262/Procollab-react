@@ -857,7 +857,13 @@ export function Discover() {
                                                         `https://api.dicebear.com/7.x/${person.avatarStyle || 'avataaars'}/svg?seed=${encodeURIComponent(person.avatarSeed || person.email || person.id)}`
                                                     }
                                                     alt={`${person.firstName} ${person.lastName}`}
-                                                    className="w-10 h-10 sm:w-12 sm:h-12 rounded-full border border-white/10 cursor-pointer hover:border-primary transition-colors shrink-0"
+                                                    className="w-10 h-10 sm:w-12 sm:h-12 rounded-full border border-white/10 cursor-pointer hover:border-primary transition-colors shrink-0 object-cover"
+                                                    onError={(e) => {
+                                                        const fallbackUrl = `https://api.dicebear.com/7.x/${person.avatarStyle || 'avataaars'}/svg?seed=${encodeURIComponent(person.avatarSeed || person.email || person.id)}`
+                                                        if (e.currentTarget.src !== fallbackUrl) {
+                                                            e.currentTarget.src = fallbackUrl
+                                                        }
+                                                    }}
                                                     onClick={() => navigate(`/profile/${person.id}`)}
                                                 />
                                                 <div className="min-w-0">

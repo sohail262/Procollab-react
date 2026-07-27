@@ -24,9 +24,10 @@ import {
     TrendingUp,
     MessageSquare
 } from 'lucide-react'
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { doc, onSnapshot, collection, query, orderBy, limit, getDocs } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
+import { cachedQuery } from '@/lib/queryUtils'
 
 interface UserProfile {
     photoURL?: string
@@ -78,24 +79,25 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
         return () => unsubscribe()
     }, [user])
 
-    // Load projects for search
-    useEffect(() => {
-        const loadProjects = async () => {
-            try {
-                const projectsRef = collection(db, 'projects')
-                const q = query(projectsRef, orderBy('createdAt', 'desc'), limit(50))
-                const snapshot = await getDocs(q)
-                const projectsData = snapshot.docs.map(doc => ({
-                    id: doc.id,
-                    ...doc.data()
-                })) as Project[]
-                setAllProjects(projectsData)
-            } catch (error) {
-                console.error('Error loading projects for search:', error)
-            }
+    const [hasLoadedProjects, setHasLoadedProjects] = useState(false)
+
+    // Load projects for search on-demand
+    const ensureProjectsLoaded = useCallback(async () => {
+        if (hasLoadedProjects) return
+        setHasLoadedProjects(true)
+        try {
+            const projectsRef = collection(db, 'projects')
+            const q = query(projectsRef, orderBy('createdAt', 'desc'), limit(50))
+            const snapshot = await cachedQuery(q, { ttl: 300_000, cacheKey: 'topbar-search-projects' })
+            const projectsData = snapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data()
+            })) as Project[]
+            setAllProjects(projectsData)
+        } catch (error) {
+            console.error('Error loading projects for search:', error)
         }
-        loadProjects()
-    }, [])
+    }, [hasLoadedProjects])
 
     // Handle click outside to close search results
     useEffect(() => {
@@ -201,8 +203,14 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                                         className="block w-56 p-2 pl-9 pr-8 text-sm bg-transparent border border-border/50 rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-foreground/15 focus:border-foreground/20 transition-all duration-200"
                                         placeholder="Search projects..."
                                         value={searchQuery}
-                                        onChange={(e) => setSearchQuery(e.target.value)}
-                                        onFocus={() => setIsSearchFocused(true)}
+                                        onChange={(e) => {
+                                            ensureProjectsLoaded()
+                                            setSearchQuery(e.target.value)
+                                        }}
+                                        onFocus={() => {
+                                            ensureProjectsLoaded()
+                                            setIsSearchFocused(true)
+                                        }}
                                     />
                                     {searchQuery && (
                                         <button

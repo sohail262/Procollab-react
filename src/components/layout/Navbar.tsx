@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { Link, useNavigate } from "react-router-dom"
 import { Logo } from "@/components/layout/Logo"
 import { Menu, LogOut, User, LayoutDashboard, Search, X, FolderKanban } from "lucide-react"
@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { collection, query, limit, getDocs, orderBy, doc, onSnapshot } from "firebase/firestore"
 import { db } from "@/lib/firebase"
+import { cachedQuery } from "@/lib/queryUtils"
 
 interface Project {
     id: string
@@ -54,24 +55,24 @@ export function Navbar() {
     ]
 
 
-    // Load projects for search
-    useEffect(() => {
-        const loadProjects = async () => {
-            try {
-                const projectsRef = collection(db, 'projects')
-                const q = query(projectsRef, orderBy('createdAt', 'desc'), limit(50))
-                const snapshot = await getDocs(q)
-                const projectsData = snapshot.docs.map(doc => ({
-                    id: doc.id,
-                    ...doc.data()
-                })) as Project[]
-                setAllProjects(projectsData)
-            } catch (error) {
-                console.error('Error loading projects:', error)
-            }
+    const [hasLoadedProjects, setHasLoadedProjects] = useState(false)
+
+    const ensureProjectsLoaded = useCallback(async () => {
+        if (hasLoadedProjects) return
+        setHasLoadedProjects(true)
+        try {
+            const projectsRef = collection(db, 'projects')
+            const q = query(projectsRef, orderBy('createdAt', 'desc'), limit(50))
+            const snapshot = await cachedQuery(q, { ttl: 300_000, cacheKey: 'navbar-search-projects' })
+            const projectsData = snapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data()
+            })) as Project[]
+            setAllProjects(projectsData)
+        } catch (error) {
+            console.error('Error loading projects:', error)
         }
-        loadProjects()
-    }, [])
+    }, [hasLoadedProjects])
 
     // Fetch user profile from Firestore to get custom avatar (real-time updates)
     useEffect(() => {
@@ -205,8 +206,14 @@ export function Navbar() {
                                 placeholder="Search projects..."
                                 className="pl-9 pr-8 w-48 lg:w-64 h-9"
                                 value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
-                                onFocus={() => setIsSearchFocused(true)}
+                                onChange={(e) => {
+                                    ensureProjectsLoaded()
+                                    setSearchQuery(e.target.value)
+                                }}
+                                onFocus={() => {
+                                    ensureProjectsLoaded()
+                                    setIsSearchFocused(true)
+                                }}
                             />
                             {searchQuery && (
                                 <button

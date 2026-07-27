@@ -23,6 +23,7 @@ import {
     collection, query, getDocs,
     orderBy, doc, getDoc, where
 } from 'firebase/firestore'
+import { cachedQuery } from '@/lib/queryUtils'
 import { db, auth } from '@/lib/firebase'
 import { useAuth } from '@/hooks/use-auth'
 
@@ -140,10 +141,11 @@ export function Projects() {
             }
         }
 
-        // ── Source B: users/{uid}/joinedProjects subcollection ─────────────
+        // ── Source B: users/{uid}/joinedProjects subcollection (cached) ─────
         try {
-            const jpSnap = await getDocs(
-                collection(db, 'users', user.uid, 'joinedProjects')
+            const jpSnap = await cachedQuery(
+                collection(db, 'users', user.uid, 'joinedProjects'),
+                { ttl: 300_000, cacheKey: `user-joined-projects-${user.uid}` }
             )
             jpSnap.docs.forEach(d => {
                 const projectId = d.data().projectId || d.id
@@ -151,33 +153,19 @@ export function Projects() {
             })
         } catch { /* subcollection may not exist yet */ }
 
-        // ── Source C: check members subcollection for projects not yet found ─
-        // Only check projects not already confirmed to avoid excess reads
-        const unchecked = allProjects.filter(p => !joined.has(p.id) && p.createdBy !== user.uid)
-        await Promise.allSettled(
-            unchecked.map(async p => {
-                try {
-                    const memberDoc = await getDoc(
-                        doc(db, 'projects', p.id, 'members', user.uid)
-                    )
-                    if (memberDoc.exists()) joined.add(p.id)
-                } catch { /* non-fatal */ }
-            })
-        )
-
         setJoinedProjectIds(joined)
     }
-
 
     const loadAppliedProjectIds = async () => {
         if (!user) return
         const applied = new Set<string>()
         try {
-            const appsSnap = await getDocs(
+            const appsSnap = await cachedQuery(
                 query(
                     collection(db, 'users', user.uid, 'applications'),
                     where('status', 'in', ['pending', 'applied', 'viewed', 'shortlisted', 'interviewing'])
-                )
+                ),
+                { ttl: 120_000, cacheKey: `user-apps-${user.uid}` }
             )
             appsSnap.docs.forEach(d => {
                 const projectId = d.data().projectId

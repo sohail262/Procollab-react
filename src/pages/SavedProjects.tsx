@@ -5,6 +5,7 @@ import { ProjectCard } from '@/components/ProjectCard'
 import { ApplicationModal } from '@/components/ApplicationModal'
 import { collection, getDocs, doc, getDoc, query, where } from 'firebase/firestore'
 import { db, auth } from '@/lib/firebase'
+import { batchGetDocs } from '@/lib/queryUtils'
 import { FolderKanban } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
@@ -47,23 +48,28 @@ export function SavedProjects() {
             const savedRef = collection(db, 'users', auth.currentUser.uid, 'savedProjects')
             const savedSnapshot = await getDocs(savedRef)
 
-            const projectPromises = savedSnapshot.docs.map(async (savedDoc) => {
-                const projectId = savedDoc.data().projectId
-                const projectRef = doc(db, 'projects', projectId)
-                const projectSnap = await getDoc(projectRef)
+            const projectRefs = savedSnapshot.docs
+                .map((savedDoc) => {
+                    const projectId = savedDoc.data().projectId
+                    return projectId ? doc(db, 'projects', projectId) : null
+                })
+                .filter(Boolean) as ReturnType<typeof doc>[]
 
-                if (projectSnap.exists()) {
-                    return {
-                        id: projectSnap.id,
-                        ...projectSnap.data(),
-                        tags: projectSnap.data().tags || [],
-                        createdAt: projectSnap.data().createdAt?.toDate() || new Date()
-                    } as Project
-                }
-                return null
-            })
+            if (projectRefs.length === 0) {
+                setProjects([])
+                return
+            }
 
-            const projectsData = (await Promise.all(projectPromises)).filter(p => p !== null) as Project[]
+            const projectSnaps = await batchGetDocs(projectRefs, { userId: auth.currentUser.uid, ttl: 120_000 })
+            const projectsData = projectSnaps
+                .filter(snap => snap.exists)
+                .map(projectSnap => ({
+                    id: projectSnap.id,
+                    ...projectSnap.data!,
+                    tags: projectSnap.data!.tags || [],
+                    createdAt: projectSnap.data!.createdAt?.toDate() || new Date()
+                } as Project))
+
             setProjects(projectsData)
         } catch (error) {
             console.error('Error loading saved projects:', error)

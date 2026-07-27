@@ -5,6 +5,7 @@ import { useNavigate } from 'react-router-dom'
 import { useState, useEffect } from 'react'
 import { doc, setDoc, deleteDoc, getDoc } from 'firebase/firestore'
 import { db, auth } from '@/lib/firebase'
+import { cachedGetDoc } from '@/lib/queryUtils'
 import { Button } from '@/components/ui/button'
 import { invalidateSavedProjectsCache, updateProjectHighlightStatus } from '@/services/dashboardService'
 import { getTagColorClass } from '@/lib/utils'
@@ -98,12 +99,20 @@ export function ProjectCard({ project, onApply, isAlreadyMember = false, hasAppl
 
             const profiles = await Promise.all(
                 memberIds.map(async memberId => {
+                    // ⚡ Denormalization check: If memberId is an embedded object with photoURL/displayName, use it directly (0 reads)
+                    if (typeof memberId === 'object' && memberId !== null && (memberId.photoURL || memberId.displayName || memberId.name)) {
+                        return memberId
+                    }
+
                     const userId =
                         typeof memberId === 'string'
                             ? memberId
                             : memberId.userId || memberId.id
                     try {
-                        const userDoc = await getDoc(doc(db, 'users', userId))
+                        const userDoc = await cachedGetDoc(doc(db, 'users', userId), {
+                            ttl: 300_000,
+                            cacheKey: `user-card-profile-${userId}`
+                        })
                         if (userDoc.exists()) return userDoc.data()
                     } catch { /* non-fatal */ }
                     return null
@@ -118,21 +127,26 @@ export function ProjectCard({ project, onApply, isAlreadyMember = false, hasAppl
     const toggleSave = async (e: React.MouseEvent) => {
         e.stopPropagation()
         if (!auth.currentUser) return
+        const previousState = isSaved
+        const newState = !previousState
+        // Optimistic UI update
+        setIsSaved(newState)
         setLoading(true)
         try {
             const savedRef = doc(db, 'users', auth.currentUser.uid, 'savedProjects', project.id)
-            if (isSaved) {
+            if (previousState) {
                 await deleteDoc(savedRef)
-                setIsSaved(false)
             } else {
                 await setDoc(savedRef, { projectId: project.id, savedAt: new Date() })
-                setIsSaved(true)
             }
-            // ✅ Invalidate the saved-projects cache so the next visit to Saved Projects
-            // reflects the change immediately instead of serving stale cached data.
             invalidateSavedProjectsCache(auth.currentUser.uid)
         } catch (error) {
-            console.error('Error toggling save:', error)
+            // Revert state on error
+            setIsSaved(previousState)
+            toast({
+                title: 'Failed to update saved project',
+                variant: 'destructive'
+            })
         } finally {
             setLoading(false)
         }
