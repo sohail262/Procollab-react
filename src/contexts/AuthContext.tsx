@@ -207,32 +207,47 @@ export function AuthProvider({ children }: AuthProviderProps) {
                             })
                         } else {
                             const isSohail = firebaseUser.email?.toLowerCase() === 'mohd26sohail@gmail.com'
+                            const writeKey = `last_session_write_${firebaseUser.uid}`
+                            const lastWrite = localStorage.getItem(writeKey)
+                            const now = Date.now()
+                            // Only update Firestore if > 15 minutes have elapsed since last session write
+                            if (!lastWrite || now - parseInt(lastWrite, 10) > 15 * 60 * 1000) {
+                                setDoc(
+                                    userDocRef,
+                                    {
+                                        lastLogin: serverTimestamp(),
+                                        lastActivity: serverTimestamp(),
+                                        sessionExtended: serverTimestamp(),
+                                        ...(isSohail && userDoc.data()?.role !== 'admin' ? { role: 'admin' } : {})
+                                    },
+                                    { merge: true }
+                                ).then(() => {
+                                    localStorage.setItem(writeKey, now.toString())
+                                }).catch(err => console.error('Failed to update login stats in bg:', err))
+                            }
+                        }
+                        try {
+                            localStorage.setItem(cacheKey, 'true')
+                        } catch { /* storage full / private browsing */ }
+                    } else {
+                        // Returning user — update login activity silently in background with throttling
+                        const writeKey = `last_session_write_${firebaseUser.uid}`
+                        const lastWrite = localStorage.getItem(writeKey)
+                        const now = Date.now()
+                        if (!lastWrite || now - parseInt(lastWrite, 10) > 15 * 60 * 1000) {
+                            const userDocRef = doc(db, 'users', firebaseUser.uid)
                             setDoc(
                                 userDocRef,
                                 {
                                     lastLogin: serverTimestamp(),
                                     lastActivity: serverTimestamp(),
                                     sessionExtended: serverTimestamp(),
-                                    ...(isSohail && userDoc.data()?.role !== 'admin' ? { role: 'admin' } : {})
                                 },
                                 { merge: true }
-                            ).catch(err => console.error('Failed to update login stats in bg:', err))
+                            ).then(() => {
+                                localStorage.setItem(writeKey, now.toString())
+                            }).catch(err => console.error('Failed to update login stats in bg:', err))
                         }
-                        try {
-                            localStorage.setItem(cacheKey, 'true')
-                        } catch { /* storage full / private browsing */ }
-                    } else {
-                        // Returning user — update login activity silently in background
-                        const userDocRef = doc(db, 'users', firebaseUser.uid)
-                        setDoc(
-                            userDocRef,
-                            {
-                                lastLogin: serverTimestamp(),
-                                lastActivity: serverTimestamp(),
-                                sessionExtended: serverTimestamp(),
-                            },
-                            { merge: true }
-                        ).catch(err => console.error('Failed to update login stats in bg:', err))
                     }
 
                     // Track session start for retention analytics

@@ -36,6 +36,7 @@ import {
     serverTimestamp,
 } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
+import { cachedGetDoc } from '@/lib/queryUtils'
 import { useParams } from 'react-router-dom'
 import { useAuth } from '@/hooks/use-auth'
 import { useToast } from '@/hooks/use-toast'
@@ -1190,14 +1191,17 @@ export function ResourceManagement({ readOnly = false }: ResourceManagementProps
                 })
                 setRawMembers(membersMap)
 
-                // Fetch user profiles for enriched data
+                // Fetch user profiles for enriched data using cachedGetDoc
                 const profileMap: Record<string, any> = {}
                 await Promise.all(
                     snap.docs.map(async d => {
                         const uid = d.id
                         const subData = d.data()
                         try {
-                            const uSnap = await getDoc(doc(db, 'users', uid))
+                            const uSnap = await cachedGetDoc(doc(db, 'users', uid), {
+                                cacheKey: `user_profile_${uid}`,
+                                ttl: 300000
+                            })
                             if (uSnap.exists()) {
                                 profileMap[uid] = { uid, ...uSnap.data() }
                             } else {

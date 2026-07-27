@@ -10,7 +10,7 @@ import {
     Loader2, MapPin, Link as LinkIcon, Github, Linkedin, Twitter,
     Mail, Calendar, UserPlus, Check, BookOpen, Trash2,
     LayoutDashboard, FileText, Users, ImageIcon, X, Award, Star,
-    Zap, CheckCircle, ShieldAlert, Crown, Heart, Code2, Compass, Shield,
+    Zap, CheckCircle, ShieldAlert, Crown, Heart, Code2, Compass, Shield, Sparkles,
     ShieldCheck, Clock, GitBranch, Layers, Briefcase, BarChart3, Share2, Search,
     Lock, Upload, Info, MoreVertical
 } from 'lucide-react'
@@ -59,6 +59,17 @@ import {
     DialogTrigger,
 } from '@/components/ui/dialog'
 import { ResumeBuilder } from '@/components/profile/ResumeBuilder'
+import { ActivityHeatmap } from '@/components/profile/ActivityHeatmap'
+import { StreakCard } from '@/components/profile/StreakCard'
+import { StreakLeaderboard } from '@/components/profile/StreakLeaderboard'
+import { ShareFlexModal } from '@/components/profile/ShareFlexModal'
+import {
+    fetchUserActivityData,
+    calculateStreakMetrics,
+    ActivityDay,
+    StreakMetrics,
+} from '@/services/activityService'
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface UserProfile {
     id: string
@@ -83,7 +94,9 @@ interface UserProfile {
     availabilityHours?: number
     timezone?: string
     preferredRoles?: string[]
+    highlightedProjectIds?: string[]
     pastProjectsShowcase?: {
+
         title: string
         description: string
         outcome: string
@@ -266,6 +279,13 @@ export default function Profile() {
     const [savingAvatar, setSavingAvatar] = useState(false)
     const [connectionsSearch, setConnectionsSearch] = useState('')
 
+    // Activity & Streak states
+    const [activityData, setActivityData] = useState<Record<string, ActivityDay>>({})
+    const [streakMetrics, setStreakMetrics] = useState<StreakMetrics | null>(null)
+    const [isLeaderboardOpen, setIsLeaderboardOpen] = useState(false)
+    const [isShareModalOpen, setIsShareModalOpen] = useState(false)
+
+
     const handleToggleProjectHighlight = async (e: React.MouseEvent, projectId: string, currentHighlighted: boolean) => {
         e.stopPropagation()
         try {
@@ -426,7 +446,8 @@ export default function Profile() {
         }
     }
 
-        const isOwnProfile = !resolvedId || (currentUser && resolvedId === currentUser.uid)
+        const isOwnProfile = Boolean(!resolvedId || (currentUser && resolvedId === currentUser.uid))
+
     const profileId = resolvedId || currentUser?.uid
 
     // Profile Strength Calculation
@@ -686,8 +707,25 @@ export default function Profile() {
         }
     }
 
+    // ── Load Activity & Streak Metrics ───────────────────────────────────────
+    useEffect(() => {
+        if (!profileId) return
+        let isMounted = true
+
+        fetchUserActivityData(profileId).then(data => {
+            if (!isMounted) return
+            setActivityData(data)
+            setStreakMetrics(calculateStreakMetrics(data))
+        }).catch(err => {
+            console.error('Error fetching activity data:', err)
+        })
+
+        return () => { isMounted = false }
+    }, [profileId])
+
     // ── Load profile + real-time friends listener ─────────────────────────────
     useEffect(() => {
+
         if (!profileId) return
 
         let unsubFriends: (() => void) | null = null
@@ -1372,7 +1410,23 @@ export default function Profile() {
                     </div>
                 </div>
 
-                {isOwnProfile && false && null /* connection hint removed */}
+                {/* ── Activity Heatmap & Streak Consistency Section ── */}
+                {streakMetrics && (
+                    <div className="space-y-6 mb-6">
+                        <StreakCard
+                            metrics={streakMetrics}
+                            userName={profile.firstName}
+                            isOwnProfile={isOwnProfile}
+                            onOpenLeaderboard={() => setIsLeaderboardOpen(true)}
+                            onOpenShareModal={() => setIsShareModalOpen(true)}
+                        />
+                        <ActivityHeatmap
+                            activityData={activityData}
+                            userName={profile.firstName}
+                            isOwnProfile={isOwnProfile}
+                        />
+                    </div>
+                )}
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
 
@@ -1381,22 +1435,22 @@ export default function Profile() {
 
                         {/* Profile Strength Card — hidden once score reaches 100% */}
                         {isOwnProfile && profileStrengthScore < 100 && (
-                            <Card className="relative overflow-hidden border border-indigo-100 dark:border-indigo-900/30">
-                                <CardContent className="pt-6">
+                            <Card className="relative overflow-hidden border border-zinc-800 bg-zinc-900/60 backdrop-blur-xl shadow-xl hover:border-amber-500/30 transition-all rounded-2xl">
+                                <CardContent className="p-5">
                                     <div className="flex justify-between items-center mb-3">
-                                        <h3 className="font-bold text-sm text-gray-950 dark:text-white flex items-center gap-1.5">
-                                            <span className="flex h-2 w-2 rounded-full bg-indigo-500 animate-pulse" />
+                                        <h3 className="font-bold text-sm text-white flex items-center gap-2">
+                                            <Sparkles className="h-4 w-4 text-amber-400 animate-pulse" />
                                             Profile Strength
                                         </h3>
-                                        <span className="text-sm font-extrabold text-indigo-600 dark:text-indigo-400">
+                                        <span className="text-xs font-mono font-extrabold text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2.5 py-0.5 rounded-full">
                                             {profileStrengthScore}%
                                         </span>
                                     </div>
                                     
                                     {/* Progress Bar */}
-                                    <div className="w-full h-2 bg-gray-200 dark:bg-gray-800 rounded-full overflow-hidden mb-4">
+                                    <div className="w-full h-2.5 bg-zinc-950/80 rounded-full border border-zinc-800/80 p-0.5 overflow-hidden mb-4">
                                         <div 
-                                            className="h-full bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 transition-all duration-500" 
+                                            className="h-full rounded-full bg-gradient-to-r from-amber-500 via-orange-500 to-emerald-500 transition-all duration-700 shadow-[0_0_10px_rgba(245,158,11,0.3)]" 
                                             style={{ width: `${profileStrengthScore}%` }}
                                         />
                                     </div>
@@ -1404,30 +1458,38 @@ export default function Profile() {
                                     {/* Suggestions list */}
                                     {profileStrengthSuggestions.length > 0 ? (
                                         <div className="space-y-2.5">
-                                            <p className="text-[10px] font-semibold text-gray-400 dark:text-gray-500 uppercase tracking-wider">Suggested actions</p>
-                                            {profileStrengthSuggestions.map((suggestion, index) => (
-                                                <div key={index} className="flex items-start gap-2 text-xs text-gray-600 dark:text-gray-300">
-                                                    <span className="inline-flex items-center justify-center w-4 h-4 rounded-full bg-indigo-50 dark:bg-indigo-955 text-indigo-600 dark:text-indigo-400 text-[10px] font-bold mt-0.5">
-                                                        +
-                                                    </span>
-                                                    <div className="flex-1">
-                                                        <span className="font-medium text-gray-700 dark:text-gray-200">{suggestion.label}</span>
-                                                        <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-0.5">{suggestion.help}</p>
+                                            <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Suggested Actions</p>
+                                            <div className="space-y-2">
+                                                {profileStrengthSuggestions.map((suggestion, index) => (
+                                                    <div 
+                                                        key={index} 
+                                                        onClick={() => navigate('/settings/profile')}
+                                                        className="flex items-start gap-2.5 p-2.5 rounded-xl bg-zinc-950/40 border border-zinc-800/60 hover:border-amber-500/30 hover:bg-zinc-900/80 transition-all cursor-pointer group"
+                                                    >
+                                                        <span className="inline-flex items-center justify-center w-5 h-5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-400 text-xs font-bold shrink-0 mt-0.5 group-hover:scale-105 transition-transform">
+                                                            +
+                                                        </span>
+                                                        <div className="flex-1 min-w-0">
+                                                            <span className="font-semibold text-xs text-zinc-200 group-hover:text-white transition-colors">{suggestion.label}</span>
+                                                            <p className="text-[11px] text-zinc-400 mt-0.5 leading-relaxed">{suggestion.help}</p>
+                                                        </div>
                                                     </div>
-                                                </div>
-                                            ))}
+                                                ))}
+                                            </div>
                                             <Button 
-                                                variant="outline" 
                                                 size="sm" 
-                                                className="w-full text-xs mt-2 border-indigo-200 hover:bg-indigo-50 hover:text-indigo-650 dark:border-indigo-900/30 dark:hover:bg-indigo-950/30 dark:hover:text-indigo-400 transition-colors"
+                                                className="w-full text-xs mt-3 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-zinc-950 font-bold shadow-md shadow-amber-500/10 border-0 transition-all h-9"
                                                 onClick={() => navigate('/settings/profile')}
                                             >
-                                                Update Profile
+                                                Complete Profile
                                             </Button>
                                         </div>
                                     ) : (
                                         <div className="text-center py-2">
-                                            <p className="text-xs text-green-600 dark:text-green-400 font-medium">Your profile is complete and optimized.</p>
+                                            <p className="text-xs text-emerald-400 font-semibold flex items-center justify-center gap-1.5">
+                                                <CheckCircle className="h-4 w-4 text-emerald-400" />
+                                                Your profile is complete and optimized.
+                                            </p>
                                         </div>
                                     )}
                                 </CardContent>
@@ -1978,7 +2040,8 @@ export default function Profile() {
                                                         </p>
                                                         <div className="flex justify-between items-center mt-3 pt-3 border-t border-gray-100 dark:border-gray-800">
                                                             <div className="flex flex-wrap gap-2">
-                                                                {project.tags?.slice(0, 3).map((tag, i) => (
+                                                                {project.tags?.slice(0, 3).map((tag: string, i: number) => (
+
                                                                     <Badge
                                                                         key={i}
                                                                         className="border-0 bg-white/5 text-white/85 text-xs px-2.5 py-0.5 rounded-md"
@@ -2248,6 +2311,27 @@ export default function Profile() {
                 )
             })()}
 
+            {/* Modals for Streak Leaderboard & Share Flex Card */}
+            {streakMetrics && profile && (
+                <>
+                    <StreakLeaderboard
+                        isOpen={isLeaderboardOpen}
+                        onClose={() => setIsLeaderboardOpen(false)}
+                        currentUserId={profile.id}
+                    />
+                    <ShareFlexModal
+                        isOpen={isShareModalOpen}
+                        onClose={() => setIsShareModalOpen(false)}
+                        metrics={streakMetrics}
+                        activityData={activityData}
+                        userName={`${profile.firstName} ${profile.lastName}`}
+                        userHandle={profile.username ? `@${profile.username}` : `@${profile.firstName.toLowerCase()}_grind`}
+                        userPhoto={profile.photoURL || currentUser?.photoURL || undefined}
+
+                    />
+                </>
+            )}
+
         </DashboardLayout>
     )
-}
+}

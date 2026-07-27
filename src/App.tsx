@@ -45,6 +45,7 @@ const Register = lazyWithRetry(() => import('@/pages/Register').then(module => (
 const ForgotPassword = lazyWithRetry(() => import('@/pages/ForgotPassword').then(module => ({ default: module.ForgotPassword })))
 const Dashboard = lazyWithRetry(() => import('@/pages/Dashboard').then(module => ({ default: module.Dashboard })))
 const Discover = lazyWithRetry(() => import('@/pages/Discover').then(module => ({ default: module.Discover })))
+const TrendingTopics = lazyWithRetry(() => import('@/pages/TrendingTopics').then(module => ({ default: module.TrendingTopics })))
 const Projects = lazyWithRetry(() => import('@/pages/Projects').then(module => ({ default: module.Projects })))
 const Profile = lazyWithRetry(() => import('@/pages/Profile'))
 const MyProjects = lazyWithRetry(() => import('@/pages/MyProjects'))
@@ -161,6 +162,14 @@ function AppRoutes() {
               element={
                 <ErrorBoundary>
                   <Discover />
+                </ErrorBoundary>
+              }
+            />
+            <Route
+              path="/trending-topics"
+              element={
+                <ErrorBoundary>
+                  <TrendingTopics />
                 </ErrorBoundary>
               }
             />

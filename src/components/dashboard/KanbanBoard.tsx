@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
     DndContext, DragOverlay, closestCorners,
     KeyboardSensor, PointerSensor,
@@ -17,22 +17,30 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Textarea } from '@/components/ui/textarea'
 import {
+    Select, SelectContent, SelectItem,
+    SelectTrigger, SelectValue,
+} from '@/components/ui/select'
+import {
     Dialog, DialogContent, DialogHeader,
     DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/dialog'
-import { Plus, AlertTriangle, Lock, ChevronLeft, ChevronRight, Send } from 'lucide-react'
+import {
+    Plus, AlertTriangle, Lock, ChevronLeft, ChevronRight,
+    Send, Calendar, Clock, MessageSquare,
+} from 'lucide-react'
 import {
     collection, query, onSnapshot,
     addDoc, updateDoc, doc, serverTimestamp,
     getDoc, increment,
 } from 'firebase/firestore'
 import { db, auth } from '@/lib/firebase'
+import { clearCache } from '@/lib/queryUtils'
 import { useParams } from 'react-router-dom'
 import { useAuth } from '@/hooks/use-auth'
 import { usePermissions } from '@/hooks/use-permissions'
 import { useToast } from '@/hooks/use-toast'
 import { updateCollaborativeActivity } from '@/services/analyticsService'
-import { isPast } from 'date-fns'
+import { isPast, format } from 'date-fns'
 import { Skeleton } from '@/components/ui/skeleton'
 
 // ─── Mobile detection ─────────────────────────────────────────────────────────
@@ -81,60 +89,195 @@ function toDate(val: any): Date {
     return new Date(val)
 }
 
-// ─── Submit-for-Review dialog ─────────────────────────────────────────────────
-// Shown when a member drags a task into the Review column
+// ─── Status & Priority badge styles ──────────────────────────────────────────
+const PRIORITY_BADGE_COLORS: Record<string, string> = {
+    low:    'bg-green-500/10 text-green-600 border-green-500/20',
+    medium: 'bg-yellow-500/10 text-yellow-600 border-yellow-500/20',
+    high:   'bg-orange-500/10 text-orange-600 border-orange-500/20',
+    urgent: 'bg-red-500/10 text-red-600 border-red-500/20',
+}
+
+const STATUS_LABELS: Record<TaskStatus, string> = {
+    backlog:       'Backlog',
+    todo:          'To Do',
+    'in-progress': 'In Progress',
+    review:        'In Review',
+    done:          'Done',
+}
+
+const STATUS_BADGE_COLORS: Record<TaskStatus, string> = {
+    backlog:       'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
+    todo:          'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300',
+    'in-progress': 'bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300',
+    review:        'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300',
+    done:          'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300',
+}
+
+// ─── Update Task Status Modal ────────────────────────────────────────────────
+// Shown when a task is moved/submitted for review in Kanban board
 interface SubmitReviewDialogProps {
     task:         Task | null
     open:         boolean
+    targetStatus?: TaskStatus
     onOpenChange: (v: boolean) => void
-    onSubmit:     (note: string) => Promise<void>
+    onSubmit:     (status: TaskStatus, note: string) => Promise<void>
 }
 
-function SubmitReviewDialog({ task, open, onOpenChange, onSubmit }: SubmitReviewDialogProps) {
-    const [note,    setNote]    = useState('')
-    const [saving,  setSaving]  = useState(false)
+function SubmitReviewDialog({ task, open, targetStatus = 'review', onOpenChange, onSubmit }: SubmitReviewDialogProps) {
+    const [newStatus, setNewStatus] = useState<TaskStatus>(targetStatus)
+    const [note,      setNote]      = useState('')
+    const [saving,    setSaving]    = useState(false)
 
-    // Reset note each time dialog opens
     useEffect(() => {
-        if (open) setNote('')
-    }, [open])
+        if (open) {
+            setNewStatus(targetStatus || task?.status || 'review')
+            setNote('')
+        }
+    }, [open, targetStatus, task])
 
     if (!task) return null
+
+    const dueDate   = toDate(task.dueDate)
+    const isOverdue = dueDate && isPast(dueDate) && task.status !== 'done'
+    const statusChanged = newStatus !== task.status
 
     const handleSubmit = async () => {
         setSaving(true)
         try {
-            await onSubmit(note)
+            await onSubmit(newStatus, note)
             onOpenChange(false)
         } finally {
             setSaving(false)
         }
     }
 
+    const MEMBER_STATUSES: TaskStatus[] = ['backlog', 'todo', 'in-progress', 'review']
+
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="sm:max-w-[460px]">
+            <DialogContent className="sm:max-w-[480px]">
                 <DialogHeader>
                     <DialogTitle className="flex items-center gap-2">
-                        <Send className="h-4 w-4 text-purple-500" />
-                        Submit for Review
+                        <span>Update Task Status</span>
+                        <Badge
+                            variant="outline"
+                            className={`text-xs ${PRIORITY_BADGE_COLORS[task.priority] ?? ''}`}
+                        >
+                            {task.priority}
+                        </Badge>
                     </DialogTitle>
                     <DialogDescription>
-                        You are submitting <strong>"{task.title}"</strong> for the project
-                        owner to review. Add a note about what you completed.
+                        Update the status of your assigned task and leave a note for the project owner.
                     </DialogDescription>
                 </DialogHeader>
 
-                <div className="space-y-3 py-1">
-                    <div className="space-y-1.5">
+                <div className="space-y-4 py-2">
+                    {/* Task info card */}
+                    <div className="bg-muted/50 rounded-lg p-3 space-y-2">
+                        <h3 className="font-semibold text-sm">{task.title}</h3>
+                        {task.description && (
+                            <p className="text-xs text-muted-foreground line-clamp-2">
+                                {task.description}
+                            </p>
+                        )}
+                        <div className="flex flex-wrap gap-2">
+                            {dueDate && (
+                                <div className={`flex items-center gap-1 text-xs ${
+                                    isOverdue ? 'text-destructive font-medium' : 'text-muted-foreground'
+                                }`}>
+                                    <Calendar className="h-3 w-3" />
+                                    Due: {format(dueDate, 'MMM d, yyyy')}
+                                    {isOverdue && ' (Overdue!)'}
+                                </div>
+                            )}
+                            {task.timeEstimate && (
+                                <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                                    <Clock className="h-3 w-3" />
+                                    {task.timeEstimate}h estimated
+                                </div>
+                            )}
+                        </div>
+                        {(task.tags ?? []).length > 0 && (
+                            <div className="flex flex-wrap gap-1">
+                                {(task.tags ?? []).map(tag => (
+                                    <span key={tag} className="text-xs bg-muted px-1.5 py-0.5 rounded-full text-muted-foreground">
+                                        {tag}
+                                    </span>
+                                ))}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Previous review feedback if changes were requested */}
+                    {(task as any).reviewStatus === 'changes_requested' && (task as any).reviewNote && (
+                        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3 space-y-1">
+                            <p className="text-xs font-semibold text-red-700 dark:text-red-400 flex items-center gap-1">
+                                <MessageSquare className="h-3 w-3" />
+                                Owner's Feedback:
+                            </p>
+                            <p className="text-sm text-red-700 dark:text-red-300">
+                                {(task as any).reviewNote}
+                            </p>
+                        </div>
+                    )}
+
+                    {/* New Status selection */}
+                    <div className="space-y-2">
+                        <label className="text-sm font-medium">New Status</label>
+                        <Select value={newStatus} onValueChange={(v) => setNewStatus(v as TaskStatus)}>
+                            <SelectTrigger>
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {MEMBER_STATUSES.map(s => (
+                                    <SelectItem key={s} value={s}>
+                                        <div className="flex items-center gap-2">
+                                            <span className={`inline-block w-2 h-2 rounded-full ${
+                                                s === 'review' ? 'bg-purple-500' :
+                                                s === 'in-progress' ? 'bg-orange-500' :
+                                                s === 'todo' ? 'bg-blue-500' :
+                                                'bg-slate-400'
+                                            }`} />
+                                            {STATUS_LABELS[s]}
+                                            {s === 'review' && (
+                                                <span className="text-xs text-muted-foreground ml-1">
+                                                    (notifies owner)
+                                                </span>
+                                            )}
+                                        </div>
+                                    </SelectItem>
+                                ))}
+                                <div className="flex items-center gap-2 px-2 py-1.5 text-sm text-muted-foreground/50 cursor-not-allowed select-none">
+                                    <span className="inline-block w-2 h-2 rounded-full bg-green-300" />
+                                    Done
+                                    <span className="text-xs ml-1">(owner approval only)</span>
+                                </div>
+                            </SelectContent>
+                        </Select>
+
+                        {statusChanged && (
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                <Badge variant="outline" className={STATUS_BADGE_COLORS[task.status]}>
+                                    {STATUS_LABELS[task.status]}
+                                </Badge>
+                                <ChevronRight className="h-3 w-3" />
+                                <Badge variant="outline" className={STATUS_BADGE_COLORS[newStatus]}>
+                                    {STATUS_LABELS[newStatus]}
+                                </Badge>
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Note to owner */}
+                    <div className="space-y-2">
                         <label className="text-sm font-medium">
-                            Your Note{' '}
+                            Note{' '}
                             <span className="text-muted-foreground font-normal">
                                 (tell the owner what you did)
                             </span>
                         </label>
                         <Textarea
-                            placeholder="e.g., Implemented the feature, all tests passing..."
+                            placeholder="e.g., Implemented the API endpoint, all tests passing..."
                             value={note}
                             onChange={e => setNote(e.target.value)}
                             rows={3}
@@ -145,29 +288,19 @@ function SubmitReviewDialog({ task, open, onOpenChange, onSubmit }: SubmitReview
                         </p>
                     </div>
 
-                    <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200
-                                    dark:border-blue-800 rounded-lg p-3 flex items-start gap-2">
+                    <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3 flex items-start gap-2">
                         <Send className="h-4 w-4 text-blue-600 shrink-0 mt-0.5" />
                         <p className="text-xs text-blue-700 dark:text-blue-300">
-                            The project owner will be notified to review your work.
-                            They can approve it or request changes.
+                            The project owner will be notified to review your work. They can approve it (→ Done) or request changes. You cannot mark it Done yourself.
                         </p>
                     </div>
                 </div>
 
                 <DialogFooter>
-                    <Button
-                        variant="outline"
-                        onClick={() => onOpenChange(false)}
-                        disabled={saving}
-                    >
+                    <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
                         Cancel
                     </Button>
-                    <Button
-                        onClick={handleSubmit}
-                        disabled={saving}
-                        className="bg-purple-600 hover:bg-purple-700 text-white"
-                    >
+                    <Button onClick={handleSubmit} disabled={saving} className="bg-purple-600 hover:bg-purple-700 text-white">
                         {saving ? 'Submitting...' : (
                             <>
                                 <Send className="h-4 w-4 mr-2" />
@@ -414,12 +547,18 @@ export function KanbanBoard({ readOnly = false, tasks: injectedTasks }: KanbanBo
         loading: permLoading,
     } = usePermissions()
 
-    // ── Local tasks — only used when parent does NOT inject ───────────────────
-    const [localTasks, setLocalTasks] = useState<Task[]>([])
+    // ── Local tasks — initialized with injected tasks or fetched from Firestore ─
+    const [localTasks, setLocalTasks] = useState<Task[]>(injectedTasks ?? [])
     const [loading,    setLoading]    = useState(!injectedTasks)
 
     // ── Resolved task list ─────────────────────────────────────────────────────
-    const tasks = injectedTasks ?? localTasks
+    const tasks = localTasks
+
+    // ── Track whether a drag or save is in progress (ref = no re-render) ─────
+    // This prevents the injectedTasks sync effect from overwriting optimistic
+    // local state while the user is mid-drag or while Firestore write is pending.
+    const isDraggingRef = useRef(false)
+    const isSavingRef   = useRef(false)
 
     // ── Drag / dialog state ───────────────────────────────────────────────────
     const [prevTasks,     setPrevTasks]     = useState<Task[]>([])
@@ -446,6 +585,8 @@ export function KanbanBoard({ readOnly = false, tasks: injectedTasks }: KanbanBo
         const unsub = onSnapshot(
             q,
             snap => {
+                // Skip sync while dragging or saving to avoid reverting optimistic state
+                if (isDraggingRef.current || isSavingRef.current) return
                 setLocalTasks(
                     snap.docs.map(d => ({ id: d.id, ...d.data() }) as Task)
                 )
@@ -459,9 +600,13 @@ export function KanbanBoard({ readOnly = false, tasks: injectedTasks }: KanbanBo
         return () => unsub()
     }, [projectId, user, injectedTasks])
 
-    // ── Clear loading when injected tasks arrive ──────────────────────────────
+    // ── Sync injected tasks only when NOT dragging / saving ──────────────────
+    // Prevents parent re-renders from reverting an in-flight optimistic drag.
     useEffect(() => {
-        if (injectedTasks) setLoading(false)
+        if (injectedTasks && !isDraggingRef.current && !isSavingRef.current) {
+            setLocalTasks(injectedTasks)
+            setLoading(false)
+        }
     }, [injectedTasks])
 
     // ── Summary stats ──────────────────────────────────────────────────────────
@@ -480,15 +625,17 @@ export function KanbanBoard({ readOnly = false, tasks: injectedTasks }: KanbanBo
     )
 
     // ── Per-task drag permission ───────────────────────────────────────────────
-    // Owner/Admin  → can drag any task
-    // Member       → can only drag tasks assigned to them
-    // readOnly     → nobody drags
+    // Owner/Admin → can drag any task
+    // Assigned Member → can drag tasks assigned to them only
     const canDragTask = useCallback((task: Task): boolean => {
-        if (readOnly) return false
         if (isOwnerOrAdmin) return true
-        if (isMember && task.assigneeId === user?.uid) return true
+        if (isMember && user) {
+            const isAssignee = (task.assigneeId && task.assigneeId === user.uid) ||
+                               (task.assignee?.id && task.assignee.id === user.uid)
+            return !!isAssignee
+        }
         return false
-    }, [readOnly, isOwnerOrAdmin, isMember, user])
+    }, [isOwnerOrAdmin, isMember, user])
 
     // ── Can create new tasks ───────────────────────────────────────────────────
     const canCreate = !readOnly && isOwnerOrAdmin
@@ -512,6 +659,7 @@ export function KanbanBoard({ readOnly = false, tasks: injectedTasks }: KanbanBo
                 status:    newStatus,
                 updatedAt: serverTimestamp(),
             })
+            clearCache(projectId)
 
             if (user) {
                 updateCollaborativeActivity(user.uid, projectId)
@@ -554,55 +702,79 @@ export function KanbanBoard({ readOnly = false, tasks: injectedTasks }: KanbanBo
             }
         } catch (err) {
             console.error('Error writing status directly:', err)
+            throw err   // ← rethrow so handleDragEnd can revert optimistic state
         }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // Helper: submit a task for review (member path — called from dialog)
+    // Helper: submit a task status update / review (called from dialog)
     // ─────────────────────────────────────────────────────────────────────────
-    const submitTaskForReview = async (task: Task, note: string) => {
+    const submitTaskForReview = async (task: Task, targetStatus: TaskStatus, note: string) => {
         if (!projectId || !user) return
 
-        await updateDoc(
-            doc(db, 'projects', projectId, 'tasks', task.id),
-            {
-                status:       'review',
-                statusNote:   note.trim() || null,
-                reviewStatus: 'pending_review',
-                submittedAt:  serverTimestamp(),
-                submittedBy:  user.uid,
-                reviewNote:   null,
-                reviewedBy:   null,
-                reviewedAt:   null,
-                updatedAt:    serverTimestamp(),
-            }
+        // ── Optimistically move card to target column immediately ──────────────
+        setLocalTasks(prev =>
+            prev.map(t => t.id === task.id ? { ...t, status: targetStatus } : t)
         )
 
-        // Activity log
-        await addDoc(
-            collection(db, 'projects', projectId, 'activities'),
-            {
-                userId:      user.uid,
-                type:        'task_updated',
-                description: `${user.displayName || 'Member'} submitted "${task.title}" for review${note ? `: "${note}"` : ''}`,
-                timestamp:   serverTimestamp(),
-                targetId:    task.id,
-                targetType:  'task',
-            }
-        )
+        // ── Block the injectedTasks sync while the write is in flight ──────────
+        isSavingRef.current = true
+        try {
+            await updateDoc(
+                doc(db, 'projects', projectId, 'tasks', task.id),
+                {
+                    status:       targetStatus,
+                    statusNote:   note.trim() || null,
+                    reviewStatus: targetStatus === 'review' ? 'pending_review' : null,
+                    submittedAt:  serverTimestamp(),
+                    submittedBy:  user.uid,
+                    reviewNote:   null,
+                    reviewedBy:   null,
+                    reviewedAt:   null,
+                    updatedAt:    serverTimestamp(),
+                }
+            )
 
-        updateCollaborativeActivity(user.uid, projectId)
+            // Activity log
+            await addDoc(
+                collection(db, 'projects', projectId, 'activities'),
+                {
+                    userId:      user.uid,
+                    type:        'task_updated',
+                    description: `${user.displayName || 'Member'} moved "${task.title}" to ${STATUS_LABELS[targetStatus]}${note ? `: "${note}"` : ''}`,
+                    timestamp:   serverTimestamp(),
+                    targetId:    task.id,
+                    targetType:  'task',
+                }
+            )
 
-        toast({
-            title:       'Submitted for review!',
-            description: 'The project owner will review your work.',
-        })
+            updateCollaborativeActivity(user.uid, projectId)
+
+            toast({
+                title:       targetStatus === 'review' ? 'Submitted for review!' : 'Task status updated!',
+                description: targetStatus === 'review' ? 'The project owner will review your work.' : `Status changed to ${STATUS_LABELS[targetStatus]}.`,
+            })
+        } catch (err) {
+            console.error('Failed to submit task for review:', err)
+            // Revert optimistic update on failure
+            setLocalTasks(prev =>
+                prev.map(t => t.id === task.id ? { ...t, status: task.status } : t)
+            )
+            toast({
+                title:       'Error',
+                description: 'Could not submit task. Please try again.',
+                variant:     'destructive',
+            })
+        } finally {
+            isSavingRef.current = false
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
     // Drag handlers
     // ─────────────────────────────────────────────────────────────────────────
     const handleDragStart = (event: DragStartEvent) => {
+        isDraggingRef.current = true
         setPrevTasks([...tasks])
         setActiveId(event.active.id as string)
     }
@@ -641,6 +813,7 @@ export function KanbanBoard({ readOnly = false, tasks: injectedTasks }: KanbanBo
 
     const handleDragEnd = async (event: DragEndEvent) => {
         const { active, over } = event
+        isDraggingRef.current = false
         setActiveId(null)
         if (!over) return
 
@@ -660,28 +833,23 @@ export function KanbanBoard({ readOnly = false, tasks: injectedTasks }: KanbanBo
         const originalStatus = prevTasks.find(t => t.id === active.id)?.status
         if (originalStatus === newStatus) return
 
-        // ── Members: enforce review workflow ───────────────────────────────────
-        if (isMember) {
-            // Block members from dragging directly to DONE
-            if (newStatus === 'done') {
-                toast({
-                    title:       '🔒 Approval required',
-                    description: 'Move this task to Review first. The project owner must approve it before it can be marked Done.',
-                    variant:     'destructive',
-                })
-                setLocalTasks(prevTasks)
-                return
-            }
+        // ── When task is moved to REVIEW → open Update Task Status modal for note ─
+        if (newStatus === 'review') {
+            setLocalTasks(prevTasks)
+            setReviewPendingTask(activeTask)
+            setReviewPendingStatus('review')
+            setReviewDialogOpen(true)
+            return
+        }
 
-            // When member drags to REVIEW → open submit dialog
-            if (newStatus === 'review') {
-                // Revert visual state to avoid confusion during dialog
-                setLocalTasks(prevTasks)
-                setReviewPendingTask(activeTask)
-                setReviewPendingStatus('review')
-                setReviewDialogOpen(true)
-                return
-            }
+        if (isMember && newStatus === 'done') {
+            toast({
+                title:       '🔒 Approval required',
+                description: 'Move this task to Review first. The project owner must approve it before it can be marked Done.',
+                variant:     'destructive',
+            })
+            setLocalTasks(prevTasks)
+            return
         }
 
         // ── WIP check ─────────────────────────────────────────────────────────
@@ -698,7 +866,9 @@ export function KanbanBoard({ readOnly = false, tasks: injectedTasks }: KanbanBo
             return
         }
 
-        // ── Write to Firestore (owner/admin direct path) ───────────────────────
+
+        // ── Write to Firestore ──────────────────────────────────────────────────
+        isSavingRef.current = true
         try {
             if (projectId) {
                 await writeStatusDirectly(active.id as string, newStatus)
@@ -726,8 +896,11 @@ export function KanbanBoard({ readOnly = false, tasks: injectedTasks }: KanbanBo
                 variant:     'destructive',
             })
             setLocalTasks(prevTasks)
+        } finally {
+            isSavingRef.current = false
         }
     }
+
 
     // ─────────────────────────────────────────────────────────────────────────
     // Save task — owner/admin only
@@ -1040,17 +1213,18 @@ export function KanbanBoard({ readOnly = false, tasks: injectedTasks }: KanbanBo
                 readOnly={dialogReadOnly}
             />
 
-            {/* ── Submit-for-Review dialog (member only) ── */}
+            {/* ── Submit-for-Review dialog ── */}
             <SubmitReviewDialog
                 task={reviewPendingTask}
                 open={reviewDialogOpen}
+                targetStatus={reviewPendingStatus}
                 onOpenChange={(v) => {
                     setReviewDialogOpen(v)
                     if (!v) setReviewPendingTask(null)
                 }}
-                onSubmit={async (note) => {
+                onSubmit={async (status, note) => {
                     if (!reviewPendingTask) return
-                    await submitTaskForReview(reviewPendingTask, note)
+                    await submitTaskForReview(reviewPendingTask, status, note)
                 }}
             />
         </div>

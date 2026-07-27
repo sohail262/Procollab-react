@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { SEOHead, buildBreadcrumbSchema } from '@/components/seo/SEOHead'
 import { DashboardLayout } from '@/components/layout/DashboardLayout'
@@ -28,6 +28,8 @@ import {
     Check,
     BookOpen,
     Loader2,
+    Sparkles,
+    ArrowRight,
     Bot,
     Globe,
     Cloud,
@@ -136,6 +138,7 @@ export function Discover() {
     // ── Pagination ─────────────────────────────────────────────────────────────
     const [peopleState, peopleActions] = usePagination<Person>()
     const [topicsState, topicsActions] = usePagination<TrendingTopic>()
+    const masterTopicsRef = useRef<TrendingTopic[] | null>(null)
 
     const disciplines = [
         'All Disciplines',
@@ -215,23 +218,28 @@ export function Discover() {
 
     const loadMoreTopics = useCallback(async (): Promise<boolean> => {
         try {
-            const topics = await loadTrendingTopics()
-            const currentIndex = topicsState.lastDoc
-                ? parseInt(topicsState.lastDoc.id) || 0
-                : 0
+            let masterPool = masterTopicsRef.current
+            if (!masterPool || masterPool.length === 0) {
+                masterPool = await loadTrendingTopics()
+                masterTopicsRef.current = masterPool
+            }
+
+            const currentIndex = topicsState.items.length
             const pageSize = 9
             const endIndex = currentIndex + pageSize
-            const paginatedTopics = topics.slice(currentIndex, endIndex)
-            const hasMore = endIndex < topics.length
+            const paginatedTopics = masterPool.slice(currentIndex, endIndex)
+            const hasMore = endIndex < masterPool.length
+
             if (paginatedTopics.length > 0) {
                 topicsActions.addItems(paginatedTopics, { id: endIndex.toString() } as any)
             }
+            topicsActions.setHasMore(hasMore)
             return hasMore
         } catch (error) {
             console.error('Error loading more topics:', error)
             return false
         }
-    }, [topicsState.lastDoc, topicsActions])
+    }, [topicsState.items.length, topicsActions])
 
     // ── Infinite scroll sentinels ─────────────────────────────────────────────
     const peopleScroll = useInfiniteScroll(loadMorePeople, { enabled: !peopleState.loading })
@@ -312,14 +320,7 @@ export function Discover() {
             checkConnectionStatuses()
 
             // ── Load topics in background — doesn't block people display ──
-            loadTrendingTopics().then(topics => {
-                const initialTopics = topics.slice(0, 9)
-                topicsActions.setItems(initialTopics)
-                topicsActions.setHasMore(topics.length > 9)
-                if (topics.length > 9) {
-                    topicsActions.addItems([], { id: '9' } as any)
-                }
-            }).catch(error => {
+            fetchAndInitTopics().catch(error => {
                 console.error('Error loading trending topics:', error)
             })
         } catch (error) {
@@ -329,7 +330,7 @@ export function Discover() {
     }
 
     // ── Trending topics ───────────────────────────────────────────────────────
-    const fetchTopHackerNewsStories = async (count = 20) => {
+    const fetchTopHackerNewsStories = async (count = 6) => {
         try {
             const response = await fetch(
                 `https://hacker-news.firebaseio.com/v0/topstories.json`
@@ -450,6 +451,11 @@ export function Discover() {
         }
 
         return stories.map(story => {
+            const cleanSlug = (s: string) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '_')
+            const topicId = story.id
+                ? `newsapi_${story.id}`
+                : `newsapi_${cleanSlug(story.url || story.title)}`
+
             if ((story.source === 'newsapi' || story.source === 'currents') && story._newsCategory) {
                 const isHealth = story._newsCategory === 'health'
                 let tags: string[] = []
@@ -466,7 +472,7 @@ export function Discover() {
                 }
                 if (description.length > 150) description = description.substring(0, 150) + '...'
                 return {
-                    id: story.id,
+                    id: topicId,
                     title: story.title,
                     description,
                     url: story.url,
@@ -512,8 +518,13 @@ export function Discover() {
             }
             if (description.length > 150) description = description.substring(0, 150) + '...'
 
+            const fallbackId = cleanSlug(story.url || story.title)
+            const genericTopicId = story.source
+                ? `${story.source}_${story.id || fallbackId}`
+                : `topic_${fallbackId}`
+
             return {
-                id: story.source ? `${story.source}_${story.id}` : `${story.id || Date.now()}`,
+                id: genericTopicId,
                 title: story.title,
                 description,
                 url: story.url,
@@ -527,14 +538,29 @@ export function Discover() {
         })
     }
 
-    const loadTrendingTopics = async () => {
+    const loadTrendingTopics = async (forceFresh = false): Promise<TrendingTopic[]> => {
         try {
+            if (forceFresh) {
+                sessionStorage.removeItem('trending_topics_cache')
+            } else {
+                // Check 30-minute sessionStorage cache first to avoid repetitive external API fetches
+                const cachedData = sessionStorage.getItem('trending_topics_cache')
+                if (cachedData) {
+                    try {
+                        const parsed = JSON.parse(cachedData)
+                        if (Date.now() - parsed.timestamp < 30 * 60 * 1000 && Array.isArray(parsed.topics) && parsed.topics.length > 0) {
+                            return parsed.topics
+                        }
+                    } catch { /* ignore corrupted cache */ }
+                }
+            }
+
             const [hackerNewsStories, devToArticles, healthArticles, lawArticles] =
                 await Promise.all([
-                    fetchTopHackerNewsStories(20).catch(() => []),
+                    fetchTopHackerNewsStories(12).catch(() => []),
                     fetchDevToArticles(10).catch(() => []),
-                    fetchNewsAPIArticles('health', 'Health', 8).catch(() => []),
-                    fetchNewsAPIArticles('science', 'Science & Law', 8).catch(() => [])
+                    fetchNewsAPIArticles('health', 'Health', 6).catch(() => []),
+                    fetchNewsAPIArticles('science', 'Science & Law', 6).catch(() => [])
                 ])
 
             const allStories = [
@@ -546,31 +572,46 @@ export function Discover() {
             if (allStories.length === 0) return []
 
             const topics = createTopicsFromStories(allStories)
-            const unique = topics.filter((t, i, self) =>
-                i === self.findIndex(x => x.title === t.title)
-            )
-            const withIds = unique.map((t, i) => ({
-                ...t,
-                id: `${t.source}_${t.id}_${Date.now()}_${i}`
-            }))
-            return withIds.sort(() => 0.5 - Math.random())
+            const seen = new Set<string>()
+            const unique: TrendingTopic[] = []
+            for (const topic of topics) {
+                const key = (topic.url || topic.title).toLowerCase().trim()
+                if (key && !seen.has(key)) {
+                    seen.add(key)
+                    unique.push(topic)
+                }
+            }
+            const sorted = unique.sort(() => 0.5 - Math.random())
+            try {
+                sessionStorage.setItem('trending_topics_cache', JSON.stringify({
+                    timestamp: Date.now(),
+                    topics: sorted
+                }))
+            } catch { /* storage full / private browsing */ }
+            return sorted
         } catch (error) {
             console.error('Error loading trending topics:', error)
             return []
         }
     }
 
+    const fetchAndInitTopics = useCallback(async (forceFresh = false) => {
+        const topics = await loadTrendingTopics(forceFresh)
+        masterTopicsRef.current = topics
+        const initialTopics = topics.slice(0, 9)
+        topicsActions.setItems(initialTopics)
+        topicsActions.setHasMore(topics.length > 9)
+        if (topics.length > 9) {
+            topicsActions.addItems([], { id: '9' } as any)
+        }
+    }, [topicsActions])
+
     const handleRefreshTopics = async () => {
         setRefreshingTopics(true)
         try {
             topicsActions.reset()
-            const topics = await loadTrendingTopics()
-            const initialTopics = topics.slice(0, 9)
-            topicsActions.setItems(initialTopics)
-            topicsActions.setHasMore(topics.length > 9)
-            if (topics.length > 9) {
-                topicsActions.addItems([], { id: '9' } as any)
-            }
+            masterTopicsRef.current = null
+            await fetchAndInitTopics(true)
         } catch (error) {
             console.error('Error refreshing topics:', error)
         } finally {
@@ -966,111 +1007,6 @@ export function Discover() {
                                     className="px-6 py-2"
                                 >
                                     Load More Collaborators
-                                </Button>
-                            )}
-                        </div>
-                    )}
-                </div>
-            </section>
-
-            {/* ── Trending Topics ── */}
-            <section className="mb-8">
-                <div className="flex flex-wrap justify-between items-center gap-2 mb-6">
-                    <h2 className="text-xl sm:text-2xl font-bold">Trending Topics</h2>
-                    <Button
-                        onClick={handleRefreshTopics}
-                        disabled={refreshingTopics}
-                        variant="outline"
-                        size="sm"
-                        className="gap-2"
-                    >
-                        <RefreshCw className={`h-4 w-4 ${refreshingTopics ? 'animate-spin' : ''}`} />
-                        Refresh
-                    </Button>
-                </div>
-
-                <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-                    {topicsState.items.length === 0 ? (
-                        <div className="col-span-full text-center py-8">
-                            <TrendingUp className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                            <p className="text-gray-500">No trending topics yet</p>
-                        </div>
-                    ) : (
-                        topicsState.items.map(topic => {
-                            const iconMap: Record<string, LucideIcon> = {
-                                bot: Bot,
-                                globe: Globe,
-                                cloud: Cloud,
-                                shield: ShieldCheck,
-                                barchart: BarChart2,
-                                link2: Link2,
-                                monitor: Monitor,
-                                heartpulse: HeartPulse,
-                                scale: Scale
-                            }
-                            const TopicIcon = iconMap[topic.icon] || Monitor
-                            return (
-                                <Card
-                                    key={topic.id}
-                                    className="hover:shadow-lg transition-all hover:border-blue-500"
-                                >
-                                    <CardContent className="p-3 sm:p-5">
-                                        <div className="flex items-center justify-between mb-2 sm:mb-3">
-                                            <TopicIcon className="h-4 w-4 sm:h-5 sm:w-5 text-gray-600 dark:text-gray-300" />
-                                            <Badge variant="secondary" className="text-[10px] sm:text-xs">
-                                                {topic.sourceLabel || topic.source}
-                                            </Badge>
-                                        </div>
-                                        <h3
-                                            className="text-xs sm:text-sm font-bold mb-1 sm:mb-2 line-clamp-2"
-                                            title={topic.title}
-                                        >
-                                            {topic.title}
-                                        </h3>
-                                        {topic.description && topic.description !== topic.title && (
-                                            <p className="text-[10px] sm:text-xs text-gray-600 dark:text-gray-300 mb-2 line-clamp-2 hidden sm:block">
-                                                {topic.description}
-                                            </p>
-                                        )}
-                                        <div className="flex flex-wrap gap-1 mb-2">
-                                            <Badge
-                                                variant="outline"
-                                                className="text-[10px] bg-gray-50 dark:bg-gray-800 px-1"
-                                            >
-                                                {topic.category}
-                                            </Badge>
-                                        </div>
-                                        <Button
-                                            variant="ghost"
-                                            size="sm"
-                                            onClick={() => window.open(topic.url, '_blank')}
-                                            className="text-blue-600 hover:text-blue-800 text-xs font-medium flex items-center gap-1 h-7 px-1 w-full justify-end"
-                                        >
-                                            Read <ExternalLink className="h-3 w-3" />
-                                        </Button>
-                                    </CardContent>
-                                </Card>
-                            )
-                        })
-                    )}
-
-                    {topicsState.hasMore && (
-                        <div
-                            ref={topicsScroll.sentinelRef}
-                            className="col-span-full flex justify-center py-8"
-                        >
-                            {topicsScroll.isLoading ? (
-                                <div className="flex items-center gap-2 text-gray-500">
-                                    <Loader2 className="h-4 w-4 animate-spin" />
-                                    <span>Loading more topics...</span>
-                                </div>
-                            ) : (
-                                <Button
-                                    variant="outline"
-                                    onClick={topicsScroll.loadMore}
-                                    className="px-6 py-2"
-                                >
-                                    Load More Topics
                                 </Button>
                             )}
                         </div>

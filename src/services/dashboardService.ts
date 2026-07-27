@@ -206,8 +206,11 @@ export async function loadRecommendedProjects(userId: string): Promise<Project[]
     if (!userId) return [];
 
     try {
-        // Get user profile - live & un-cached
-        const userDoc = await getDoc(doc(db, 'users', userId));
+        // Get user profile - cached for 5 minutes
+        const userDoc = await cachedGetDoc(doc(db, 'users', userId), {
+            cacheKey: `user_profile_${userId}`,
+            ttl: 300000
+        });
 
         if (!userDoc.exists()) return [];
 
@@ -233,20 +236,21 @@ export async function loadRecommendedProjects(userId: string): Promise<Project[]
         const userDiscipline = userData.discipline || '';
         const userRole = userData.role?.toLowerCase() || '';
 
-        // Get user's applied projects - live & un-cached
-        const appliedProjectsSnap = await getDocs(
-            query(collection(db, 'users', userId, 'applications'))
+        // Get user's applied projects - cached for 5 minutes
+        const appliedProjectsSnap = await cachedQuery(
+            query(collection(db, 'users', userId, 'applications')),
+            { cacheKey: `user_apps_${userId}`, ttl: 300000 }
         );
         const appliedProjectIds = new Set(appliedProjectsSnap.docs.map(d => d.data().projectId));
 
         // Convert user's discipline to kebab-case for the Firestore exact match query
         const kebabDiscipline = userDiscipline.toLowerCase().replace(/ & /g, '-').replace(/ /g, '-');
 
-        // Hybrid query: Fetch latest general projects AND latest projects matching user's discipline
+        // Hybrid query: Fetch latest general projects AND latest projects matching user's discipline (limit 12)
         const latestQuery = query(
             collection(db, 'projects'),
             orderBy('createdAt', 'desc'),
-            limit(40)
+            limit(12)
         );
 
         let disciplineQuery = null;
@@ -254,23 +258,23 @@ export async function loadRecommendedProjects(userId: string): Promise<Project[]
             disciplineQuery = query(
                 collection(db, 'projects'),
                 where('primaryDiscipline', '==', kebabDiscipline),
-                limit(40)
+                limit(12)
             );
         }
 
-        // Run fetches in parallel with individual error catching for safety
+        // Run fetches in parallel using cached queries with 10 minute TTL
         let latestSnap = null;
         let disciplineSnap = null;
 
         try {
-            latestSnap = await getDocs(latestQuery);
+            latestSnap = await cachedQuery(latestQuery, { cacheKey: 'rec_latest_projects_12', ttl: 600000 });
         } catch (err) {
             console.error('Error fetching latest projects for recommendations:', err);
         }
 
         if (disciplineQuery) {
             try {
-                disciplineSnap = await getDocs(disciplineQuery);
+                disciplineSnap = await cachedQuery(disciplineQuery, { cacheKey: `rec_disc_projects_${kebabDiscipline}_12`, ttl: 600000 });
             } catch (err) {
                 console.warn('Discipline-specific query failed (likely missing index). Falling back to general query.', err);
             }

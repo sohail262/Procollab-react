@@ -63,27 +63,10 @@ service cloud.firestore {
              );
     }
 
-    // ── Task field helpers ────────────────────────────────────────────────────
-
-    // Only status + updatedAt are changing (assignee drag-drop)
-    function isOnlyStatusUpdate() {
-      return request.resource.data.diff(resource.data)
-               .affectedKeys()
-               .hasOnly(['status', 'updatedAt']);
-    }
-
-    // Assignee updating status with review fields (MyTasksPanel)
-    function isAssigneeStatusUpdateWithReview() {
-      let allowedFields = ['status', 'updatedAt', 'statusNote', 'reviewStatus', 
-                          'submittedAt', 'submittedBy', 'reviewNote', 'reviewedBy', 'reviewedAt'];
-      return request.resource.data.diff(resource.data)
-               .affectedKeys()
-               .hasOnly(allowedFields);
-    }
-
-    // Task assigneeId matches current user
+    // Task assigneeId or assignee.id matches current user
     function isTaskAssignee() {
-      return resource.data.assigneeId == request.auth.uid;
+      return ('assigneeId' in resource.data && resource.data.assigneeId != null && resource.data.assigneeId == request.auth.uid) ||
+             ('assignee' in resource.data && resource.data.assignee != null && 'id' in resource.data.assignee && resource.data.assignee.id == request.auth.uid);
     }
 
     // ─── Invite Tokens ─────────────────────────────────────────────────────────
@@ -315,13 +298,13 @@ service cloud.firestore {
         );
 
         // UPDATE:
-        //   Owner / Admin / TeamLead → full update
-        //   Assignee (plain member)  → status + review fields OR just status + updatedAt
+        // Owner / Admin / TeamLead → can update any task
+        // Assigned Member → can update their own assigned task only
         allow update: if isValidUser() && (
           isAdmin()                    ||
           isProjectOwner(projectId)    ||
           isProjectTeamLead(projectId) ||
-          (isTaskAssignee() && (isOnlyStatusUpdate() || isAssigneeStatusUpdateWithReview()))
+          (isProjectTeamMember(projectId) && isTaskAssignee())
         );
 
         // DELETE: only the person who created the task

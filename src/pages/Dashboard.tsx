@@ -156,15 +156,7 @@ export function Dashboard() {
                 .map(pid => doc(db, 'projects', pid));
 
             try {
-                const promises = projectRefs.map(async (docRef) => {
-                    const d = await getDoc(docRef);
-                    return {
-                        id: docRef.id,
-                        data: d.exists() ? d.data() : undefined,
-                        exists: d.exists()
-                    };
-                });
-                const projectsData = await Promise.all(promises);
+                const projectsData = await batchGetDocs(projectRefs, { userId: user.uid });
                 const projectsMap = new Map(
                     projectsData.filter(p => p.exists).map(p => [p.id, p.data!])
                 );
@@ -231,9 +223,12 @@ export function Dashboard() {
         return () => unsub();
     }, [user]);
 
-    // 6. Reactive Recommended Projects (Updates live when profileData / skills change!)
+    // 6. Reactive Recommended Projects (Uses cached query, safe memo key!)
+    const profileSkillsKey = JSON.stringify(profileData?.skills || []);
+    const profileDiscipline = profileData?.discipline || '';
+
     useEffect(() => {
-        if (!user || !profileData) return;
+        if (!user) return;
 
         let active = true;
         loadRecommendedProjects(user.uid).then((res) => {
@@ -247,7 +242,7 @@ export function Dashboard() {
         return () => {
             active = false;
         };
-    }, [user, profileData]);
+    }, [user?.uid, profileSkillsKey, profileDiscipline]);
 
     // 7. Reactive Suggested Users (If connections count is 0)
     useEffect(() => {

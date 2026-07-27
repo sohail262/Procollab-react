@@ -673,50 +673,14 @@ export function ProjectDashboard() {
         permissions?.tasks?.read,  // re-run if task permission changes
     ])
 
-    // ── Effect 2.5: Auto-move overdue tasks to backlog ──────────────────────────
-    useEffect(() => {
-        if (!id || !user?.uid || !tasks || tasks.length === 0) return
-        if (permissionsLoading || authLoading || loading) return
 
-        // Only users with write access can perform the update
-        if (!canWriteTab('kanban')) return
+    // ── Effect 2.5 removed ────────────────────────────────────────────────────
+    // Previously auto-moved overdue tasks back to backlog on every snapshot.
+    // This was causing task status changes to instantly revert for overdue tasks.
+    // Overdue tasks now show the overdue indicator badge only — status is
+    // always controlled by the user/owner, never by the system.
 
-        const now = new Date()
-        const overdueTasksToMove = tasks.filter(task => {
-            if (!task.dueDate) return false
-            if (task.status === 'done' || task.status === 'backlog') return false
 
-            let due: Date
-            if (task.dueDate instanceof Date) {
-                due = task.dueDate
-            } else if ((task.dueDate as any)?.toDate) {
-                due = (task.dueDate as any).toDate()
-            } else {
-                due = new Date(task.dueDate as any)
-            }
-
-            if (isNaN(due.getTime())) return false
-            return due < now
-        })
-
-        if (overdueTasksToMove.length === 0) return
-
-        const moveOverdueTasks = async () => {
-            for (const task of overdueTasksToMove) {
-                try {
-                    await updateDoc(doc(db, 'projects', id, 'tasks', task.id), {
-                        status: 'backlog',
-                        updatedAt: serverTimestamp()
-                    })
-                    console.log(`Auto-moved overdue task ${task.id} to backlog`)
-                } catch (err) {
-                    console.error(`Failed to auto-move task ${task.id}:`, err)
-                }
-            }
-        }
-
-        moveOverdueTasks()
-    }, [tasks, id, user?.uid, permissionsLoading, authLoading, loading])
 
     // ── Effect 3: Activities listener ────────────────────────────────────
     useEffect(() => {

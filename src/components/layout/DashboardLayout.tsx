@@ -21,7 +21,7 @@ import {
     Compass,
     Grid3x3,
     Shield,
-    Sparkles,
+    TrendingUp,
     MessageSquare
 } from 'lucide-react'
 import { useState, useEffect, useRef } from 'react'
@@ -151,6 +151,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
     const navigation = [
         { name: 'Overview', href: '/dashboard', icon: LayoutDashboard },
         { name: 'Discover', href: '/discover', icon: Compass },
+        { name: 'Trending Topics', href: '/trending-topics', icon: TrendingUp },
         { name: 'Projects', href: '/projects', icon: Grid3x3 },
         { name: 'My Projects', href: '/dashboard/projects', icon: FolderKanban },
         { name: 'Applications', href: '/dashboard/applications', icon: Send },

@@ -452,6 +452,13 @@ export function clearCache(pattern?: string) {
             matches = true;
         } else if (
             entry.query &&
+            entry.query.path &&
+            typeof entry.query.path.toString === 'function' &&
+            entry.query.path.toString().includes(pattern)
+        ) {
+            matches = true;
+        } else if (
+            entry.query &&
             entry.query._query &&
             typeof entry.query._query.path?.toString === 'function' &&
             entry.query._query.path.toString().includes(pattern)
@@ -463,6 +470,23 @@ export function clearCache(pattern?: string) {
         }
     }
 }
+
+/**
+ * Helper to invalidate user-specific cache keys (applications, savedProjects, notifications, profile).
+ */
+export function invalidateUserCache(userId: string) {
+    if (!userId) return;
+    clearCache(userId);
+}
+
+/**
+ * Helper to invalidate project or collection cache keys (tasks, members, details).
+ */
+export function invalidateCollection(collectionOrPath: string) {
+    if (!collectionOrPath) return;
+    clearCache(collectionOrPath);
+}
+
 
 /**
  * Get cache statistics for debugging and monitoring.
