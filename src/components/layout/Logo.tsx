@@ -18,6 +18,10 @@ export function Logo({ className = '', iconSize = 64, showText = true, textColor
                 <img
                     src="/images/logo_pc.png"
                     alt="ProCollab Logo"
+                    width={iconSize}
+                    height={iconSize}
+                    decoding="async"
+                    fetchPriority="high"
                     className="w-full h-full object-contain scale-[1.35] mix-blend-screen"
                 />
             </div>

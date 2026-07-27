@@ -15,7 +15,6 @@ import {
     Plus,
     User,
     Eye,
-    Clock,
     TrendingUp,
     Sparkles,
     Users,
@@ -25,9 +24,6 @@ import {
     XCircle,
     AlertCircle,
     AlertTriangle,
-    RefreshCw,
-    UserPlus,
-    Check,
 } from 'lucide-react';
 import {
     loadRecommendedProjects,
@@ -35,9 +31,9 @@ import {
     type Project,
     type Application,
 } from '@/services/dashboardService'
-import { collection, query, orderBy, limit, onSnapshot, doc, where, getDoc, getDocs } from 'firebase/firestore'
+import { collection, query, orderBy, limit, onSnapshot, doc, where, getDocs } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
-import { cachedGetDoc, cachedQuery } from '@/lib/queryUtils'
+import { cachedGetDoc, cachedQuery, batchGetDocs } from '@/lib/queryUtils'
 import { OnboardingChecklist } from '@/components/dashboard/OnboardingChecklist'
 import { PendingInvitesBanner } from '@/components/dashboard/PendingInvitesBanner'
 import { motion } from 'framer-motion'
@@ -158,7 +154,7 @@ export function Dashboard() {
             try {
                 const projectsData = await batchGetDocs(projectRefs, { userId: user.uid });
                 const projectsMap = new Map(
-                    projectsData.filter(p => p.exists).map(p => [p.id, p.data!])
+                    projectsData.filter((p: any) => p.exists).map((p: any) => [p.id, p.data!])
                 );
 
                 const apps = snap.docs.map(appDoc => {
@@ -231,11 +227,11 @@ export function Dashboard() {
         if (!user) return;
 
         let active = true;
-        loadRecommendedProjects(user.uid).then((res) => {
+        loadRecommendedProjects(user.uid).then((res: Project[]) => {
             if (active) {
                 setRecommendedProjects(res);
             }
-        }).catch((err) => {
+        }).catch((err: unknown) => {
             console.error('Error loading recommendations:', err);
         });
 
@@ -376,10 +372,10 @@ export function Dashboard() {
                             className="bg-card border border-border/50 rounded-2xl p-6 flex flex-col md:flex-row items-center justify-between gap-6 relative overflow-hidden mb-6"
                         >
                             <div>
-                                <h3 className="text-lg font-bold text-foreground flex items-center gap-2">
-                                    <Sparkles className="h-5 w-5 text-muted-foreground" />
+                                <h2 className="text-lg font-bold text-foreground flex items-center gap-2">
+                                    <Sparkles className="h-5 w-5 text-muted-foreground" aria-hidden="true" />
                                     Get Started in Minutes
-                                </h3>
+                                </h2>
                                 <p className="text-muted-foreground text-sm mt-1 max-w-xl">
                                     Create a project brief in seconds or apply to browse matching ideas. No empty stats, just pure building.
                                 </p>
@@ -397,54 +393,54 @@ export function Dashboard() {
 
                     {/* Stats Grid - 2x2 on mobile, 4 cols on desktop */}
                     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6 sm:mb-8">
-                        <Card className="glass-card border-primary/25 hover:border-primary/50 hover:bg-primary/5 transition-all duration-300 cursor-pointer" onClick={() => navigate('/dashboard/projects')}>
+                        <Card className="glass-card border-primary/25 hover:border-primary/50 hover:bg-primary/5 transition-all duration-300 cursor-pointer" onClick={() => navigate('/dashboard/projects')} role="button" aria-label="My Projects">
                             <CardContent className="p-4 sm:p-6">
                                 <div className="flex items-center justify-between">
                                     <div>
                                         <p className="text-xs sm:text-sm font-medium text-white/50">My Projects</p>
-                                        <h3 className="text-2xl sm:text-3xl font-bold text-white mt-1 sm:mt-2">{loading ? '...' : stats.myProjects}</h3>
+                                        <p className="text-2xl sm:text-3xl font-bold text-white mt-1 sm:mt-2" aria-live="polite">{loading ? '...' : stats.myProjects}</p>
                                     </div>
                                     <div className="w-10 h-10 sm:w-12 sm:h-12 bg-primary/10 rounded-lg flex items-center justify-center shrink-0">
-                                        <FolderKanban className="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
+                                        <FolderKanban className="h-5 w-5 sm:h-6 sm:w-6 text-primary" aria-hidden="true" />
                                     </div>
                                 </div>
                             </CardContent>
                         </Card>
-                        <Card className="glass-card border-accent/25 hover:border-accent/50 hover:bg-accent/5 transition-all duration-300 cursor-pointer" onClick={() => navigate('/dashboard/applications')}>
+                        <Card className="glass-card border-accent/25 hover:border-accent/50 hover:bg-accent/5 transition-all duration-300 cursor-pointer" onClick={() => navigate('/dashboard/applications')} role="button" aria-label="Applications">
                             <CardContent className="p-4 sm:p-6">
                                 <div className="flex items-center justify-between">
                                     <div>
                                         <p className="text-xs sm:text-sm font-medium text-white/50">Applications</p>
-                                        <h3 className="text-2xl sm:text-3xl font-bold text-white mt-1 sm:mt-2">{loading ? '...' : stats.applications}</h3>
+                                        <p className="text-2xl sm:text-3xl font-bold text-white mt-1 sm:mt-2" aria-live="polite">{loading ? '...' : stats.applications}</p>
                                     </div>
                                     <div className="w-10 h-10 sm:w-12 sm:h-12 bg-accent/10 rounded-lg flex items-center justify-center shrink-0">
-                                        <Send className="h-5 w-5 sm:h-6 sm:w-6 text-accent" />
+                                        <Send className="h-5 w-5 sm:h-6 sm:w-6 text-accent" aria-hidden="true" />
                                     </div>
                                 </div>
                             </CardContent>
                         </Card>
-                        <Card className="glass-card border-emerald-500/20 hover:border-emerald-500/40 hover:bg-emerald-500/5 transition-all duration-300 cursor-pointer" onClick={() => navigate('/dashboard/notifications')}>
+                        <Card className="glass-card border-emerald-500/20 hover:border-emerald-500/40 hover:bg-emerald-500/5 transition-all duration-300 cursor-pointer" onClick={() => navigate('/dashboard/notifications')} role="button" aria-label="Notifications">
                             <CardContent className="p-4 sm:p-6">
                                 <div className="flex items-center justify-between">
                                     <div>
                                         <p className="text-xs sm:text-sm font-medium text-white/50">Notifications</p>
-                                        <h3 className="text-2xl sm:text-3xl font-bold text-white mt-1 sm:mt-2">{loading ? '...' : stats.notifications}</h3>
+                                        <p className="text-2xl sm:text-3xl font-bold text-white mt-1 sm:mt-2" aria-live="polite">{loading ? '...' : stats.notifications}</p>
                                     </div>
                                     <div className="w-10 h-10 sm:w-12 sm:h-12 bg-emerald-500/10 rounded-lg flex items-center justify-center shrink-0">
-                                        <Bell className="h-5 w-5 sm:h-6 sm:w-6 text-emerald-400" />
+                                        <Bell className="h-5 w-5 sm:h-6 sm:w-6 text-emerald-400" aria-hidden="true" />
                                     </div>
                                 </div>
                             </CardContent>
                         </Card>
-                        <Card className="glass-card border-primary/25 hover:border-primary/50 hover:bg-primary/5 transition-all duration-300 cursor-pointer" onClick={() => navigate('/dashboard/saved')}>
+                        <Card className="glass-card border-primary/25 hover:border-primary/50 hover:bg-primary/5 transition-all duration-300 cursor-pointer" onClick={() => navigate('/dashboard/saved')} role="button" aria-label="Saved Projects">
                             <CardContent className="p-4 sm:p-6">
                                 <div className="flex items-center justify-between">
                                     <div>
                                         <p className="text-xs sm:text-sm font-medium text-white/50">Saved Projects</p>
-                                        <h3 className="text-2xl sm:text-3xl font-bold text-white mt-1 sm:mt-2">{loading ? '...' : stats.savedProjects}</h3>
+                                        <p className="text-2xl sm:text-3xl font-bold text-white mt-1 sm:mt-2" aria-live="polite">{loading ? '...' : stats.savedProjects}</p>
                                     </div>
                                     <div className="w-10 h-10 sm:w-12 sm:h-12 bg-primary/10 rounded-lg flex items-center justify-center shrink-0">
-                                        <Bookmark className="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
+                                        <Bookmark className="h-5 w-5 sm:h-6 sm:w-6 text-primary" aria-hidden="true" />
                                     </div>
                                 </div>
                             </CardContent>
@@ -468,7 +464,7 @@ export function Dashboard() {
                                         </Button>
                                     </div>
                                 </CardHeader>
-                                <CardContent className="pt-0">
+                                <CardContent className="pt-0 min-h-[180px]">
                                     {loading ? (
                                         <div className="space-y-2">
                                             {[1, 2, 3].map(i => (
@@ -524,7 +520,7 @@ export function Dashboard() {
                                         </Button>
                                     </div>
                                 </CardHeader>
-                                <CardContent className="pt-0">
+                                <CardContent className="pt-0 min-h-[180px]">
                                     {loading ? (
                                         <div className="space-y-2">
                                             {[1, 2, 3].map(i => (
@@ -652,7 +648,7 @@ export function Dashboard() {
                                         )}
                                     </div>
                                 </CardHeader>
-                                <CardContent className="pt-0">
+                                <CardContent className="pt-0 min-h-[220px]">
                                     {loading ? (
                                         <div className="space-y-3">
                                             {[1, 2, 3].map((i) => (

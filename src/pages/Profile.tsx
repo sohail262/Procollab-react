@@ -1164,7 +1164,7 @@ export default function Profile() {
     // ── Main render ───────────────────────────────────────────────────────────
     return (
         <DashboardLayout>
-            <div className="max-w-5xl mx-auto">
+            <main aria-label="User profile" className="max-w-5xl mx-auto">
 
                 {/* Profile Header */}
                 <div className="relative bg-zinc-900/40 backdrop-blur-xl border border-zinc-800/80 rounded-xl overflow-visible mb-6">
@@ -1224,7 +1224,9 @@ export default function Profile() {
                                                     <span className="text-[10px] text-white font-semibold">Change</span>
                                                 </>
                                             )}
+                                            <label htmlFor="profile-avatar-upload" className="sr-only">Upload profile picture</label>
                                             <input
+                                                id="profile-avatar-upload"
                                                 type="file"
                                                 accept="image/*"
                                                 className="absolute inset-0 opacity-0 cursor-pointer"
@@ -1269,9 +1271,10 @@ export default function Profile() {
                                             variant="destructive"
                                             size="icon"
                                             className="h-8 w-8"
+                                            aria-label="Delete profile"
                                             onClick={() => setIsDeleteModalOpen(true)}
                                         >
-                                            <Trash2 className="h-3.5 w-3.5" />
+                                            <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
                                         </Button>
                                     </>
                                 ) : (
@@ -1330,7 +1333,7 @@ export default function Profile() {
                                     <div className="w-px h-8 bg-gray-200 dark:bg-gray-700" />
                                     <div className="text-center">
                                         <p className="text-base sm:text-lg font-bold text-gray-955 dark:text-white">{networkFriends.length}</p>
-                                        <p className="text-xs text-gray-500 dark:text-gray-400">Connections</p>
+                                        <p className="text-xs text-gray-600 dark:text-slate-400">Connections</p>
                                     </div>
                                 </>
                             )}
@@ -1339,14 +1342,14 @@ export default function Profile() {
                                     <div className="w-px h-8 bg-gray-200 dark:bg-gray-700" />
                                     <div className="text-center">
                                         <p className="text-base sm:text-lg font-bold text-gray-955 dark:text-white">{applications.length}</p>
-                                        <p className="text-xs text-gray-500 dark:text-gray-400">Applications</p>
+                                        <p className="text-xs text-gray-600 dark:text-slate-400">Applications</p>
                                     </div>
                                 </>
                             )}
                         </div>
 
                         {/* Meta + social row */}
-                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-gray-500 dark:text-gray-400">
+                        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-gray-600 dark:text-slate-400">
                             {profile.location && (
                                 <span className="flex items-center gap-1">
                                     <MapPin className="h-3.5 w-3.5 shrink-0" />
@@ -2017,9 +2020,9 @@ export default function Profile() {
                                                                                     type="button"
                                                                                     onClick={e => e.stopPropagation()}
                                                                                     className="p-1 rounded-md hover:bg-zinc-800 text-zinc-400 hover:text-white transition-colors"
-                                                                                    title="Project options"
+                                                                                    aria-label={`Options for ${project.title}`}
                                                                                 >
-                                                                                    <MoreVertical className="h-4 w-4" />
+                                                                                    <MoreVertical className="h-4 w-4" aria-hidden="true" />
                                                                                 </button>
                                                                             </DropdownMenuTrigger>
                                                                             <DropdownMenuContent align="end" onClick={e => e.stopPropagation()} className="w-48 bg-zinc-950 border border-zinc-800 text-white z-50">
@@ -2172,7 +2175,7 @@ export default function Profile() {
                         )}
                     </div>
                 </div>
-            </div>
+            </main>
 
             {/* Delete Account Modal */}
             {isDeleteModalOpen && (

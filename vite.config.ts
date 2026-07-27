@@ -65,19 +65,19 @@ export default defineConfig({
       output: {
         manualChunks: {
           // Separate vendor chunks
-          'react-vendor': ['react', 'react-dom'],
-          'firebase-vendor': ['firebase/app', 'firebase/auth', 'firebase/firestore'],
-          'ui-vendor': ['lucide-react', '@radix-ui/react-dialog', '@radix-ui/react-dropdown-menu'],
+          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
+          'firebase-vendor': ['firebase/app', 'firebase/auth', 'firebase/firestore', 'firebase/database'],
+          'ui-vendor': ['@radix-ui/react-dialog', '@radix-ui/react-dropdown-menu', '@radix-ui/react-tooltip', '@radix-ui/react-avatar'],
+          'framer-motion': ['framer-motion'],
+          'lucide-react': ['lucide-react'],
           'chart-vendor': ['recharts'],
-          // ⚡ OPTIMIZATION: three.js is ~600KB — isolate it so it never
-          // blocks the initial bundle. Only loads when HeroGlobe is rendered.
           'three-vendor': ['three'],
-          'utils': ['clsx', 'class-variance-authority']
+          'utils': ['clsx', 'class-variance-authority', 'tailwind-merge']
         }
       }
     },
     // Optimize chunk size
-    chunkSizeWarningLimit: 1000,
+    chunkSizeWarningLimit: 600,
     // Enable minification
     minify: 'terser',
     terserOptions: {

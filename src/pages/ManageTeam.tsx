@@ -144,7 +144,6 @@ const getDefaultPermissions = (role: string): MemberPermissions => {
 const PERMISSION_TABS = [
     { key: 'dashboard',  label: 'Dashboard',  icon: LayoutDashboard },
     { key: 'tasks',      label: 'Tasks',       icon: Kanban          },
-    { key: 'whiteboard', label: 'Whiteboard',  icon: Pencil          },
     { key: 'files',      label: 'Files',       icon: FileText        },
     { key: 'chat',       label: 'Chat',        icon: MessageSquare   },
     { key: 'calendar',   label: 'Calendar',    icon: Calendar        },

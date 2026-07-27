@@ -68,20 +68,20 @@ export const StreakCard: React.FC<StreakCardProps> = ({
                     <div className="flex items-center gap-2">
                         <button
                             onClick={() => isOwnProfile && currentStreak > 0 && setShowFireOverlay(true)}
-                            title={isOwnProfile && currentStreak > 0 ? 'Replay streak animation' : undefined}
+                            aria-label={isOwnProfile && currentStreak > 0 ? 'Replay streak animation' : 'Streak fire icon'}
                             className={`p-2 rounded-xl bg-orange-500/20 border border-orange-500/30 text-orange-400 transition-all duration-200 ${isOwnProfile && currentStreak > 0 ? 'hover:bg-orange-500/30 hover:border-orange-400/60 hover:scale-110 cursor-pointer' : 'cursor-default'}`}
                         >
-                            <Flame className="h-5 w-5 animate-pulse" />
+                            <Flame className="h-5 w-5 animate-pulse" aria-hidden="true" />
                         </button>
                         <div>
                             <div className="flex items-center gap-1.5">
-                                <h3 className="text-sm font-bold tracking-tight text-white">
+                                <h2 className="text-sm font-bold tracking-tight text-white">
                                     Consistency & Streaks
-                                </h3>
+                                </h2>
                                 <Tooltip>
                                     <TooltipTrigger asChild>
-                                        <button className="text-zinc-400 hover:text-amber-400 transition-colors p-0.5">
-                                            <Info className="h-3.5 w-3.5" />
+                                        <button className="text-zinc-400 hover:text-amber-400 transition-colors p-0.5" aria-label="How streaks and contributions work">
+                                            <Info className="h-3.5 w-3.5" aria-hidden="true" />
                                         </button>
                                     </TooltipTrigger>
                                     <TooltipContent side="top" className="bg-zinc-950 text-zinc-100 border-zinc-800 p-3 max-w-xs text-xs shadow-xl space-y-1.5">
@@ -97,7 +97,7 @@ export const StreakCard: React.FC<StreakCardProps> = ({
                                      </TooltipContent>
                                  </Tooltip>
                             </div>
-                            <p className="text-[11px] text-zinc-400">
+                            <p className="text-[11px] text-zinc-300">
                                 "He's the one who showed up."
                             </p>
                         </div>

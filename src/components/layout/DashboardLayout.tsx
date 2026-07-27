@@ -179,9 +179,12 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                         <div className="flex items-center justify-start">
                             <button
                                 onClick={() => setSidebarOpen(!sidebarOpen)}
+                                aria-label={sidebarOpen ? 'Close navigation menu' : 'Open navigation menu'}
+                                aria-expanded={sidebarOpen}
+                                aria-controls="sidebar-nav"
                                 className="inline-flex items-center p-2 text-muted-foreground rounded-lg lg:hidden hover:bg-accent hover:text-foreground transition-all duration-200"
                             >
-                                {sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+                                {sidebarOpen ? <X className="w-5 h-5" aria-hidden="true" /> : <Menu className="w-5 h-5" aria-hidden="true" />}
                             </button>
                             <Link to="/" className="flex items-center ml-2 md:mr-24 group">
                                 <Logo iconSize={38} showText={true} />
@@ -204,9 +207,10 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                                     {searchQuery && (
                                         <button
                                             onClick={() => setSearchQuery('')}
+                                            aria-label="Clear search"
                                             className="absolute right-2 top-1/2 transform -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
                                         >
-                                            <X className="h-3.5 w-3.5" />
+                                            <X className="h-3.5 w-3.5" aria-hidden="true" />
                                         </button>
                                     )}
                                 </div>
@@ -245,21 +249,21 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                             <div className="flex items-center gap-2 sm:gap-3">
                                 <button
                                     onClick={() => navigate('/profile')}
+                                    aria-label={`View profile for ${user?.displayName || user?.email?.split('@')[0] || 'user'}`}
                                     className="focus:outline-none rounded-full ring-1 ring-border/50 hover:ring-foreground/20 transition-all duration-200"
-                                    title="View Profile"
                                 >
                                     <img
                                         key={getUserAvatarUrl()}
                                         src={getUserAvatarUrl()}
-                                        alt="User avatar"
+                                        alt={`${user?.displayName || user?.email?.split('@')[0] || 'User'}'s avatar`}
                                         className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-muted"
                                     />
                                 </button>
                                 <span className="text-sm text-muted-foreground hidden md:block">
                                     {user?.displayName || user?.email?.split('@')[0]}
                                 </span>
-                                <Button variant="ghost" size="sm" onClick={handleLogout} className="hidden sm:flex text-muted-foreground hover:text-foreground">
-                                    <LogOut className="h-4 w-4" />
+                                <Button variant="ghost" size="sm" onClick={handleLogout} aria-label="Log out" className="hidden sm:flex text-muted-foreground hover:text-foreground">
+                                    <LogOut className="h-4 w-4" aria-hidden="true" />
                                 </Button>
                             </div>
                         </div>
@@ -269,6 +273,8 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
 
             {/* Sidebar — Frosted Glass */}
             <aside
+                id="sidebar-nav"
+                aria-label="Main navigation"
                 className={`fixed top-0 left-0 z-40 w-64 h-screen pt-20 transition-transform duration-300 ease-premium ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'
                     } glass border-r border-border/40 lg:translate-x-0`}
             >
@@ -288,6 +294,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                                         <Link
                                             to={item.href}
                                             onClick={() => setSidebarOpen(false)}
+                                            aria-current={isActive ? 'page' : undefined}
                                             className={`relative flex items-center px-3.5 py-2.5 rounded-lg group transition-all duration-200 border border-transparent ${isActive
                                                 ? 'bg-white/[0.06] dark:bg-zinc-800/40 text-foreground border-white/[0.06] dark:border-zinc-800/60 shadow-[inset_0_1px_0_rgba(255,255,255,0.05)] backdrop-blur-md font-semibold'
                                                 : 'text-muted-foreground hover:text-foreground hover:bg-zinc-500/[0.03] dark:hover:bg-zinc-800/20 hover:border-zinc-500/[0.03] dark:hover:border-zinc-800/10'
@@ -298,10 +305,11 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                                                 <div
                                                     className="absolute left-1.5 top-1/2 w-[3px] h-4 bg-white rounded-full shadow-[0_0_8px_rgba(255,255,255,0.4)]"
                                                     style={{ transform: 'translateY(-50%)' }}
+                                                    aria-hidden="true"
                                                 />
                                             )}
                                             <item.icon className={`w-[18px] h-[18px] transition-colors duration-200 ${isActive ? 'text-foreground' : 'text-muted-foreground group-hover:text-foreground'
-                                                }`} strokeWidth={1.5} />
+                                                }`} strokeWidth={1.5} aria-hidden="true" />
                                             <span className="ml-3 text-[13px]">{item.name}</span>
                                         </Link>
                                     </motion.li>
@@ -361,7 +369,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
             </aside>
 
             {/* Main Content */}
-            <div className="pt-20 px-4 pb-4 sm:px-6 sm:pb-6 lg:ml-64">
+            <main className="pt-20 px-4 pb-4 sm:px-6 sm:pb-6 lg:ml-64" id="main-content">
                 <motion.div
                     key={location.pathname}
                     initial={{ opacity: 0, y: 8 }}
@@ -371,7 +379,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
                 >
                     {children}
                 </motion.div>
-            </div>
+            </main>
 
             {/* Mobile sidebar overlay */}
             <AnimatePresence>

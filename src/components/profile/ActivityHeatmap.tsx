@@ -161,15 +161,15 @@ export const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({
 
     return (
         <TooltipProvider delayDuration={150}>
-            <div className="bg-white dark:bg-zinc-900/90 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-4 sm:p-6 shadow-sm relative overflow-hidden transition-all duration-300">
+            <div className="bg-white dark:bg-zinc-900/90 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-4 sm:p-6 shadow-sm relative overflow-hidden transition-all duration-300" role="region" aria-label="Activity Calendar">
                 {/* Top header row */}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
                     <div>
                         <div className="flex items-center gap-2">
-                            <h3 className="text-base font-bold text-zinc-900 dark:text-white flex items-center gap-2">
-                                <Sparkles className={`h-4 w-4 ${currentThemeStyle.iconColor}`} />
+                            <h2 className="text-base font-bold text-zinc-900 dark:text-white flex items-center gap-2">
+                                <Sparkles className={`h-4 w-4 ${currentThemeStyle.iconColor}`} aria-hidden="true" />
                                 Activity Calendar
-                            </h3>
+                            </h2>
                             <span className="text-xs px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 font-medium">
                                 {totalContributionsInPeriod} contributions
                             </span>
@@ -182,10 +182,12 @@ export const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({
                     {/* Filter Controls */}
                     <div className="flex flex-wrap items-center gap-2">
                         {/* Period Selector */}
-                        <div className="flex items-center bg-zinc-100 dark:bg-zinc-800/80 p-0.5 rounded-lg text-xs font-medium">
+                        <div className="flex items-center bg-zinc-100 dark:bg-zinc-800/80 p-0.5 rounded-lg text-xs font-medium" role="group" aria-label="Select time period">
                             <button
                                 onClick={() => setPeriodMonths(12)}
-                                className={`px-2.5 py-1 rounded-md transition-all ${
+                                aria-pressed={periodMonths === 12}
+                                aria-label="Show 1 year"
+                                className={`px-2.5 py-1.5 rounded-md transition-all ${
                                     periodMonths === 12
                                         ? 'bg-white dark:bg-zinc-950 text-zinc-900 dark:text-white shadow-xs font-semibold'
                                         : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'
@@ -195,7 +197,9 @@ export const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({
                             </button>
                             <button
                                 onClick={() => setPeriodMonths(6)}
-                                className={`px-2.5 py-1 rounded-md transition-all ${
+                                aria-pressed={periodMonths === 6}
+                                aria-label="Show 6 months"
+                                className={`px-2.5 py-1.5 rounded-md transition-all ${
                                     periodMonths === 6
                                         ? 'bg-white dark:bg-zinc-950 text-zinc-900 dark:text-white shadow-xs font-semibold'
                                         : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'
@@ -205,7 +209,9 @@ export const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({
                             </button>
                             <button
                                 onClick={() => setPeriodMonths(3)}
-                                className={`px-2.5 py-1 rounded-md transition-all ${
+                                aria-pressed={periodMonths === 3}
+                                aria-label="Show 3 months"
+                                className={`px-2.5 py-1.5 rounded-md transition-all ${
                                     periodMonths === 3
                                         ? 'bg-white dark:bg-zinc-950 text-zinc-900 dark:text-white shadow-xs font-semibold'
                                         : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'
@@ -216,13 +222,14 @@ export const ActivityHeatmap: React.FC<ActivityHeatmapProps> = ({
                         </div>
 
                         {/* Theme Switcher Pills */}
-                        <div className="flex items-center gap-1 bg-zinc-100 dark:bg-zinc-800/80 p-1 rounded-lg">
+                        <div className="flex items-center gap-1 bg-zinc-100 dark:bg-zinc-800/80 p-1 rounded-lg" role="group" aria-label="Select heatmap theme">
                             {(Object.keys(themeStyles) as HeatmapTheme[]).map((tKey) => (
                                 <button
                                     key={tKey}
                                     onClick={() => setTheme(tKey)}
-                                    title={themeStyles[tKey].label}
-                                    className={`w-5 h-5 rounded-full transition-transform ${
+                                    aria-label={`${themeStyles[tKey].label} theme`}
+                                    aria-pressed={theme === tKey}
+                                    className={`w-6 h-6 rounded-full transition-transform ${
                                         tKey === 'emerald' ? 'bg-emerald-500' :
                                         tKey === 'flame' ? 'bg-orange-500' :
                                         tKey === 'violet' ? 'bg-violet-500' :
