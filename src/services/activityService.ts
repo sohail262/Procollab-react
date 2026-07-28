@@ -46,13 +46,27 @@ export interface LeaderboardUser {
 }
 
 /**
- * Format a Date object to YYYY-MM-DD in local time
+ * Format a Date object to YYYY-MM-DD in Indian Standard Time (IST — Asia/Kolkata, UTC+5:30)
+ * Ensures midnight IST is the exact platform-wide day boundary for all users.
  */
 export const formatDateKey = (d: Date): string => {
-    const year = d.getFullYear()
-    const month = String(d.getMonth() + 1).padStart(2, '0')
-    const day = String(d.getDate()).padStart(2, '0')
-    return `${year}-${month}-${day}`
+    try {
+        const formatter = new Intl.DateTimeFormat('en-CA', {
+            timeZone: 'Asia/Kolkata',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit'
+        })
+        return formatter.format(d)
+    } catch {
+        const istOffset = 5.5 * 60 * 60 * 1000
+        const utcTime = d.getTime() + (d.getTimezoneOffset() * 60000)
+        const istDate = new Date(utcTime + istOffset)
+        const year = istDate.getFullYear()
+        const month = String(istDate.getMonth() + 1).padStart(2, '0')
+        const day = String(istDate.getDate()).padStart(2, '0')
+        return `${year}-${month}-${day}`
+    }
 }
 
 /**

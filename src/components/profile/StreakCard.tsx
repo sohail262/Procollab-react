@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { StreakMetrics } from '@/services/activityService'
+import { StreakMetrics, formatDateKey } from '@/services/activityService'
 import { Button } from '@/components/ui/button'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { Flame, Trophy, Share2, ShieldCheck, Zap, Award, Target, TrendingUp, Info } from 'lucide-react'
@@ -37,7 +37,7 @@ export const StreakCard: React.FC<StreakCardProps> = ({
     useEffect(() => {
         if (!isOwnProfile || currentStreak === 0) return
 
-        const todayKey = `streak_anim_${new Date().toISOString().split('T')[0]}`
+        const todayKey = `streak_anim_${formatDateKey(new Date())}`
         const alreadyShown = localStorage.getItem(todayKey)
 
         if (!alreadyShown) {
