@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, Link } from 'react-router-dom'
 import { SEOHead, buildProjectSchema, buildBreadcrumbSchema } from '@/components/seo/SEOHead'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -280,13 +280,13 @@ export default function PublicProjectShowcase() {
 
                     <div className="p-8 md:p-12">
                         <div className="flex flex-wrap gap-2 mb-5">
-                            <span className="text-[10px] font-black uppercase tracking-[0.15em] px-3 py-1 rounded-full bg-white/5 border border-white/10 text-slate-400">
+                            <Link to={`/discover?domain=${encodeURIComponent(project.primaryDiscipline.toLowerCase())}`} className="text-[10px] font-black uppercase tracking-[0.15em] px-3 py-1 rounded-full bg-white/5 border border-white/10 text-slate-400 hover:text-white transition-colors">
                                 {project.primaryDiscipline}
-                            </span>
+                            </Link>
                             {techTags.slice(0, 5).map((tag, i) => (
-                                <span key={i} className="text-[10px] font-semibold px-2.5 py-1 rounded-full bg-violet-500/10 border border-violet-500/20 text-violet-400">
+                                <Link key={i} to={`/discover?domain=${encodeURIComponent(tag.toLowerCase())}`} className="text-[10px] font-semibold px-2.5 py-1 rounded-full bg-violet-500/10 border border-violet-500/20 text-violet-400 hover:bg-violet-500/20 transition-colors">
                                     {tag}
-                                </span>
+                                </Link>
                             ))}
                         </div>
 

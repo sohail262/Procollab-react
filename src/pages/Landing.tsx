@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "react-router-dom"
-import { SEOHead, buildWebsiteSchema, buildOrganizationSchema, buildSoftwareAppSchema } from "@/components/seo/SEOHead"
+import { SEOHead, buildWebsiteSchema, buildOrganizationSchema, buildSoftwareAppSchema, buildFAQSchema } from "@/components/seo/SEOHead"
 import { Users, Lightbulb, ListTodo, Shield, TrendingUp, Zap, Terminal, Activity, ArrowRight, CheckCircle2, Rocket, Layers, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { LandingNavbar } from "@/components/layout/LandingNavbar"
@@ -39,13 +39,11 @@ export function Landing() {
     const heroRef = useRef<HTMLDivElement>(null)
     const whyRef = useRef<HTMLDivElement>(null)
     const featuresRef = useRef<HTMLDivElement>(null)
-    const projectsRef = useRef<HTMLDivElement>(null)
     const workflowRef = useRef<HTMLDivElement>(null)
     const ctaRef = useRef<HTMLDivElement>(null)
     const orb1Ref = useRef<HTMLDivElement>(null)
     const orb2Ref = useRef<HTMLDivElement>(null)
     const orb3Ref = useRef<HTMLDivElement>(null)
-    const orb4Ref = useRef<HTMLDivElement>(null)
     const connectorRef = useRef<HTMLDivElement>(null)
 
     useEffect(() => {
@@ -98,7 +96,6 @@ export function Landing() {
                 { ref: orb1Ref, y: -120, x: 30, scrub: 1.5 },
                 { ref: orb2Ref, y: -80, x: -20, scrub: 2 },
                 { ref: orb3Ref, y: -100, x: 50, scrub: 1.8 },
-                { ref: orb4Ref, y: -60, x: -40, scrub: 2.5 },
             ]
 
             orbAnimations.forEach(({ ref, y, x, scrub }) => {
@@ -172,28 +169,7 @@ export function Landing() {
                 )
             }
 
-            // ────────────────────────────────────────────
-            // FEATURED PROJECTS — horizontal stagger
-            // ────────────────────────────────────────────
-            if (projectsRef.current) {
-                gsap.fromTo(projectsRef.current.querySelector(".section-header"),
-                    { opacity: 0, y: 40 },
-                    {
-                        opacity: 1, y: 0, duration: 0.8, ease: "power3.out",
-                        scrollTrigger: { trigger: projectsRef.current, start: "top 80%" },
-                    }
-                )
 
-                gsap.fromTo(projectsRef.current.querySelectorAll(".project-card"),
-                    { opacity: 0, y: 50, scale: 0.95 },
-                    {
-                        opacity: 1, y: 0, scale: 1,
-                        stagger: 0.12, duration: 0.7,
-                        ease: "back.out(1.2)",
-                        scrollTrigger: { trigger: projectsRef.current.querySelector(".projects-grid"), start: "top 80%" },
-                    }
-                )
-            }
 
             // ────────────────────────────────────────────
             // WORKFLOW — sequential reveal with connector
@@ -302,6 +278,20 @@ export function Landing() {
                     buildWebsiteSchema(),
                     buildOrganizationSchema(),
                     buildSoftwareAppSchema(),
+                    buildFAQSchema([
+                        {
+                            question: "What is ProCollab?",
+                            answer: "ProCollab is India's leading unified student project platform where college students showcase final year projects, discover domain-wise ideas, and recruit teammates.",
+                        },
+                        {
+                            question: "How do I find teammates for my college capstone or final year project?",
+                            answer: "On ProCollab's Discover page, you can filter by academic discipline and specific skills (e.g., React, Python, Machine Learning, Figma) to invite verified student collaborators.",
+                        },
+                        {
+                            question: "How can I showcase my completed project to tech recruiters?",
+                            answer: "ProCollab provides recruiter-ready public showcase pages (/project/public/:id) complete with task analytics, GitHub repository links, live demos, and exportable STAR method resume bullet points.",
+                        },
+                    ]),
                 ]}
             />
             <LandingNavbar />
@@ -314,19 +304,19 @@ export function Landing() {
                     <div ref={heroRef} className="container relative px-4 pt-28 pb-16 md:pt-36 md:pb-20 max-w-7xl mx-auto w-full z-10">
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-16 items-center">
 
-                            {/* Left column — content unchanged per request */}
+                            {/* Left column */}
                             <div className="flex flex-col items-start text-left">
                                 <div className="hero-badge mb-6 inline-flex items-center gap-2 border border-primary/40 px-3 py-1.5 text-xs font-mono tracking-widest uppercase text-primary">
                                     <span className="w-1.5 h-1.5 bg-primary rounded-full animate-pulse" />
-                                    SYS:01 — TRUSTED BY COLLABORATORS
+                                    STUDENT PROJECT COLLABORATION
                                 </div>
 
                                 <h1 className="hero-heading mb-6 text-5xl font-bold tracking-tight md:text-6xl lg:text-7xl text-foreground leading-none">
-                                    Where Ideas<br className="hidden md:block" /> Meet Innovation
+                                    Build Projects<br className="hidden md:block" /> With Great Teams
                                 </h1>
 
                                 <p className="hero-desc mb-10 text-base text-muted-foreground md:text-lg leading-relaxed max-w-lg border-l-2 border-primary/50 pl-4">
-                                    Connect with brilliant minds across disciplines. Build groundbreaking projects. Transform your ideas into reality with the perfect team.
+                                    Find teammates by skill, showcase your projects, get access to various tools and build a portfolio that recruiters love.
                                 </p>
 
                                 <div className="flex flex-row flex-wrap gap-2 md:gap-3 w-full sm:w-auto items-center">
@@ -337,7 +327,7 @@ export function Landing() {
                                         </Link>
                                     </Button>
                                     <Button asChild variant="outline" size="lg" className="hero-cta w-[145px] xs:w-44 sm:w-auto text-xs sm:text-sm px-4 sm:px-8 h-10 sm:h-12 rounded-none font-mono tracking-wider uppercase">
-                                        <Link to="/projects" className="justify-center">Explore Projects</Link>
+                                        <Link to="/discover" className="justify-center">Explore Projects</Link>
                                     </Button>
                                 </div>
                             </div>
@@ -353,22 +343,76 @@ export function Landing() {
                     </div>
                 </section>
 
-                {/* ── Why Procollab ─────────────────────────────────── */}
-                <section ref={whyRef} className="relative py-28 border-t border-b border-white/[0.06] overflow-hidden">
+                {/* ── 1. Features Section (Placed First Above Why ProCollab) ───── */}
+                <section ref={featuresRef} className="py-24 border-t border-b border-white/[0.06] relative overflow-hidden">
+                    <div className="container px-4 md:px-6 max-w-7xl mx-auto relative z-10">
+
+                        <div className="section-header mb-16 text-center">
+                            <div className="inline-flex items-center gap-2 border border-primary/30 px-3 py-1.5 text-xs font-mono tracking-widest uppercase text-primary mb-4 rounded-full">
+                                <Zap className="h-3 w-3" />
+                                PLATFORM FEATURES
+                            </div>
+                            <h2 className="text-3xl font-bold tracking-tight sm:text-4xl lg:text-5xl">Everything You Need<br />To Build Great Projects</h2>
+                            <p className="mt-4 text-muted-foreground max-w-xl mx-auto text-sm md:text-base leading-relaxed">
+                                Simple, easy-to-use tools designed to help students collaborate, track progress, and showcase completed work.
+                            </p>
+                        </div>
+
+                        {/* Primary feature cards */}
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-px bg-border border border-border">
+                            {[
+                                { icon: Users, title: "Find Your Dream Team", desc: "Search for project partners by specific skills like React, Python, Machine Learning, or UI Design.", id: "01" },
+                                { icon: Lightbulb, title: "Discover Project Ideas", desc: "Browse real student projects, hackathon ideas, and open team positions across different streams.", id: "02" },
+                                { icon: ListTodo, title: "Easy Task Tracking", desc: "Keep group work organized with simple Kanban task boards and clear project milestone trackers.", id: "03" },
+                            ].map((feature) => (
+                                <div key={feature.id} className="feature-primary bg-background p-8 group hover:bg-muted/20 transition-colors border-t-2 border-t-transparent hover:border-t-primary">
+                                    <div className="text-xs font-mono text-muted-foreground mb-5 tracking-widest">FEATURE {feature.id}</div>
+                                    <div className="w-10 h-10 border border-border flex items-center justify-center mb-6 group-hover:border-primary transition-colors">
+                                        <feature.icon className="h-5 w-5 text-muted-foreground group-hover:text-primary transition-colors" />
+                                    </div>
+                                    <h3 className="text-base font-semibold mb-3">{feature.title}</h3>
+                                    <p className="text-sm text-muted-foreground leading-relaxed">{feature.desc}</p>
+                                </div>
+                            ))}
+                        </div>
+
+                        {/* Secondary feature row */}
+                        <div className="feature-secondary-grid grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
+                            {[
+                                { icon: Shield, title: "Safe & Organized", desc: "Keep project files, discussions, and tasks in one place." },
+                                { icon: TrendingUp, title: "Public Showcase Link", desc: "Share your finished project link on your resume for recruiters." },
+                                { icon: Zap, title: "Fast & Mobile Friendly", desc: "Works smoothly on both your phone and laptop." },
+                            ].map((feature, i) => (
+                                <div key={i} className="feature-secondary flex gap-4 p-5 border border-border hover:border-primary transition-colors group">
+                                    <div className="flex-shrink-0 w-9 h-9 border border-border group-hover:border-primary flex items-center justify-center transition-colors">
+                                        <feature.icon className="h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors" />
+                                    </div>
+                                    <div>
+                                        <h3 className="font-semibold text-sm mb-1">{feature.title}</h3>
+                                        <p className="text-xs text-muted-foreground">{feature.desc}</p>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+
+                    </div>
+                </section>
+
+                {/* ── 2. Why ProCollab Section (Placed in Active Collaborations Spot) ── */}
+                <section ref={whyRef} className="relative py-24 border-b border-white/[0.06] bg-muted/10 overflow-hidden">
                     {/* Parallax orb */}
                     <div ref={orb3Ref} className="parallax-orb parallax-orb-amber w-[500px] h-[500px] -right-40 top-0 opacity-30" />
 
                     <div className="container px-4 max-w-7xl mx-auto relative z-10">
                         <div className="section-header text-center mb-16">
                             <div className="inline-flex items-center gap-2 border border-primary/30 px-4 py-1.5 text-xs font-mono tracking-widest uppercase text-primary mb-6 rounded-full">
-
                                 WHY PROCOLLAB
                             </div>
                             <h2 className="text-3xl font-bold tracking-tight sm:text-4xl lg:text-5xl mb-4">
-                                Collaboration, <span className="text-primary">Reimagined</span>
+                                Why Students <span className="text-primary">Love ProCollab</span>
                             </h2>
                             <p className="text-muted-foreground max-w-xl mx-auto text-sm md:text-base leading-relaxed">
-                                The platform built for people who want to stop talking about ideas and start building them — together.
+                                Group projects don't have to be stressful. ProCollab helps you find reliable partners and turn your ideas into reality.
                             </p>
                         </div>
 
@@ -376,22 +420,22 @@ export function Landing() {
                             {[
                                 {
                                     icon: Layers,
-                                    title: "Cross-Disciplinary Teams",
-                                    desc: "AI engineers, designers, researchers, and domain experts — all in one space. The best ideas come from the intersection of disciplines.",
+                                    title: "Cross-College Teaming",
+                                    desc: "Connect with students across different colleges, departments, and skill levels. Combine developers, designers, and domain experts effortlessly.",
                                     accent: "from-primary/20 to-primary/5",
                                     borderAccent: "group-hover:border-primary/30",
                                 },
                                 {
                                     icon: Zap,
-                                    title: "Zero Overhead",
-                                    desc: "No bloated project management. Post your idea, find collaborators, start building. We handle the friction so you can focus on the work.",
+                                    title: "Zero Confusion",
+                                    desc: "No complicated enterprise setups or scattered WhatsApp groups. Post your idea, invite teammates, and start building right away.",
                                     accent: "from-primary/15 to-transparent",
                                     borderAccent: "group-hover:border-primary/30",
                                 },
                                 {
                                     icon: Rocket,
-                                    title: "Built for Students & Builders",
-                                    desc: "Not another enterprise tool. Procollab is built for grassroots innovation — students, indie hackers, researchers, and makers.",
+                                    title: "Recruiter-Ready Portfolios",
+                                    desc: "Turn your college assignments and capstones into verified public project links complete with live demos and task metrics.",
                                     accent: "from-primary/15 to-transparent",
                                     borderAccent: "group-hover:border-primary/30",
                                 },
@@ -413,131 +457,17 @@ export function Landing() {
                     </div>
                 </section>
 
-                {/* ── Features ───────────────────────────────────────── */}
-                <section ref={featuresRef} className="py-28 border-b border-white/[0.06] relative overflow-hidden">
-                    <div className="container px-4 md:px-6 max-w-7xl mx-auto relative z-10">
-
-                        <div className="section-header mb-16">
-                            <div className="inline-flex items-center gap-2 border border-border px-3 py-1.5 text-xs font-mono tracking-widest uppercase text-muted-foreground mb-4">
-                                <Zap className="h-3 w-3" />
-                                SYS:02 — PLATFORM CAPABILITIES
-                            </div>
-                            <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">Everything You Need<br />to Succeed</h2>
-                            <p className="mt-3 text-muted-foreground max-w-lg text-sm leading-relaxed">Built for modern teams who want to collaborate without boundaries.</p>
-                        </div>
-
-                        {/* Primary feature cards */}
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-px bg-border border border-border">
-                            {[
-                                { icon: Users, title: "Find Your Dream Team", desc: "Connect with talented individuals from diverse backgrounds. Smart matching finds collaborators who complement your skills perfectly.", id: "F.01" },
-                                { icon: Lightbulb, title: "Discover Innovation", desc: "Browse cutting-edge projects or launch your own. Get inspired by what others are building and find opportunities to contribute.", id: "F.02" },
-                                { icon: ListTodo, title: "Seamless Collaboration", desc: "Integrated tools for task management, real-time messaging, and progress tracking. Everything you need in one place.", id: "F.03" },
-                            ].map((feature) => (
-                                <div key={feature.id} className="feature-primary bg-background p-8 group hover:bg-muted/20 transition-colors border-t-2 border-t-transparent hover:border-t-primary">
-                                    <div className="text-xs font-mono text-muted-foreground mb-5 tracking-widest">{feature.id}</div>
-                                    <div className="w-10 h-10 border border-border flex items-center justify-center mb-6 group-hover:border-primary transition-colors">
-                                        <feature.icon className="h-5 w-5 text-muted-foreground group-hover:text-primary transition-colors" />
-                                    </div>
-                                    <h3 className="text-base font-semibold mb-3">{feature.title}</h3>
-                                    <p className="text-sm text-muted-foreground leading-relaxed">{feature.desc}</p>
-                                </div>
-                            ))}
-                        </div>
-
-                        {/* Secondary feature row */}
-                        <div className="feature-secondary-grid grid grid-cols-1 md:grid-cols-3 gap-4 mt-6">
-                            {[
-                                { icon: Shield, title: "Secure & Private", desc: "Enterprise-grade security for your data" },
-                                { icon: TrendingUp, title: "Track Progress", desc: "Real-time analytics and insights" },
-                                { icon: Zap, title: "Lightning Fast", desc: "Optimized for speed and performance" },
-                            ].map((feature, i) => (
-                                <div key={i} className="feature-secondary flex gap-4 p-5 border border-border hover:border-primary transition-colors group">
-                                    <div className="flex-shrink-0 w-9 h-9 border border-border group-hover:border-primary flex items-center justify-center transition-colors">
-                                        <feature.icon className="h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors" />
-                                    </div>
-                                    <div>
-                                        <h3 className="font-semibold text-sm mb-1">{feature.title}</h3>
-                                        <p className="text-xs text-muted-foreground">{feature.desc}</p>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-
-                    </div>
-                </section>
-
-                {/* ── Featured Projects ──────────────────────────────── */}
-                <section ref={projectsRef} className="py-28 border-b border-white/[0.06] bg-muted/10 relative overflow-hidden">
-                    <div ref={orb4Ref} className="parallax-orb parallax-orb-muted w-[500px] h-[500px] -left-40 bottom-0 opacity-50" />
-
-                    <div className="container px-4 md:px-6 max-w-7xl mx-auto relative z-10">
-
-                        <div className="section-header mb-16">
-                            <div className="inline-flex items-center gap-2 border border-border px-3 py-1.5 text-xs font-mono tracking-widest uppercase text-muted-foreground mb-4">
-                                <Activity className="h-3 w-3" />
-                                SYS:03 — FEATURED PROJECTS
-                            </div>
-                            <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">Active Collaborations</h2>
-                            <p className="mt-3 text-muted-foreground max-w-lg text-sm leading-relaxed">Explore innovative projects happening right now.</p>
-                        </div>
-
-                        <div className="projects-grid grid grid-cols-1 md:grid-cols-3 gap-6">
-                            {[
-                                { title: "AI-Powered Healthcare Diagnostics", desc: "Combining medical expertise with AI to develop accessible diagnostic tools for underserved communities.", tags: ["Medicine", "AI", "Data Science"], members: "3/5", id: "PRJ.001" },
-                                { title: "Sustainable Urban Planning", desc: "Redesigning urban spaces with focus on sustainability, community engagement, and tech integration.", tags: ["Architecture", "Environment", "Sociology"], members: "4/6", id: "PRJ.002" },
-                                { title: "Digital Humanities Archive", desc: "Creating an interactive digital archive of historical artifacts using advanced visualization.", tags: ["History", "Computer Science", "Design"], members: "2/4", id: "PRJ.003" },
-                            ].map((project) => (
-                                <div key={project.id} className="project-card border border-border bg-background hover:border-primary transition-all duration-300 group p-6 flex flex-col hover:shadow-[0_8px_30px_-8px_hsl(38_95%_58%/0.1)]">
-                                    <div className="flex items-center justify-between mb-5">
-                                        <span className="text-xs font-mono text-muted-foreground tracking-widest">{project.id}</span>
-                                        <span className="inline-flex items-center gap-1.5 text-xs font-mono border border-primary/30 text-primary px-2 py-0.5">
-                                            <span className="w-1.5 h-1.5 bg-primary rounded-full animate-pulse" />
-                                            ACTIVE
-                                        </span>
-                                    </div>
-                                    <h3 className="text-sm font-semibold mb-3 group-hover:text-primary transition-colors leading-snug">{project.title}</h3>
-                                    <p className="text-xs text-muted-foreground mb-4 leading-relaxed flex-1">{project.desc}</p>
-                                    <div className="flex flex-wrap gap-2 mb-5">
-                                        {project.tags.map((tag, j) => (
-                                            <span key={j} className="text-xs font-mono border border-border px-2 py-0.5 text-muted-foreground">
-                                                {tag}
-                                            </span>
-                                        ))}
-                                    </div>
-                                    <div className="flex justify-between items-center pt-4 border-t border-border">
-                                        <span className="text-xs font-mono text-muted-foreground">{project.members} MEMBERS</span>
-                                        <Link to="#" className="text-xs font-mono text-primary flex items-center gap-1 hover:gap-2 transition-all">
-                                            VIEW DETAILS
-                                            <ArrowRight className="h-3 w-3" />
-                                        </Link>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-
-                        <div className="mt-10">
-                            <Button asChild variant="outline" className="rounded-none font-mono text-xs tracking-wider uppercase">
-                                <Link to="/projects">
-                                    View All Projects
-                                    <ArrowRight className="ml-2 h-4 w-4" />
-                                </Link>
-                            </Button>
-                        </div>
-
-                    </div>
-                </section>
-
-                {/* ── How It Works ───────────────────────────────────── */}
-                <section ref={workflowRef} className="py-28 border-b border-white/[0.06] relative overflow-hidden">
+                {/* ── 3. How It Works Section ───────────────────────────── */}
+                <section ref={workflowRef} className="py-24 border-b border-white/[0.06] relative overflow-hidden">
                     <div className="container px-4 md:px-6 max-w-7xl mx-auto relative z-10">
                         <div className="section-header text-center mb-20">
                             <div className="inline-flex items-center gap-2 border border-border px-4 py-1.5 text-xs font-mono tracking-widest uppercase text-muted-foreground mb-6 rounded-full">
                                 <Terminal className="h-3 w-3" />
-                                HOW IT WORKS
+                                SIMPLE PROCESS
                             </div>
-                            <h2 className="text-3xl font-bold tracking-tight sm:text-4xl lg:text-5xl">From Idea to Reality<br />in Three Steps</h2>
+                            <h2 className="text-3xl font-bold tracking-tight sm:text-4xl lg:text-5xl">How It Works in 3 Easy Steps</h2>
                             <p className="mt-4 text-muted-foreground max-w-lg mx-auto text-sm md:text-base leading-relaxed">
-                                Our platform removes friction from the collaboration process.
+                                Getting started is quick and straightforward.
                             </p>
                         </div>
 
@@ -556,23 +486,23 @@ export function Landing() {
                                     {
                                         step: "01",
                                         icon: Lightbulb,
-                                        title: "Share Your Vision",
-                                        desc: "Post your project idea with the skills you need. Define your goals, timeline, and what kind of collaborators you're looking for.",
-                                        detail: "Takes less than 5 minutes",
+                                        title: "Post Your Project Idea",
+                                        desc: "Describe what you want to build and the skills you're looking for. Takes less than 2 minutes.",
+                                        detail: "Quick & Simple Setup",
                                     },
                                     {
                                         step: "02",
                                         icon: Users,
-                                        title: "Connect with Talent",
-                                        desc: "Browse profiles of driven individuals or get matched automatically. Review applications and build your ideal team.",
-                                        detail: "Smart matching algorithm",
+                                        title: "Pick Your Teammates",
+                                        desc: "Browse student profiles or review requests from interested peers to form your ideal team.",
+                                        detail: "Filter by skills & discipline",
                                     },
                                     {
                                         step: "03",
                                         icon: Rocket,
-                                        title: "Build & Launch",
-                                        desc: "Collaborate using built-in tools — task boards, real-time chat, and milestone tracking. Ship your project together.",
-                                        detail: "All tools in one place",
+                                        title: "Build & Share Showcase",
+                                        desc: "Organize tasks together on simple boards and share your finished project link with recruiters.",
+                                        detail: "Get your project link",
                                     },
                                 ].map((item, i) => (
                                     <div key={i} className="step-card group flex flex-col items-center">
@@ -603,7 +533,7 @@ export function Landing() {
                     </div>
                 </section>
 
-                {/* ── CTA ────────────────────────────────────────────── */}
+                {/* ── 4. CTA Section ──────────────────────────────────── */}
                 <section ref={ctaRef} className="relative overflow-hidden py-32">
                     {/* Ambient glow behind text */}
                     <div className="cta-glow-orb absolute inset-0 cta-glow pointer-events-none" />
@@ -611,10 +541,10 @@ export function Landing() {
                     <div className="relative container px-4 max-w-7xl mx-auto z-10">
                         <div className="max-w-3xl mx-auto text-center">
                             <h2 className="cta-animate text-4xl font-bold tracking-tight sm:text-5xl md:text-6xl mb-6">
-                                Ready to Build<br />Something <span className="text-primary">Amazing?</span>
+                                Ready to Build Your Next <span className="text-primary">Great Project?</span>
                             </h2>
                             <p className="cta-animate text-muted-foreground mb-10 max-w-lg mx-auto leading-relaxed text-base md:text-lg">
-                                Join the community of innovators, researchers, and creators shaping the future of collaboration.
+                                Join thousands of students creating, collaborating, and launching awesome projects on ProCollab.
                             </p>
                             <div className="cta-animate flex flex-col sm:flex-row gap-3 justify-center">
                                 <Button asChild size="lg" className="rounded-none font-mono text-xs tracking-wider uppercase px-10 btn-glow-amber">

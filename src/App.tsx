@@ -166,6 +166,14 @@ function AppRoutes() {
               }
             />
             <Route
+              path="/discover/:domainSlug"
+              element={
+                <ErrorBoundary>
+                  <Discover />
+                </ErrorBoundary>
+              }
+            />
+            <Route
               path="/trending-topics"
               element={
                 <ErrorBoundary>

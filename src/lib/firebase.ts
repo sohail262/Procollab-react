@@ -1,26 +1,13 @@
 // Firebase configuration
+// Services are initialized synchronously to maintain compatibility with all
+// existing callers. The key optimization is that AuthContext (which imports this)
+// is itself only instantiated inside the App tree — and Firebase's own SDK
+// does tree-shaking of unused sub-packages at build time via the modular API.
 import { initializeApp, getApps, getApp } from 'firebase/app'
 import { getAuth } from 'firebase/auth'
 import { getFirestore, enableIndexedDbPersistence } from 'firebase/firestore'
 import { getStorage } from 'firebase/storage'
 import { getDatabase } from 'firebase/database'
-import { getAnalytics, isSupported } from 'firebase/analytics'
-
-// Validate required environment variables
-const requiredEnvVars = [
-    'VITE_FIREBASE_API_KEY',
-    'VITE_FIREBASE_AUTH_DOMAIN',
-    'VITE_FIREBASE_PROJECT_ID',
-    'VITE_FIREBASE_STORAGE_BUCKET',
-    'VITE_FIREBASE_MESSAGING_SENDER_ID',
-    'VITE_FIREBASE_APP_ID'
-]
-
-for (const envVar of requiredEnvVars) {
-    if (!import.meta.env[envVar] && !firebaseConfig[envVar.replace('VITE_FIREBASE_', '').toLowerCase() as keyof typeof firebaseConfig]) {
-        console.warn(`Missing environment variable: ${envVar}`)
-    }
-}
 
 const firebaseConfig = {
     apiKey: import.meta.env.VITE_FIREBASE_API_KEY || 'AIzaSyDBUImEHJh2V_kblqlOVgKICjUP_P02gcc',
@@ -38,7 +25,7 @@ const app = getApps().length === 0
     ? initializeApp(firebaseConfig)
     : getApp()
 
-// Initialize Firebase services
+// Initialize core Firebase services
 export const auth = getAuth(app)
 export const db = getFirestore(app)
 export const storage = getStorage(app)
@@ -67,7 +54,6 @@ export const database = getDatabase(app)
 enableIndexedDbPersistence(db).catch(err => {
     if (err.code === 'failed-precondition') {
         // Multiple tabs open — only the first tab gets persistence.
-        // Subsequent tabs still work normally, just without offline cache.
         console.warn('[Firebase] Offline persistence unavailable (multiple tabs open).')
     } else if (err.code === 'unimplemented') {
         // Browser does not support IndexedDB (e.g., Firefox private mode).
@@ -80,10 +66,14 @@ enableIndexedDbPersistence(db).catch(err => {
 // ✅ Export app — required by fcmService.ts for getMessaging(app)
 export { app }
 
-// ✅ Initialize Analytics (only in browser environments that support it)
-export let analytics: ReturnType<typeof getAnalytics> | null = null
-isSupported().then(supported => {
-    if (supported) analytics = getAnalytics(app)
-}).catch(() => { /* silently skip if analytics not supported */ })
+// ✅ Initialize Analytics lazily — deferred to avoid blocking initial parse
+// firebase/analytics is NOT imported at the top level so it stays out of the
+// critical-path chunk. It loads asynchronously after the app is interactive.
+export let analytics: Awaited<ReturnType<typeof import('firebase/analytics').getAnalytics>> | null = null
+import('firebase/analytics').then(({ getAnalytics, isSupported }) => {
+    isSupported().then(supported => {
+        if (supported) analytics = getAnalytics(app)
+    }).catch(() => { /* silently skip if analytics not supported */ })
+})
 
 export default app

@@ -15,16 +15,6 @@ const TEAM = [
     { name: "Liam O.", role: "DevOps", loc: "Sydney", lat: -33.86, lon: 151.20 }
 ]
 
-interface LabelData {
-    id: number
-    name: string
-    role: string
-    loc: string
-    x: number
-    y: number
-    visible: boolean
-}
-
 // Helper to get effective theme (resolving "system" to actual theme)
 function getEffectiveTheme(theme: string): "light" | "dark" {
     if (theme === "system") {
@@ -44,11 +34,38 @@ function getVector(lat: number, lon: number, r: number) {
     )
 }
 
+// Generate a fast fallback canvas procedural texture for Earth (instant 0ms network load)
+function createProceduralEarthTexture(isDark: boolean): THREE.CanvasTexture {
+    const canvas = document.createElement("canvas")
+    canvas.width = 1024
+    canvas.height = 512
+    const ctx = canvas.getContext("2d")!
+
+    // Base ocean background
+    ctx.fillStyle = isDark ? "#091322" : "#1e40af"
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+
+    // Grid pattern / land dots simulation
+    ctx.fillStyle = isDark ? "rgba(0, 240, 255, 0.3)" : "rgba(255, 255, 255, 0.4)"
+    for (let x = 0; x < canvas.width; x += 16) {
+        for (let y = 0; y < canvas.height; y += 16) {
+            if ((Math.sin(x * 0.02) + Math.cos(y * 0.03)) > 0.3) {
+                ctx.beginPath()
+                ctx.arc(x, y, 2.5, 0, Math.PI * 2)
+                ctx.fill()
+            }
+        }
+    }
+
+    const texture = new THREE.CanvasTexture(canvas)
+    texture.needsUpdate = true
+    return texture
+}
+
 export function HeroGlobe() {
     const mountRef = useRef<HTMLDivElement>(null)
-    const labelsRef = useRef<HTMLDivElement>(null)
+    const labelElementsRef = useRef<(HTMLDivElement | null)[]>([])
     const rendererRef = useRef<THREE.WebGLRenderer | null>(null)
-    const [labels, setLabels] = useState<LabelData[]>([])
     const [loading, setLoading] = useState(true)
     const { theme } = useTheme()
 
@@ -58,6 +75,18 @@ export function HeroGlobe() {
 
     const cameraRef = useRef<THREE.PerspectiveCamera | null>(null)
     const controlsRef = useRef<OrbitControls | null>(null)
+
+    // Build static list of location markers (Team + User)
+    const locations = [...TEAM]
+    if (userLocation) {
+        locations.push({
+            name: "You",
+            role: "Innovator",
+            loc: userLocation.name || "You",
+            lat: userLocation.lat,
+            lon: userLocation.lon
+        })
+    }
 
     const handleShareLocation = () => {
         if (!navigator.geolocation) {
@@ -70,7 +99,6 @@ export function HeroGlobe() {
                 const lat = position.coords.latitude
                 const lon = position.coords.longitude
 
-                // Fetch reverse geocoding to resolve city/region name
                 fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lon}&format=json`, {
                     headers: { 'Accept-Language': 'en' }
                 })
@@ -102,7 +130,7 @@ export function HeroGlobe() {
         const controls = controlsRef.current
 
         if (isZoomedIn) {
-            const userPos = getVector(userLocation.lat, userLocation.lon, 14) // 14 is CONFIG.radius
+            const userPos = getVector(userLocation.lat, userLocation.lon, 14)
             const targetCameraPos = userPos.clone().normalize().multiplyScalar(22)
 
             controls.autoRotate = false
@@ -111,7 +139,7 @@ export function HeroGlobe() {
                 x: targetCameraPos.x,
                 y: targetCameraPos.y,
                 z: targetCameraPos.z,
-                duration: 2.0,
+                duration: 1.8,
                 ease: "power2.out",
                 onUpdate: () => controls.update()
             })
@@ -129,20 +157,19 @@ export function HeroGlobe() {
         }
     }, [isZoomedIn, userLocation])
 
-    // Resolve effective theme
     const effectiveTheme = getEffectiveTheme(theme)
     const isDark = effectiveTheme === "dark"
 
     useEffect(() => {
         if (!mountRef.current) return
 
-        // Prevent double initialization in React Strict Mode
-        // Clear any existing canvas first
+        let isMounted = true
+
+        // Clean up previous container contents
         while (mountRef.current.firstChild) {
             mountRef.current.removeChild(mountRef.current.firstChild)
         }
 
-        // Clean up previous renderer if exists
         if (rendererRef.current) {
             rendererRef.current.dispose()
             rendererRef.current = null
@@ -150,7 +177,6 @@ export function HeroGlobe() {
 
         // --- THEME-BASED CONFIG ---
         const CONFIG = isDark ? {
-            // Dark mode config
             radius: 14,
             colorAmbient: 0x333333,
             colorSpot: 0x00f0ff,
@@ -165,7 +191,6 @@ export function HeroGlobe() {
             fogColor: 0x02040a,
             fogDensity: 0.02
         } : {
-            // Light mode config
             radius: 14,
             colorAmbient: 0x666666,
             colorSpot: 0x3b82f6,
@@ -183,7 +208,6 @@ export function HeroGlobe() {
 
         // --- SCENE ---
         const scene = new THREE.Scene()
-        // Only apply fog in dark mode - it causes a visible box in light mode
         if (isDark) {
             scene.fog = new THREE.FogExp2(CONFIG.fogColor, CONFIG.fogDensity)
         }
@@ -199,14 +223,16 @@ export function HeroGlobe() {
         cameraRef.current = camera
 
         // --- RENDERER ---
-        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
+        // Limit pixel ratio to max 2 for high DPI screens to prevent GPU slowdown
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "high-performance" })
         renderer.setSize(mountRef.current.clientWidth, mountRef.current.clientHeight)
-        renderer.setPixelRatio(window.devicePixelRatio)
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
         mountRef.current.appendChild(renderer.domElement)
 
         // --- CONTROLS ---
         const controls = new OrbitControls(camera, renderer.domElement)
         controls.enableDamping = true
+        controls.dampingFactor = 0.05
         controls.autoRotate = true
         controls.autoRotateSpeed = 0.6
         controls.minDistance = 20
@@ -215,20 +241,17 @@ export function HeroGlobe() {
         controls.enableZoom = false
         controlsRef.current = controls
 
-        // --- TEXTURE LOADER ---
-        const textureLoader = new THREE.TextureLoader()
-        const earthTexture = textureLoader.load(CONFIG.textureURL, () => {
-            setLoading(false)
-        })
+        // --- INSTANT PROCEDURAL TEXTURE + BACKGROUND LOAD ---
+        const fallbackTexture = createProceduralEarthTexture(isDark)
 
         // --- GLOBE GROUP ---
         const globeGroup = new THREE.Group()
         scene.add(globeGroup)
 
-        // 1. The Main Earth Sphere
-        const geometry = new THREE.SphereGeometry(CONFIG.radius, 64, 64)
+        // Optimized geometry: 36x36 segments instead of 64x64 (60% vertex reduction)
+        const geometry = new THREE.SphereGeometry(CONFIG.radius, 36, 36)
         const material = new THREE.MeshPhongMaterial({
-            map: earthTexture,
+            map: fallbackTexture,
             color: CONFIG.earthColor,
             emissive: CONFIG.emissive,
             emissiveIntensity: CONFIG.emissiveIntensity,
@@ -236,9 +259,19 @@ export function HeroGlobe() {
         })
         const earth = new THREE.Mesh(geometry, material)
         globeGroup.add(earth)
+        setLoading(false)
 
-        // 2. Tech Wireframe Overlay
-        const wireGeo = new THREE.WireframeGeometry(new THREE.SphereGeometry(CONFIG.radius + 0.1, 24, 24))
+        // Async load external texture lazily without blocking render
+        const textureLoader = new THREE.TextureLoader()
+        textureLoader.load(CONFIG.textureURL, (tex) => {
+            if (isMounted && material) {
+                material.map = tex
+                material.needsUpdate = true
+            }
+        })
+
+        // Tech Wireframe Overlay
+        const wireGeo = new THREE.WireframeGeometry(new THREE.SphereGeometry(CONFIG.radius + 0.1, 20, 20))
         const wireMat = new THREE.LineBasicMaterial({
             color: CONFIG.colorLine,
             transparent: true,
@@ -247,8 +280,8 @@ export function HeroGlobe() {
         const wireframe = new THREE.LineSegments(wireGeo, wireMat)
         globeGroup.add(wireframe)
 
-        // 3. Atmosphere Glow (Shader)
-        const atmosGeo = new THREE.SphereGeometry(CONFIG.radius + 2.5, 64, 64)
+        // Atmosphere Glow (Shader)
+        const atmosGeo = new THREE.SphereGeometry(CONFIG.radius + 2.5, 32, 32)
         const atmosMat = new THREE.ShaderMaterial({
             vertexShader: `
                 varying vec3 vNormal;
@@ -266,13 +299,13 @@ export function HeroGlobe() {
                 }
             `,
             uniforms: {
-                glowColor: {
-                    value: new THREE.Vector3(
+                glowColor: new THREE.Uniform(
+                    new THREE.Vector3(
                         CONFIG.atmosphereColor.r,
                         CONFIG.atmosphereColor.g,
                         CONFIG.atmosphereColor.b
                     )
-                }
+                )
             },
             side: THREE.BackSide,
             blending: THREE.AdditiveBlending,
@@ -281,7 +314,7 @@ export function HeroGlobe() {
         const atmosphere = new THREE.Mesh(atmosGeo, atmosMat)
         globeGroup.add(atmosphere)
 
-        // --- LIGHTING ---
+        // Lighting
         const ambientLight = new THREE.AmbientLight(CONFIG.colorAmbient, isDark ? 3.0 : 2.0)
         scene.add(ambientLight)
 
@@ -289,7 +322,6 @@ export function HeroGlobe() {
         sunLight.position.set(50, 30, 50)
         scene.add(sunLight)
 
-        // Opposite fill light to keep both sides of the globe visible (avoiding a dark side)
         const fillLight = new THREE.DirectionalLight(0xffffff, isDark ? 1.5 : 1.0)
         fillLight.position.set(-50, -30, -50)
         scene.add(fillLight)
@@ -298,21 +330,9 @@ export function HeroGlobe() {
         blueSpot.position.set(-50, 50, 0)
         scene.add(blueSpot)
 
-        // --- MARKERS & CONNECTIONS ---
-        const locations = [...TEAM]
-        if (userLocation) {
-            locations.push({
-                name: "You",
-                role: "Innovator",
-                loc: userLocation.name || "You",
-                lat: userLocation.lat,
-                lon: userLocation.lon
-            })
-        }
-
+        // Markers & Packets
         interface DomElement {
             mesh: THREE.Mesh
-            member: typeof locations[0]
             id: number
         }
 
@@ -323,20 +343,17 @@ export function HeroGlobe() {
             const pos = getVector(member.lat, member.lon, CONFIG.radius)
             const isUser = member.name === "You"
 
-            // A. The Dot
             const dot = new THREE.Mesh(
-                new THREE.SphereGeometry(isUser ? 0.15 : 0.2, 16, 16),
+                new THREE.SphereGeometry(isUser ? 0.15 : 0.2, 12, 12),
                 new THREE.MeshBasicMaterial({ color: isUser ? 0xff3b30 : CONFIG.colorDot })
             )
             dot.position.copy(pos)
             globeGroup.add(dot)
 
-            // Store for label tracking
-            domElements.push({ mesh: dot, member, id: i })
+            domElements.push({ mesh: dot, id: i })
 
-            // B. The Ripple Ring
             const ring = new THREE.Mesh(
-                new THREE.RingGeometry(isUser ? 0.25 : 0.3, isUser ? 0.45 : 0.5, 32),
+                new THREE.RingGeometry(isUser ? 0.25 : 0.3, isUser ? 0.45 : 0.5, 24),
                 new THREE.MeshBasicMaterial({
                     color: isUser ? 0xff3b30 : CONFIG.colorLine,
                     side: THREE.DoubleSide,
@@ -348,13 +365,10 @@ export function HeroGlobe() {
             ring.lookAt(new THREE.Vector3(0, 0, 0))
             globeGroup.add(ring)
 
-            // C. Connection Lines & Packets (Only for default team members loop to keep user's pin clear)
             if (isUser) {
-                // Draw a 3D pointer pin/line pointing straight outward from the globe
                 const pinHeight = 4.0
                 const tipPos = pos.clone().normalize().multiplyScalar(CONFIG.radius + pinHeight)
 
-                // Pin Line
                 const linePoints = [pos, tipPos]
                 const pointerGeo = new THREE.BufferGeometry().setFromPoints(linePoints)
                 const pointerMat = new THREE.LineBasicMaterial({
@@ -364,9 +378,8 @@ export function HeroGlobe() {
                 const pointerLine = new THREE.Line(pointerGeo, pointerMat)
                 globeGroup.add(pointerLine)
 
-                // Pin Tip Sphere
                 const tipDot = new THREE.Mesh(
-                    new THREE.SphereGeometry(0.18, 16, 16),
+                    new THREE.SphereGeometry(0.18, 12, 12),
                     new THREE.MeshBasicMaterial({ color: 0xff3b30 })
                 )
                 tipDot.position.copy(tipPos)
@@ -381,7 +394,7 @@ export function HeroGlobe() {
                 mid.normalize().multiplyScalar(CONFIG.radius + (dist * 0.3))
 
                 const curve = new THREE.QuadraticBezierCurve3(pos, mid, nextPos)
-                const lineGeo = new THREE.BufferGeometry().setFromPoints(curve.getPoints(50))
+                const lineGeo = new THREE.BufferGeometry().setFromPoints(curve.getPoints(30))
                 const lineMat = new THREE.LineBasicMaterial({
                     color: CONFIG.colorLine,
                     transparent: true,
@@ -390,9 +403,8 @@ export function HeroGlobe() {
                 const line = new THREE.Line(lineGeo, lineMat)
                 globeGroup.add(line)
 
-                // D. Traveling Packet
                 const packet = new THREE.Mesh(
-                    new THREE.SphereGeometry(0.12),
+                    new THREE.SphereGeometry(0.12, 8, 8),
                     new THREE.MeshBasicMaterial({ color: CONFIG.colorDot })
                 )
                 packet.userData = { curve: curve, pos: Math.random(), speed: 0.004 }
@@ -401,63 +413,78 @@ export function HeroGlobe() {
             }
         })
 
-        // --- RAYCASTER FOR OCCLUSION ---
         const raycaster = new THREE.Raycaster()
+        const tempVector = new THREE.Vector3()
 
-        // --- ANIMATION ---
-        let frameId: number
+        let frameId: number = 0
+        let isInView = true
 
+        // ⚡ HIGH PERFORMANCE ANIMATION LOOP — Direct DOM ref manipulation, NO React state updates!
         const animate = () => {
+            if (!isInView) return
+
             frameId = requestAnimationFrame(animate)
             controls.update()
 
             // Packet Animation
-            packets.forEach(packet => {
+            for (let p = 0; p < packets.length; p++) {
+                const packet = packets[p]
                 if (packet.userData.curve) {
                     packet.userData.pos += packet.userData.speed
                     if (packet.userData.pos > 1) packet.userData.pos = 0
                     packet.position.copy(packet.userData.curve.getPoint(packet.userData.pos))
                 }
-            })
+            }
 
-            // Label Position & Occlusion Sync
-            const newLabels: LabelData[] = domElements.map(item => {
-                const worldPos = item.mesh.getWorldPosition(new THREE.Vector3())
+            // Direct DOM Label Position & Occlusion Sync (Zero React re-renders)
+            const clientWidth = mountRef.current?.clientWidth || 0
+            const clientHeight = mountRef.current?.clientHeight || 0
+
+            for (let i = 0; i < domElements.length; i++) {
+                const item = domElements[i]
+                const labelEl = labelElementsRef.current[item.id]
+                if (!labelEl) continue
+
+                item.mesh.getWorldPosition(tempVector)
 
                 // Occlusion check
-                const dir = worldPos.clone().sub(camera.position).normalize()
+                const dir = tempVector.clone().sub(camera.position).normalize()
                 raycaster.set(camera.position, dir)
                 const intersects = raycaster.intersectObject(earth)
 
-                const distToDot = camera.position.distanceTo(worldPos)
-                let isVisible = true
-                if (intersects.length > 0 && intersects[0].distance < distToDot - 1.5) {
-                    isVisible = false
-                }
+                const distToDot = camera.position.distanceTo(tempVector)
+                const isVisible = !(intersects.length > 0 && intersects[0].distance < distToDot - 1.5)
 
                 // Project to screen coordinates
-                const v = worldPos.project(camera)
-                const x = (v.x * 0.5 + 0.5) * (mountRef.current?.clientWidth || 0)
-                const y = -(v.y * 0.5 - 0.5) * (mountRef.current?.clientHeight || 0)
+                const v = tempVector.project(camera)
+                const x = (v.x * 0.5 + 0.5) * clientWidth
+                const y = -(v.y * 0.5 - 0.5) * clientHeight
 
-                return {
-                    id: item.id,
-                    name: item.member.name,
-                    role: item.member.role,
-                    loc: item.member.loc,
-                    x,
-                    y,
-                    visible: isVisible
-                }
-            })
-
-            setLabels(newLabels)
+                labelEl.style.transform = `translate(-50%, -130%) translate(${x}px, ${y}px)`
+                labelEl.style.opacity = isVisible ? '1' : '0'
+            }
 
             renderer.render(scene, camera)
         }
+
+        // ⚡ INTERSECTION OBSERVER: Pause animation loop when off-screen to save 100% CPU/GPU
+        const observer = new IntersectionObserver(([entry]) => {
+            isInView = entry.isIntersecting
+            if (isInView) {
+                cancelAnimationFrame(frameId)
+                frameId = requestAnimationFrame(animate)
+            } else {
+                cancelAnimationFrame(frameId)
+            }
+        }, { threshold: 0.05 })
+
+        if (mountRef.current) {
+            observer.observe(mountRef.current)
+        }
+
         animate()
 
-        // --- RESIZE HANDLER ---
+        // Resize Handler
         const handleResize = () => {
             if (!mountRef.current) return
             camera.aspect = mountRef.current.clientWidth / mountRef.current.clientHeight
@@ -466,34 +493,33 @@ export function HeroGlobe() {
         }
         window.addEventListener("resize", handleResize)
 
-        // Store renderer ref for cleanup
         rendererRef.current = renderer
 
-        // --- CLEANUP ---
         return () => {
+            isMounted = false
             window.removeEventListener("resize", handleResize)
+            observer.disconnect()
             cancelAnimationFrame(frameId)
 
-            // Clear all children from mount
             if (mountRef.current) {
                 while (mountRef.current.firstChild) {
                     mountRef.current.removeChild(mountRef.current.firstChild)
                 }
             }
 
-            // Dispose Three.js resources
             geometry.dispose()
             material.dispose()
             wireGeo.dispose()
             wireMat.dispose()
             atmosGeo.dispose()
             atmosMat.dispose()
+            fallbackTexture.dispose()
             renderer.dispose()
             rendererRef.current = null
             cameraRef.current = null
             controlsRef.current = null
         }
-    }, [isDark, userLocation]) // Re-run effect when theme changes or user location changes
+    }, [isDark, userLocation])
 
     return (
         <div className="relative w-full h-full min-h-[500px]">
@@ -507,51 +533,44 @@ export function HeroGlobe() {
             {/* Canvas Container */}
             <div ref={mountRef} className="w-full h-full" />
 
-            {/* HTML Labels Container */}
-            <div ref={labelsRef} className="absolute inset-0 pointer-events-none overflow-hidden">
-                {labels.map(label => (
+            {/* HTML Labels Container (Direct DOM manipulated via refs for 60FPS speed without React state overhead) */}
+            <div className="absolute inset-0 pointer-events-none overflow-hidden">
+                {locations.map((member, i) => (
                     <div
-                        key={label.id}
-                        className="absolute pointer-events-none transition-opacity duration-300"
-                        style={{
-                            transform: `translate(-50%, -130%) translate(${label.x}px, ${label.y}px)`,
-                            opacity: label.visible ? 1 : 0
+                        key={i}
+                        ref={(el: HTMLDivElement | null): void => {
+                            labelElementsRef.current[i] = el
                         }}
+                        className="absolute pointer-events-none transition-opacity duration-200 opacity-0"
+                        style={{ willChange: "transform, opacity" }}
                     >
-                        {/* Node Tag - Theme aware */}
-                        <div className={`relative backdrop-blur-sm px-3 py-2.5 rounded text-xs min-w-[140px] ${
-                            label.name === "Innovator"
+                        <div className={`relative backdrop-blur-sm px-3 py-2.5 rounded text-xs min-w-[140px] ${member.name === "You"
                                 ? 'bg-red-950/85 border border-red-500/50 text-white shadow-[0_4px_25px_rgba(239,68,68,0.25)] font-bold'
                                 : isDark
                                     ? 'bg-[rgba(10,20,35,0.85)] border border-cyan-400/30 text-white shadow-[0_10px_30px_rgba(0,0,0,0.5)]'
                                     : 'bg-white/90 border border-blue-300/50 text-gray-800 shadow-[0_4px_20px_rgba(0,0,0,0.1)]'
                             }`}>
-                            {/* Header: Role & Location */}
                             <div className="flex flex-wrap items-center gap-1 mb-1 text-[10px]">
-                                <span className={`font-bold uppercase tracking-wide ${
-                                    label.name === "You"
+                                <span className={`font-bold uppercase tracking-wide ${member.name === "You"
                                         ? 'text-red-400'
                                         : isDark
                                             ? 'text-cyan-400'
                                             : 'text-blue-600'
-                                }`}>
-                                    {label.name === "You" ? "Innovator" : label.role}
+                                    }`}>
+                                    {member.name === "You" ? "Innovator" : member.role}
                                 </span>
                                 <span className="text-slate-500">-</span>
                                 <span className={`${isDark ? 'text-slate-400' : 'text-gray-500'}`}>
-                                    {label.loc}
+                                    {member.loc}
                                 </span>
                             </div>
-                            {/* Name */}
                             <div className="font-semibold text-[13px]">
-                                {label.name}
+                                {member.name}
                             </div>
-
-                            {/* Connector Line */}
                             <div
                                 className="absolute left-1/2 bottom-[-20px] w-[1px] h-[20px]"
                                 style={{
-                                    background: label.name === "Innovator"
+                                    background: member.name === "You"
                                         ? 'linear-gradient(to bottom, #ef4444, transparent)'
                                         : isDark
                                             ? 'linear-gradient(to bottom, #00f0ff, transparent)'
@@ -575,14 +594,14 @@ export function HeroGlobe() {
                     }}
                     disabled={locating}
                     className={`absolute bottom-4 left-1/2 -translate-x-1/2 z-20 font-mono text-[11px] tracking-wider uppercase px-4 py-2 transition-all rounded-full flex items-center gap-1.5 pointer-events-auto ${userLocation
-                            ? isDark
-                                ? 'bg-cyan-500/20 border border-cyan-400/40 text-cyan-300 shadow-[0_4px_15px_rgba(0,240,255,0.15)] hover:bg-cyan-500/30'
-                                : 'bg-blue-50/90 border border-blue-300 text-blue-800 shadow-[0_4px_15px_rgba(59,130,246,0.15)] hover:bg-blue-100'
-                            : locating
-                                ? 'bg-slate-800/80 border border-slate-700 text-slate-400 cursor-not-allowed'
-                                : isDark
-                                    ? 'bg-slate-950/70 border border-cyan-400/30 text-white shadow-[0_4px_15px_rgba(0,240,255,0.1)] hover:bg-cyan-500/10 active:bg-cyan-500/20'
-                                    : 'bg-white/80 border border-blue-300/50 text-blue-800 shadow-[0_4px_15px_rgba(59,130,246,0.15)] hover:bg-blue-50 hover:text-blue-900'
+                        ? isDark
+                            ? 'bg-cyan-500/20 border border-cyan-400/40 text-cyan-300 shadow-[0_4px_15px_rgba(0,240,255,0.15)] hover:bg-cyan-500/30'
+                            : 'bg-blue-50/90 border border-blue-300 text-blue-800 shadow-[0_4px_15px_rgba(59,130,246,0.15)] hover:bg-blue-100'
+                        : locating
+                            ? 'bg-slate-800/80 border border-slate-700 text-slate-400 cursor-not-allowed'
+                            : isDark
+                                ? 'bg-slate-950/70 border border-cyan-400/30 text-white shadow-[0_4px_15px_rgba(0,240,255,0.1)] hover:bg-cyan-500/10 active:bg-cyan-500/20'
+                                : 'bg-white/80 border border-blue-300/50 text-blue-800 shadow-[0_4px_15px_rgba(59,130,246,0.15)] hover:bg-blue-50 hover:text-blue-900'
                         }`}
                 >
                     <MapPin className={`h-3.5 w-3.5 ${userLocation ? 'text-cyan-400' : 'text-primary'}`} />

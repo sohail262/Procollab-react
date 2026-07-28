@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { DashboardLayout } from '@/components/layout/DashboardLayout'
+import { SEOHead } from '@/components/seo/SEOHead'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -354,6 +355,21 @@ export function TrendingTopics() {
 
     return (
         <DashboardLayout>
+            <SEOHead
+                title="Trending Topics & Project Research Ideas"
+                description="Explore trending innovations, tech news, AI research, and domain-wise project ideas across Tech, Medicine, Law, Business, and Design on ProCollab."
+                keywords={[
+                    'trending tech topics',
+                    'student project ideas',
+                    'AI research trends',
+                    'medical tech news',
+                    'law and tech trends',
+                    'business innovation topics',
+                    'design research trends',
+                    'HackerNews top stories',
+                ]}
+                canonical="https://procollab.in/trending-topics"
+            />
             <div className="min-h-screen">
                 {/* Header */}
                 <div className="mb-7">

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { SEOHead, buildBreadcrumbSchema } from '@/components/seo/SEOHead'
 import { DashboardLayout } from '@/components/layout/DashboardLayout'
 import { Card, CardContent } from '@/components/ui/card'
@@ -97,10 +97,15 @@ interface TrendingTopic {
 }
 
 export function Discover() {
+    const { domainSlug } = useParams<{ domainSlug?: string }>()
     const navigate = useNavigate()
     const { toast } = useToast()
     const [loading, setLoading] = useState(true)
     const [refreshingTopics, setRefreshingTopics] = useState(false)
+
+    const domainTitle = domainSlug
+        ? domainSlug.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+        : null
 
     // Track feature usage on mount
     useEffect(() => {
@@ -745,9 +750,13 @@ export function Discover() {
     return (
         <DashboardLayout>
             <SEOHead
-                title="Discover Projects & Collaborators"
-                description="Discover student projects by domain and skill. Find teammates, connect with developers, and explore trending tech projects. Search by technology, discipline, or skill to find your next collaboration."
+                title={domainTitle ? `${domainTitle} Student Projects & Teammates` : "Discover Projects & Collaborators"}
+                description={domainTitle
+                    ? `Explore top ${domainTitle} student projects, find ${domainTitle} collaborators & teammates, and showcase your ${domainTitle} project portfolio on ProCollab.`
+                    : "Discover student projects by domain and skill. Find teammates, connect with developers, and explore trending tech projects. Search by technology, discipline, or skill to find your next collaboration."
+                }
                 keywords={[
+                    ...(domainTitle ? [domainTitle, `${domainTitle} student projects`, `${domainTitle} project ideas`, `find ${domainTitle} teammates`] : []),
                     'discover student projects',
                     'find project collaborators',
                     'find teammates online',
@@ -758,15 +767,12 @@ export function Discover() {
                     'find project partner India',
                     'developer collaboration',
                     'tech team finder',
-                    'engineering student network',
-                    'project mate finder',
-                    'trending tech projects',
-                    'open to collaborate students',
                 ]}
-                canonical="https://procollab.in/discover"
+                canonical={domainSlug ? `https://procollab.in/discover/${domainSlug}` : "https://procollab.in/discover"}
                 structuredData={buildBreadcrumbSchema([
                     { name: 'Home', url: '/' },
                     { name: 'Discover', url: '/discover' },
+                    ...(domainTitle ? [{ name: domainTitle, url: `/discover/${domainSlug}` }] : []),
                 ])}
             />
             <div className="mb-6 sm:mb-8">

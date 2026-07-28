@@ -2,10 +2,35 @@ import path from "path"
 import react from "@vitejs/plugin-react"
 import { defineConfig } from "vitest/config"
 import { VitePWA } from "vite-plugin-pwa"
+import { createRequire } from "module"
+
+// vite-plugin-compression is a prod build-only dependency.
+// Load it safely so `npm run dev` still works before the package is installed.
+const _require = createRequire(import.meta.url)
+let compression: (...args: any[]) => any
+try {
+  compression = _require('vite-plugin-compression').default ?? _require('vite-plugin-compression')
+} catch {
+  // Package not installed yet — use a no-op plugin stub
+  compression = () => ({ name: 'compression-noop' })
+}
 
 export default defineConfig({
   plugins: [
     react(),
+    // Brotli compression — best compression ratio (~70% smaller than gzip)
+    // Run `npm install --save-dev vite-plugin-compression` to activate
+    compression({
+      algorithm: 'brotliCompress',
+      ext: '.br',
+      threshold: 1024, // Only compress files > 1KB
+    }),
+    // Gzip as fallback for older CDNs/proxies that don't support Brotli
+    compression({
+      algorithm: 'gzip',
+      ext: '.gz',
+      threshold: 1024,
+    }),
     VitePWA({
       registerType: "autoUpdate",
       injectRegister: "auto",
@@ -53,6 +78,8 @@ export default defineConfig({
     alias: {
       "@": path.resolve(__dirname, "./src"),
     },
+    // Fix duplicate module warnings — ensures single instance of React in bundle
+    dedupe: ["react", "react-dom", "react-router-dom"],
   },
   test: {
     globals: true,
@@ -60,30 +87,64 @@ export default defineConfig({
     setupFiles: ['./src/test/setup.ts'],
   },
   build: {
-    // Optimize bundle size
+    // Target modern browsers — significantly reduces polyfill payload
+    target: 'es2020',
+    // Use lightningcss for faster, smaller CSS output (replaces esbuild CSS)
+    cssMinify: 'lightningcss',
+    // Skip compressed size reporting for faster CI builds
+    reportCompressedSize: false,
     rollupOptions: {
       output: {
-        manualChunks: {
-          // Separate vendor chunks
-          'react-vendor': ['react', 'react-dom', 'react-router-dom'],
-          'firebase-vendor': ['firebase/app', 'firebase/auth', 'firebase/firestore', 'firebase/database'],
-          'ui-vendor': ['@radix-ui/react-dialog', '@radix-ui/react-dropdown-menu', '@radix-ui/react-tooltip', '@radix-ui/react-avatar'],
-          'framer-motion': ['framer-motion'],
-          'lucide-react': ['lucide-react'],
-          'chart-vendor': ['recharts'],
-          'three-vendor': ['three'],
-          'utils': ['clsx', 'class-variance-authority', 'tailwind-merge']
-        }
+        manualChunks: (id) => {
+          // React core — always cached together
+          if (id.includes('react-dom') || id.includes('react-router-dom')) return 'react-vendor'
+          if (id.includes('/react/')) return 'react-vendor'
+
+          // Firebase — split by sub-module so unused features aren't loaded
+          if (id.includes('firebase/auth') || id.includes('@firebase/auth')) return 'firebase-auth'
+          if (id.includes('firebase/firestore') || id.includes('@firebase/firestore')) return 'firebase-firestore'
+          if (id.includes('firebase/storage') || id.includes('@firebase/storage')) return 'firebase-storage'
+          if (id.includes('firebase/messaging') || id.includes('@firebase/messaging')) return 'firebase-messaging'
+          if (id.includes('firebase/functions') || id.includes('@firebase/functions')) return 'firebase-functions'
+          if (id.includes('firebase/database') || id.includes('@firebase/database')) return 'firebase-rtdb'
+          if (id.includes('firebase/app') || id.includes('@firebase/app')) return 'firebase-core'
+
+          // Heavy UI / animation libs — separate so they're cached independently
+          if (id.includes('framer-motion')) return 'framer-motion'
+          if (id.includes('three') || id.includes('Three')) return 'three-vendor'
+          if (id.includes('gsap')) return 'gsap-vendor'
+          if (id.includes('recharts')) return 'chart-vendor'
+          if (id.includes('lucide-react')) return 'lucide-react'
+
+          // Radix UI components
+          if (id.includes('@radix-ui')) return 'radix-ui'
+
+          // Google OAuth
+          if (id.includes('@react-oauth')) return 'oauth-vendor'
+
+          // Utility libs
+          if (id.includes('clsx') || id.includes('class-variance-authority') || id.includes('tailwind-merge')) return 'utils'
+        },
       }
     },
-    // Optimize chunk size
-    chunkSizeWarningLimit: 600,
-    // Enable minification
+    // Warn at 500KB — slightly below default to keep chunks honest
+    chunkSizeWarningLimit: 500,
+    // Terser with aggressive dead-code elimination
     minify: 'terser',
     terserOptions: {
       compress: {
-        drop_console: true, // Remove console.logs in production
-        drop_debugger: true
+        drop_console: true,
+        drop_debugger: true,
+        // Remove pure function calls that have no side effects
+        pure_funcs: ['console.log', 'console.info', 'console.debug', 'console.warn'],
+        passes: 2,        // Two compression passes for better results
+        ecma: 2020,
+      },
+      mangle: {
+        safari10: false,  // Don't need Safari 10 workarounds
+      },
+      format: {
+        comments: false,  // Strip all comments from production bundle
       }
     }
   },

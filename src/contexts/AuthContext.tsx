@@ -38,12 +38,14 @@ import {
 } from '@/services/fcmService'
 import { trackSessionStart } from '@/services/analyticsService'
 import { LoadingScreen } from '@/components/LoadingScreen'
-import { BANNER_PRESETS } from '@/components/BannerPresets'
+// Import only the IDs — not the full 109 KB SVG-heavy BannerPresets component.
+// The actual render functions are only needed in the profile/settings pages where
+// the banner picker UI is shown, so they stay in their own lazy-loaded chunks.
+import { BANNER_PRESET_IDS } from '@/components/BannerPresetIds'
 
 const getRandomBannerStyle = () => {
-    if (!BANNER_PRESETS || BANNER_PRESETS.length === 0) return 'aurora-glow'
-    const randomIndex = Math.floor(Math.random() * BANNER_PRESETS.length)
-    return BANNER_PRESETS[randomIndex].id
+    const randomIndex = Math.floor(Math.random() * BANNER_PRESET_IDS.length)
+    return BANNER_PRESET_IDS[randomIndex]
 }
 
 // ─────────────────────────────────────────────────────────

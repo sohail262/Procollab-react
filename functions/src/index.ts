@@ -494,3 +494,92 @@ export const testFCM = onRequest(
         }
     }
 )
+
+// ─────────────────────────────────────────────────────────
+// Dynamic SEO Pre-renderer for Bot Crawlers
+// ─────────────────────────────────────────────────────────
+
+/**
+ * Server-side dynamic meta tag injection for social bots.
+ * Intercepts requests on /project/public/:id and /u/:username
+ * for Facebook, Twitter, WhatsApp, LinkedIn, and Slack scrapers.
+ */
+export const seoPrerender = onRequest(
+    {
+        region: 'us-central1',
+        cors: true,
+        timeoutSeconds: 15,
+        memory: '256MiB',
+    },
+    async (req, res) => {
+        const userAgent = (req.headers['user-agent'] || '').toLowerCase()
+        const isBot = /facebookexternalhit|twitterbot|linkedinbot|whatsapp|slackbot-linkexpanding|discordbot|telegrambot|googlebot/i.test(userAgent)
+
+        const pathSegments = req.path.split('/').filter(Boolean)
+        const isPublicProject = pathSegments[0] === 'project' && pathSegments[1] === 'public'
+        const isPublicUser = pathSegments[0] === 'u'
+
+        // Default platform metadata
+        let title = 'ProCollab — Student Project Collaboration & Showcase Platform'
+        let description = "ProCollab is India's #1 platform for students to showcase final year projects, discover domain-wise projects, and find teammates."
+        let image = 'https://procollab.in/og-default.png'
+        let url = `https://procollab.in${req.path}`
+
+        try {
+            if (isBot && isPublicProject && pathSegments[2]) {
+                const projectId = pathSegments[2]
+                const projSnap = await db.collection('projects').doc(projectId).get()
+                if (projSnap.exists) {
+                    const proj = projSnap.data()
+                    title = `${proj?.title || 'Student Project'} — Showcase | ProCollab`
+                    description = proj?.summary || proj?.description?.substring(0, 180) || description
+                    if (proj?.coverImage || proj?.thumbnail) {
+                        image = proj.coverImage || proj.thumbnail
+                    }
+                }
+            } else if (isBot && isPublicUser && pathSegments[1]) {
+                const username = pathSegments[1]
+                const userSnap = await db.collection('users').where('username', '==', username).limit(1).get()
+                if (!userSnap.empty) {
+                    const u = userSnap.docs[0].data()
+                    const name = u.displayName || u.firstName ? `${u.firstName} ${u.lastName || ''}`.trim() : username
+                    title = `${name} (@${username}) — Student Developer Portfolio | ProCollab`
+                    description = u.bio || `${name}'s developer portfolio, skills (${(u.skills || []).slice(0, 5).join(', ')}), and completed projects on ProCollab.`
+                    if (u.photoURL || u.avatar) {
+                        image = u.photoURL || u.avatar
+                    }
+                }
+            }
+        } catch (err) {
+            logger.warn('[SEO Prerender] Error fetching document data:', err)
+        }
+
+        const html = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>${title}</title>
+  <meta name="description" content="${description}" />
+  <meta property="og:site_name" content="ProCollab" />
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="${title}" />
+  <meta property="og:description" content="${description}" />
+  <meta property="og:url" content="${url}" />
+  <meta property="og:image" content="${image}" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="${title}" />
+  <meta name="twitter:description" content="${description}" />
+  <meta name="twitter:image" content="${image}" />
+  <link rel="canonical" href="${url}" />
+  <script>window.location.href = "${url}";</script>
+</head>
+<body>
+  <h1>${title}</h1>
+  <p>${description}</p>
+</body>
+</html>`
+
+        res.set('Cache-Control', 'public, max-age=3600, s-maxage=86400')
+        res.status(200).send(html)
+    }
+)

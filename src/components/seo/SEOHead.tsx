@@ -339,3 +339,21 @@ export function buildBreadcrumbSchema(
         })),
     }
 }
+
+/** FAQPage schema for rich SERP Q&A snippets */
+export function buildFAQSchema(
+    questions: Array<{ question: string; answer: string }>
+) {
+    return {
+        '@context': 'https://schema.org',
+        '@type': 'FAQPage',
+        mainEntity: questions.map(q => ({
+            '@type': 'Question',
+            name: q.question,
+            acceptedAnswer: {
+                '@type': 'Answer',
+                text: q.answer,
+            },
+        })),
+    }
+}

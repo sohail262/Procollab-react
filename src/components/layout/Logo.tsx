@@ -15,15 +15,18 @@ export function Logo({ className = '', iconSize = 64, showText = true, textColor
                 className="overflow-hidden relative flex-shrink-0 flex items-center justify-center"
                 style={{ width: iconSize, height: iconSize }}
             >
-                <img
-                    src="/images/logo_pc.png"
-                    alt="ProCollab Logo"
-                    width={iconSize}
-                    height={iconSize}
-                    decoding="async"
-                    fetchPriority="high"
-                    className="w-full h-full object-contain scale-[1.35] mix-blend-screen"
-                />
+                <picture>
+                    <source srcSet="/images/logo_pc.webp" type="image/webp" />
+                    <img
+                        src="/images/logo_pc.png"
+                        alt="ProCollab Logo"
+                        width={iconSize}
+                        height={iconSize}
+                        decoding="async"
+                        fetchPriority="high"
+                        className="w-full h-full object-contain scale-[1.35] mix-blend-screen"
+                    />
+                </picture>
             </div>
             {showText && (
                 <span className={`font-display font-normal tracking-[0.2em] text-[11px] uppercase ${textColor}`}>
