@@ -89,8 +89,6 @@ export default defineConfig({
   build: {
     // Target modern browsers — significantly reduces polyfill payload
     target: 'es2020',
-    // Use lightningcss for faster, smaller CSS output (replaces esbuild CSS)
-    cssMinify: 'lightningcss',
     // Skip compressed size reporting for faster CI builds
     reportCompressedSize: false,
     rollupOptions: {
