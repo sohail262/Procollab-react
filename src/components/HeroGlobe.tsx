@@ -42,16 +42,31 @@ function createProceduralEarthTexture(isDark: boolean): THREE.CanvasTexture {
     const ctx = canvas.getContext("2d")!
 
     // Base ocean background
-    ctx.fillStyle = isDark ? "#091322" : "#1e40af"
+    ctx.fillStyle = isDark ? "#080e1a" : "#1e40af"
     ctx.fillRect(0, 0, canvas.width, canvas.height)
 
-    // Grid pattern / land dots simulation
-    ctx.fillStyle = isDark ? "rgba(0, 240, 255, 0.3)" : "rgba(255, 255, 255, 0.4)"
-    for (let x = 0; x < canvas.width; x += 16) {
-        for (let y = 0; y < canvas.height; y += 16) {
-            if ((Math.sin(x * 0.02) + Math.cos(y * 0.03)) > 0.3) {
+    // Tech landmass dot matrix simulation (representing continents)
+    ctx.fillStyle = isDark ? "rgba(56, 189, 248, 0.45)" : "rgba(255, 255, 255, 0.55)"
+
+    // Rough continent density shapes (North America, South America, Europe/Africa, Asia, Australia)
+    for (let x = 0; x < canvas.width; x += 10) {
+        for (let y = 0; y < canvas.height; y += 10) {
+            const nx = (x / canvas.width) * 360 - 180
+            const ny = 90 - (y / canvas.height) * 180
+
+            // Simplified landmass bounds math
+            const isNorthAmerica = nx > -160 && nx < -50 && ny > 15 && ny < 75
+            const isSouthAmerica = nx > -85 && nx < -35 && ny > -55 && ny < 15
+            const isEuropeAfrica = nx > -20 && nx < 55 && ny > -35 && ny < 70
+            const isAsia = nx > 55 && nx < 150 && ny > 5 && ny < 75
+            const isAustralia = nx > 110 && nx < 155 && ny > -42 && ny < -10
+
+            // Perlin-style micro noise for organic continent coastlines
+            const noise = Math.sin(nx * 0.08) * Math.cos(ny * 0.08) + Math.sin(nx * 0.2 + ny * 0.2) * 0.3
+
+            if ((isNorthAmerica || isSouthAmerica || isEuropeAfrica || isAsia || isAustralia) && noise > -0.2) {
                 ctx.beginPath()
-                ctx.arc(x, y, 2.5, 0, Math.PI * 2)
+                ctx.arc(x, y, 1.8, 0, Math.PI * 2)
                 ctx.fill()
             }
         }
@@ -261,14 +276,41 @@ export function HeroGlobe() {
         globeGroup.add(earth)
         setLoading(false)
 
-        // Async load external texture lazily without blocking render
+        // Async load real Earth map texture (WebP -> JPG -> remote CDN)
         const textureLoader = new THREE.TextureLoader()
-        textureLoader.load(CONFIG.textureURL, (tex) => {
-            if (isMounted && material) {
-                material.map = tex
-                material.needsUpdate = true
+        const localWebp = isDark ? '/images/earth-night.webp' : '/images/earth-blue-marble.webp'
+        const localJpg = isDark ? '/images/earth-night.jpg' : '/images/earth-blue-marble.jpg'
+
+        textureLoader.load(
+            localWebp,
+            (tex) => {
+                if (isMounted && material) {
+                    material.map = tex
+                    material.needsUpdate = true
+                }
+            },
+            undefined,
+            () => {
+                textureLoader.load(
+                    localJpg,
+                    (tex) => {
+                        if (isMounted && material) {
+                            material.map = tex
+                            material.needsUpdate = true
+                        }
+                    },
+                    undefined,
+                    () => {
+                        textureLoader.load(CONFIG.textureURL, (tex) => {
+                            if (isMounted && material) {
+                                material.map = tex
+                                material.needsUpdate = true
+                            }
+                        })
+                    }
+                )
             }
-        })
+        )
 
         // Tech Wireframe Overlay
         const wireGeo = new THREE.WireframeGeometry(new THREE.SphereGeometry(CONFIG.radius + 0.1, 20, 20))
@@ -436,36 +478,37 @@ export function HeroGlobe() {
                 }
             }
 
-            // Direct DOM Label Position & Occlusion Sync (Zero React re-renders)
-            const clientWidth = mountRef.current?.clientWidth || 0
-            const clientHeight = mountRef.current?.clientHeight || 0
+        // Direct DOM Label Position & Occlusion Sync (Zero React re-renders, 0 raycasts)
+        const clientWidth = mountRef.current?.clientWidth || 0
+        const clientHeight = mountRef.current?.clientHeight || 0
+        const camDist = camera.position.length()
+        const cosHorizon = CONFIG.radius / camDist // ~0.368 exact horizon threshold
 
-            for (let i = 0; i < domElements.length; i++) {
-                const item = domElements[i]
-                const labelEl = labelElementsRef.current[item.id]
-                if (!labelEl) continue
+        for (let i = 0; i < domElements.length; i++) {
+            const item = domElements[i]
+            const labelEl = labelElementsRef.current[item.id]
+            if (!labelEl) continue
 
-                item.mesh.getWorldPosition(tempVector)
+            item.mesh.getWorldPosition(tempVector)
 
-                // Occlusion check
-                const dir = tempVector.clone().sub(camera.position).normalize()
-                raycaster.set(camera.position, dir)
-                const intersects = raycaster.intersectObject(earth)
+            // Fast 0.001ms dot-product occlusion calculation for sphere centered at origin
+            const dotVal = tempVector.dot(camera.position) / (CONFIG.radius * camDist)
 
-                const distToDot = camera.position.distanceTo(tempVector)
-                const isVisible = !(intersects.length > 0 && intersects[0].distance < distToDot - 1.5)
+            // Smooth opacity transition near horizon edge (fades smoothly from 1.0 to 0.0)
+            const opacity = Math.max(0, Math.min(1, (dotVal - cosHorizon) / 0.12))
 
-                // Project to screen coordinates
-                const v = tempVector.project(camera)
-                const x = (v.x * 0.5 + 0.5) * clientWidth
-                const y = -(v.y * 0.5 - 0.5) * clientHeight
+            // Project to screen coordinates
+            const v = tempVector.project(camera)
+            const x = (v.x * 0.5 + 0.5) * clientWidth
+            const y = -(v.y * 0.5 - 0.5) * clientHeight
 
-                labelEl.style.transform = `translate(-50%, -130%) translate(${x}px, ${y}px)`
-                labelEl.style.opacity = isVisible ? '1' : '0'
-            }
-
-            renderer.render(scene, camera)
+            labelEl.style.transform = `translate(-50%, -130%) translate(${x}px, ${y}px)`
+            labelEl.style.opacity = opacity.toFixed(2)
         }
+
+        renderer.render(scene, camera)
+    }
+
 
         // ⚡ INTERSECTION OBSERVER: Pause animation loop when off-screen to save 100% CPU/GPU
         const observer = new IntersectionObserver(([entry]) => {
