@@ -1,4 +1,4 @@
-import { collection, query, where, getDocs, doc, getDoc, limit, addDoc, serverTimestamp } from 'firebase/firestore'
+import { collection, query, where, getDocs, doc, getDoc, limit, addDoc, setDoc, serverTimestamp } from 'firebase/firestore'
 import { db } from '@/lib/firebase'
 
 export interface ActivityBreakdown {
@@ -119,17 +119,32 @@ const createEmpty365DaysMap = (startDate: Date, endDate: Date): Record<string, A
  */
 export const recordUserActivity = async (
     userId: string,
-    type: 'commit' | 'task' | 'application' | 'review',
+    type: 'commit' | 'task' | 'application' | 'review' | 'login',
     details?: string
 ) => {
     if (!userId) return
     try {
-        await addDoc(collection(db, 'users', userId, 'activities'), {
-            type,
-            details: details || '',
-            timestamp: serverTimestamp(),
-            createdAt: serverTimestamp(),
-        })
+        const todayStr = formatDateKey(new Date())
+        if (type === 'login' || (details && details.includes('Daily Login'))) {
+            const docRef = doc(db, 'users', userId, 'activities', `login_${todayStr}`)
+            await setDoc(
+                docRef,
+                {
+                    type: 'task',
+                    details: details || '⚡ Daily Login & Active Session',
+                    timestamp: serverTimestamp(),
+                    createdAt: serverTimestamp(),
+                },
+                { merge: true }
+            )
+        } else {
+            await addDoc(collection(db, 'users', userId, 'activities'), {
+                type,
+                details: details || '',
+                timestamp: serverTimestamp(),
+                createdAt: serverTimestamp(),
+            })
+        }
     } catch (err) {
         console.warn('Could not record user activity to Firestore:', err)
     }
@@ -146,7 +161,7 @@ export const fetchUserActivityData = async (userId: string): Promise<Record<stri
     const activityMap = createEmpty365DaysMap(oneYearAgo, today)
 
     try {
-        // 1. Fetch User document to record registration date & last active date
+        // 1. Fetch User document to record registration date & last active dates
         const userDoc = await getDoc(doc(db, 'users', userId))
         if (userDoc.exists()) {
             const uData = userDoc.data()
@@ -161,16 +176,28 @@ export const fetchUserActivityData = async (userId: string): Promise<Record<stri
                 }
             }
 
-            const updatedDate = parseFirestoreDate(uData.updatedAt || uData.lastSeenAt)
-            if (updatedDate) {
-                const uKey = formatDateKey(updatedDate)
-                if (activityMap[uKey] && uKey !== formatDateKey(joinDate || new Date(0))) {
-                    activityMap[uKey].count += 1
-                    activityMap[uKey].breakdown.tasks += 1
-                    activityMap[uKey].breakdown.items.push('⚡ Updated profile & workspace')
-                    activityMap[uKey].level = calculateActivityLevel(activityMap[uKey].count)
+            // Check all historical activity timestamp fields on user doc
+            const userTimestamps = [
+                uData.updatedAt,
+                uData.lastSeenAt,
+                uData.lastActivity,
+                uData.lastLogin,
+                uData.sessionExtended
+            ]
+            userTimestamps.forEach(ts => {
+                const updatedDate = parseFirestoreDate(ts)
+                if (updatedDate) {
+                    const uKey = formatDateKey(updatedDate)
+                    if (activityMap[uKey] && uKey !== formatDateKey(joinDate || new Date(0))) {
+                        if (!activityMap[uKey].breakdown.items.includes('⚡ Platform activity & session update')) {
+                            activityMap[uKey].count += 1
+                            activityMap[uKey].breakdown.tasks += 1
+                            activityMap[uKey].breakdown.items.push('⚡ Platform activity & session update')
+                            activityMap[uKey].level = calculateActivityLevel(activityMap[uKey].count)
+                        }
+                    }
                 }
-            }
+            })
         }
 
         // 2. Fetch real projects created by user
@@ -273,11 +300,9 @@ export const fetchUserActivityData = async (userId: string): Promise<Record<stri
             })
         } catch { /* ignore */ }
 
-        // 5. Fetch real logged analytics events for user
-        try {
-            const eventsQuery = query(collection(db, 'analyticsEvents'), where('userId', '==', userId))
-            const eventsSnap = await getDocs(eventsQuery)
-            eventsSnap.forEach(docSnap => {
+        // 5. Fetch real logged analytics events for user (checking both userId and user_id fields)
+        const processEventSnap = (eventsSnap: any) => {
+            eventsSnap.forEach((docSnap: any) => {
                 const eData = docSnap.data()
                 const eDate = parseFirestoreDate(eData.timestamp || eData.createdAt)
                 if (eDate) {
@@ -285,12 +310,27 @@ export const fetchUserActivityData = async (userId: string): Promise<Record<stri
                     if (activityMap[key]) {
                         activityMap[key].count += 1
                         activityMap[key].breakdown.tasks += 1
-                        const eventLabel = eData.eventName ? `Engaged in ${eData.eventName}` : 'Platform interaction'
-                        activityMap[key].breakdown.items.push(`⚡ ${eventLabel}`)
+                        const name = eData.eventName || eData.event
+                        const eventLabel = name ? `Engaged in ${name}` : 'Platform interaction'
+                        if (!activityMap[key].breakdown.items.includes(`⚡ ${eventLabel}`)) {
+                            activityMap[key].breakdown.items.push(`⚡ ${eventLabel}`)
+                        }
                         activityMap[key].level = calculateActivityLevel(activityMap[key].count)
                     }
                 }
             })
+        }
+
+        try {
+            const eventsQuery1 = query(collection(db, 'analyticsEvents'), where('userId', '==', userId))
+            const eventsSnap1 = await getDocs(eventsQuery1)
+            processEventSnap(eventsSnap1)
+        } catch { /* ignore */ }
+
+        try {
+            const eventsQuery2 = query(collection(db, 'analyticsEvents'), where('user_id', '==', userId))
+            const eventsSnap2 = await getDocs(eventsQuery2)
+            processEventSnap(eventsSnap2)
         } catch { /* ignore */ }
 
         // 6. Fetch real reviews left by/for user
@@ -319,6 +359,10 @@ export const fetchUserActivityData = async (userId: string): Promise<Record<stri
             activityMap[todayStr].breakdown.items.push('⚡ Daily Login & Active Session')
             activityMap[todayStr].level = calculateActivityLevel(activityMap[todayStr].count)
         }
+
+        // Automatically persist today's activity into Firestore users/{userId}/activities/login_YYYY-MM-DD
+        // so it is retained permanently for tomorrow's streak check
+        recordUserActivity(userId, 'login', '⚡ Daily Login & Active Session').catch(() => {})
 
     } catch (err) {
         console.error('Error fetching real Firestore activity data:', err)

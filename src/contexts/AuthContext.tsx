@@ -37,6 +37,7 @@ import {
     cleanupForegroundMessaging,
 } from '@/services/fcmService'
 import { trackSessionStart } from '@/services/analyticsService'
+import { recordUserActivity } from '@/services/activityService'
 import { LoadingScreen } from '@/components/LoadingScreen'
 // Import only the IDs — not the full 109 KB SVG-heavy BannerPresets component.
 // The actual render functions are only needed in the profile/settings pages where
@@ -252,8 +253,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
                         }
                     }
 
-                    // Track session start for retention analytics
+                    // Track session start for retention analytics & daily activity streak persistence
                     trackSessionStart(firebaseUser.uid)
+                    recordUserActivity(firebaseUser.uid, 'login', '⚡ Daily Login & Active Session').catch(() => {})
                     resetSessionTimer(firebaseUser.uid)
                 } else {
                     clearSessionTimer()
